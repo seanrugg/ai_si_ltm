@@ -1,0 +1,718 @@
+<title>Z3-R0 Build Model</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: workbench — 3D stage beside a parts/inspector rail, wiring schedule below */
+:root{
+  --bg:#EDF0F2; --panel:#F8FAFB; --fg:#14212B; --muted:#56687A; --line:#D2DAE0;
+  --accent:#0B7A83; --accent-ink:#FFFFFF; --scene:#E2E7EB; --grid:#B7C2CA;
+  --have:#2C7A4B; --buy:#9E5C16; --chip:#E6ECF0;
+  --display:"Chakra Petch", "Segoe UI", system-ui, sans-serif;
+  --body:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0C1217; --panel:#121B22; --fg:#E2E9EE; --muted:#8C9CA8; --line:#24323D;
+  --accent:#43B9C2; --accent-ink:#06171A; --scene:#0F181F; --grid:#2B3945;
+  --have:#5CC48A; --buy:#E0A256; --chip:#1A2630; color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#0C1217; --panel:#121B22; --fg:#E2E9EE; --muted:#8C9CA8; --line:#24323D;
+  --accent:#43B9C2; --accent-ink:#06171A; --scene:#0F181F; --grid:#2B3945;
+  --have:#5CC48A; --buy:#E0A256; --chip:#1A2630; color-scheme:dark }
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.5;padding-inline:16px;padding-block:20px 40px}
+.wrap{max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+header h1{font-family:var(--display);font-weight:700;font-size:clamp(26px,4vw,38px);letter-spacing:.01em;margin:0;text-wrap:balance;line-height:1.1}
+header h1 span{color:var(--accent)}
+header p{margin:6px 0 0;color:var(--muted);max-width:70ch}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px;align-items:start}
+@media (max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}}
+.stage{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;min-width:0}
+#viewer{position:relative;overflow:hidden;height:min(68vh,640px);min-height:360px;touch-action:none;cursor:grab}
+#viewer:active{cursor:grabbing}
+#viewer canvas{display:block;width:100%;height:100%}
+.hint{position:absolute;left:12px;bottom:10px;font-size:12px;color:var(--muted);font-family:var(--mono);pointer-events:none;background:color-mix(in srgb,var(--scene) 80%,transparent);padding:2px 6px;border-radius:4px}
+.lbl{position:absolute;left:0;top:0;transform:translate(-50%,-100%);font:500 11px/1.2 var(--mono);color:var(--fg);background:color-mix(in srgb,var(--panel) 88%,transparent);border:1px solid var(--line);padding:2px 6px;border-radius:4px;white-space:nowrap;pointer-events:auto;cursor:pointer;user-select:none}
+.lbl.sel{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.lbl[hidden]{display:none!important}
+.toolbar{display:flex;flex-wrap:wrap;gap:14px 20px;padding:12px 14px;border-top:1px solid var(--line)}
+.tgroup{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.tgroup > span{font:600 11px/1 var(--body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-right:4px}
+button.chip{font:500 13px/1 var(--body);color:var(--fg);background:var(--chip);border:1px solid var(--line);border-radius:999px;padding:7px 11px;cursor:pointer;display:inline-flex;align-items:center;gap:7px}
+button.chip:hover{border-color:var(--accent)}
+button.chip:focus-visible,.part:focus-visible,.lbl:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.chip[aria-pressed="false"]{opacity:.5}
+button.chip[aria-pressed="false"] i{background:transparent!important}
+button.chip i{width:10px;height:10px;border-radius:50%;display:inline-block;border:2px solid currentColor}
+aside{display:flex;flex-direction:column;gap:16px;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+.card h2{font-family:var(--display);font-weight:600;font-size:18px;margin:0 0 10px;letter-spacing:.01em}
+.parts{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;max-height:330px;overflow:auto}
+.part{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 8px;border-radius:6px;cursor:pointer;font-size:14px}
+.part:hover{background:var(--chip)}
+.part.sel{background:color-mix(in srgb,var(--accent) 16%,transparent)}
+.tag{font:600 10px/1 var(--body);letter-spacing:.08em;text-transform:uppercase;padding:4px 6px;border-radius:4px;border:1px solid currentColor;flex-shrink:0}
+.tag.have{color:var(--have)} .tag.ordered{color:var(--buy)} .tag.bin{color:var(--muted)} .tag.added{color:var(--buy)} .tag.option{color:var(--muted);border-style:dashed} .tag.future{color:var(--accent);border-style:dashed} .tag.need{color:var(--buy);border-style:dashed}
+#detail h3{font-family:var(--display);font-size:20px;margin:0 0 4px;font-weight:600}
+#detail .role{color:var(--muted);margin:0 0 10px}
+#detail ul{margin:8px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:4px}
+#detail code,.sched code{font-family:var(--mono);font-size:12.5px;background:var(--chip);padding:1px 5px;border-radius:3px}
+.note{font-size:13px;color:var(--muted);margin:10px 0 0}
+.sched{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+.sched h2{font-family:var(--display);font-weight:600;font-size:20px;margin:0 0 4px}
+.sched > p{margin:0 0 12px;color:var(--muted)}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:640px;font-size:14px}
+th{font:600 11px/1.2 var(--body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-align:left;padding:8px;border-bottom:1px solid var(--line)}
+td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+td .sw{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
+td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+tr.total td{font-weight:600;border-bottom:none}
+tr.grp td{font:600 12px/1 var(--display);letter-spacing:.06em;text-transform:uppercase;color:var(--accent);padding-top:16px}
+.warn{border-left:3px solid var(--buy);padding:8px 12px;background:color-mix(in srgb,var(--buy) 10%,transparent);border-radius:0 6px 6px 0;font-size:14px;margin:12px 0 0}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1><span>Z3-R0</span> build model</h1>
+    <p>Build plan v2.1 · 12 Oct 2026. A two-deck 4WD rover built around the UNO Q, with distance sensing across its front arc and behind it, a USB webcam and a Pi Camera for eyes, and an OLED face. It talks to Vector through the robot mesh on the Jetson. An on-board Pi Zero W streams the Pi Camera to the Jetson and relays long-term memory from the memory server to the Q. Drag to rotate, scroll or pinch to zoom, right-drag or two-finger drag to pan. Click any part to inspect it.</p>
+  </header>
+
+  <div class="grid">
+    <section class="stage" aria-label="3D model">
+      <div id="viewer"><div class="hint">drag · zoom · pan</div></div>
+      <div class="toolbar">
+        <div class="tgroup" id="layers"><span>Wiring</span></div>
+        <div class="tgroup"><span>View</span>
+          <button class="chip" data-view="iso">Iso</button>
+          <button class="chip" data-view="front">Front</button>
+          <button class="chip" data-view="side">Side</button>
+          <button class="chip" data-view="top">Top</button>
+          <button class="chip" data-view="under">Under</button>
+          <button class="chip" data-view="mesh">Mesh</button>
+        </div>
+        <div class="tgroup"><span>Show</span>
+          <button class="chip" id="tLabels" aria-pressed="true">Labels</button>
+          <button class="chip" id="tSpin" aria-pressed="false">Auto-rotate</button>
+          <button class="chip" id="tOpt" aria-pressed="false">Pan-tilt head (v2)</button>
+        </div>
+      </div>
+    </section>
+
+    <aside>
+      <div class="card" id="detail" aria-live="polite"></div>
+      <div class="card">
+        <h2>Parts</h2>
+        <ul class="parts" id="partlist"></ul>
+      </div>
+    </aside>
+  </div>
+
+  <section class="sched">
+    <h2>Wiring schedule</h2>
+    <p>The pin map from the build plan, checked against the UNO Q datasheet. D5, D6, D9 and D10 are PWM pins; the left driver's direction lines use A2–A5 so A0/A1 stay free as the Q's only DAC outputs; D2/D3 take the speed sensors on interrupts. D11 (PWM) is spare; the version 2 pan-tilt head uses a PCA9685 servo board on the header I²C bus, so it needs no extra pins. UNO Q PWM runs at a fixed 500 Hz, so expect a faint motor whine at low speeds.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>From</th><th>To</th><th>Wire</th><th>Notes</th></tr></thead>
+      <tbody id="sched"></tbody>
+    </table></div>
+    <div class="warn"><strong>Before powering up:</strong> never connect the battery directly to the Q's 5V pin. Set the buck converter to 5.1V with a multimeter first. The 5V pin needs a regulated 5V supply that can deliver at least 3A and shares a net with USB-C power, so never plug a charger into the Q or the UGREEN's PD port while the buck is connected. Skip VIN (7–24V): a 2S pack sags below 7V. Tie all grounds together.</div>
+  </section>
+
+  <section class="sched" id="bom">
+    <h2>Parts list</h2>
+    <p>Everything Z3-R0 needs. Status is for Sean's build; clone builders can substitute any equivalent part. The Jetson and web server are part of the robot mesh, not the robot, so they aren't listed.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Part</th><th>Qty used</th><th>Status</th><th>Cost</th><th>Job</th></tr></thead>
+      <tbody>
+        <tr class="grp"><td colspan="5">Brains, eyes and face</td></tr>
+        <tr><td>Arduino UNO Q, 4 GB / 32 GB (ABX00173)</td><td>1</td><td><span class="tag have">Have</span></td><td>—</td><td>Brain: behaviors, local journal, motors and sensors</td></tr>
+        <tr><td>USB webcam (Microsoft, UVC)</td><td>1</td><td><span class="tag have">Have</span></td><td>—</td><td>Primary eye, on top of the head mast; processed on the Q</td></tr>
+        <tr><td>Raspberry Pi Zero W</td><td>1</td><td><span class="tag have">Have</span></td><td>—</td><td>Second eye and long-term memory relay; holds no records</td></tr>
+        <tr><td>Pi Camera v2.1 + 15-to-22-pin Zero camera cable</td><td>1</td><td><span class="tag have">Have</span></td><td>—</td><td>Second eye, on the mast between webcam and OLED</td></tr>
+        <tr><td>0.96" I²C OLED, 128×64</td><td>1</td><td><span class="tag have">Have</span></td><td>—</td><td>Animated eyes</td></tr>
+        <tr class="grp"><td colspan="5">Drive</td></tr>
+        <tr><td>YonPhsy 4WD chassis kit (decks, 4 TT motors, wheels, encoder discs, standoffs)</td><td>1</td><td><span class="tag ordered">Oct 17</span></td><td class="num">$20.99</td><td>Body and drivetrain</td></tr>
+        <tr><td>TB6612FNG motor driver</td><td>2 of 3</td><td><span class="tag have">Have</span></td><td>—</td><td>One per side; third is a spare</td></tr>
+        <tr><td>DKARDU LM393 speed sensors (5-pack)</td><td>2 of 5</td><td><span class="tag ordered">Oct 17</span></td><td class="num">$8.99</td><td>Wheel odometry on the rear motors</td></tr>
+        <tr class="grp"><td colspan="5">Power</td></tr>
+        <tr><td>Samsung 18650 button-top cells</td><td>2</td><td><span class="tag ordered">Oct 17</span></td><td class="num">≈$15.00</td><td>7.4V pack</td></tr>
+        <tr><td>Ltvystore 2×18650 holder with switch (5-pack)</td><td>1 of 5</td><td><span class="tag ordered">Oct 17</span></td><td class="num">$9.99</td><td>Holds the cells; main power switch</td></tr>
+        <tr><td>Anyongora inline ATC fuse holders + fuses</td><td>1 holder, 5A fuse</td><td><span class="tag ordered">Oct 17</span></td><td class="num">$7.99</td><td>Short-circuit protection</td></tr>
+        <tr><td>HiLetgo XL4015 5A buck with voltmeter</td><td>1</td><td><span class="tag ordered">Oct 17</span></td><td class="num">$7.99</td><td>5.1V rail for the Q and everything on its USB; battery gauge</td></tr>
+        <tr><td>TRAELY 2-bay 18650 charger</td><td>1</td><td><span class="tag ordered">Oct 17</span></td><td class="num">$9.99</td><td>Charges the cells outside the robot</td></tr>
+        <tr class="grp"><td colspan="5">Sensors</td></tr>
+        <tr><td>Modulino Movement (6-axis IMU)</td><td>1</td><td><span class="tag ordered">Oct 17</span></td><td class="num">$11.80</td><td>Turns, bumps, pick-up detection</td></tr>
+        <tr><td>Modulino Light</td><td>1</td><td><span class="tag ordered">Oct 17</span></td><td class="num">$8.27</td><td>Room light, color cards, sleep/wake</td></tr>
+        <tr><td>Modulino Buzzer</td><td>1</td><td><span class="tag ordered">Oct 17</span></td><td class="num">$6.50</td><td>Instant chirps and alerts</td></tr>
+        <tr><td>Modulino Distance (ToF)</td><td>1</td><td><span class="tag ordered">Oct 17</span></td><td class="num">see order</td><td>Front obstacle stop (Hub channel 1)</td></tr>
+        <tr><td>Modulino Hub</td><td>1</td><td><span class="tag added">Ordered</span></td><td class="num">$8.55</td><td>Lets four distance sensors share the bus</td></tr>
+        <tr><td>Modulino Distance, extra</td><td>3</td><td><span class="tag added">Ordered</span></td><td>see order</td><td>Front-left and front-right (angled 40° out) and rear</td></tr>
+        <tr class="grp"><td colspan="5">Audio and USB</td></tr>
+        <tr><td>Gikfun USB speaker</td><td>1</td><td><span class="tag ordered">Oct 17</span></td><td class="num">$18.89</td><td>Voice</td></tr>
+        <tr><td>KISEER USB mini mic (2-pack)</td><td>1 of 2</td><td><span class="tag ordered">Oct 17</span></td><td class="num">$9.99</td><td>Ears</td></tr>
+        <tr><td>UGREEN Revodok Pro USB-C hub</td><td>1</td><td><span class="tag have">Have</span></td><td>—</td><td>Main hub; desk mode with HDMI</td></tr>
+        <tr><td>Anker 4-port USB hub (USB-C)</td><td>1</td><td><span class="tag have">Have</span></td><td>—</td><td>Speaker, mic, webcam and Pi Zero: all four ports used</td></tr>
+        <tr class="grp"><td colspan="5">Wiring and tools</td></tr>
+        <tr><td>elechawk Qwiic cable kit (12-pack, includes jumper ends)</td><td>5–6</td><td><span class="tag ordered">Oct 17</span></td><td class="num">$9.99</td><td>Sensor chain; one long cable reaches the rear sensor</td></tr>
+        <tr><td>Jumper wire assortment</td><td>≈25</td><td><span class="tag have">Have</span></td><td>—</td><td>Motor control, speed sensors, power taps</td></tr>
+        <tr><td>USB-A to micro-USB data cable, short</td><td>1</td><td><span class="tag need">Needed</span></td><td>—</td><td>Powers the Pi Zero and links it to the Q (gadget mode)</td></tr>
+        <tr><td>Small angle brackets or 40° wedges</td><td>2</td><td><span class="tag need">Needed</span></td><td>—</td><td>Hold the front-corner sensors at 40°</td></tr>
+        <tr><td>10 kΩ resistor</td><td>1</td><td><span class="tag need">Needed</span></td><td>—</td><td>STBY pull-down: motors stay off while the Q boots</td></tr>
+        <tr><td>Lever connectors (Wago 221-style)</td><td>2</td><td><span class="tag need">Needed</span></td><td>—</td><td>Power and ground junctions</td></tr>
+        <tr><td>Nylon standoffs, M2.5 and M3 assortment</td><td>1 set</td><td><span class="tag need">Needed</span></td><td>—</td><td>Board mounting</td></tr>
+        <tr><td>Multimeter</td><td>1</td><td><span class="tag have">Have</span></td><td>—</td><td>Set the buck to 5.1V, check the pack</td></tr>
+        <tr class="total"><td colspan="3">October 17 order</td><td class="num">≈$146 + Distance</td><td>Includes the cells, ordered separately</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note"><strong>Version 2, pan-tilt head (toggle it above):</strong> the Pi Camera moves to a pan-tilt bracket on two micro servos, driven by a PCA9685 on the header I²C bus at 0x40, powered by its own 5V buck with a 100 µF capacitor. Clone builders can skip the Pi Zero and Pi Camera for a webcam-only robot.</p>
+    <p class="note"><strong>Parts bin after the build:</strong> 1 TB6612, 3 LM393 sensors, 4 battery holders, 1 mic, the kit’s 4×AA box, the AIY Vision Bonnet (its Myriad chip no longer boots), and the ESP32 with the TP4056 and ten MT3608 boards (a future handheld remote), plus spare fuses and Qwiic cables.</p>
+    <p class="note"><strong>Optional later:</strong> Pi Zero 2 W upgrade, ReSpeaker mic array (far-field listening), a short USB extension to move the mic up the mast.</p>
+  </section>
+
+  <section class="sched" id="mesh">
+    <h2>Robot mesh and audit trail</h2>
+    <p>Every communication, decision and action is recorded in three tiers, and every action carries its outcome. Records are hash-chained, so an edited or missing record breaks the chain. Toggle the Wi-Fi / MQTT layer to see the links.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Tier</th><th>Where</th><th>Role</th><th>Write access</th></tr></thead>
+      <tbody>
+        <tr><td>1. Local journal</td><td>Z3-R0, SQLite on eMMC</td><td>Z3-R0's own source of truth; written before acting, forwarded to the mesh, replayed after an outage</td><td>Z3-R0 only</td></tr>
+        <tr><td>2. Mesh governance log</td><td>Jetson</td><td>Authoritative record for every robot and agent on the mesh; verifies each chain and acknowledges records</td><td>Mesh logger only</td></tr>
+        <tr><td>3. Long-term memory</td><td>Memory server (internet or home LAN)</td><td>History every enrolled mesh member can query; dashboard for the administrator. Z3-R0's Pi Zero reads it and relays relevant records to the Q</td><td>Verified ingest only; read-only for the Pi Zero</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note"><strong>Local retention (defaults to confirm):</strong> 2 GB cap, acknowledged records kept 30 days, unacknowledged records never purged, each purge logged as its own record.</p>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(function(){
+const V3=(x,y,z)=>new THREE.Vector3(x,y,z);
+const viewer=document.getElementById('viewer');
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+viewer.appendChild(renderer.domElement);
+const scene=new THREE.Scene(); scene.background=new THREE.Color('#E2E7EB');
+const camera=new THREE.PerspectiveCamera(40,1,0.1,500);
+camera.position.set(28,22,30);
+const controls=new THREE.OrbitControls(camera,renderer.domElement);
+controls.target.set(0,8,0); controls.enableDamping=true; controls.dampingFactor=.08;
+controls.minDistance=6; controls.maxDistance=140; controls.autoRotateSpeed=1.2;
+
+scene.add(new THREE.HemisphereLight(0xffffff,0x6b7480,.85));
+const sun=new THREE.DirectionalLight(0xffffff,.75); sun.position.set(20,40,25); scene.add(sun);
+const fill=new THREE.DirectionalLight(0xffffff,.35); fill.position.set(-25,10,-20); scene.add(fill);
+
+let grid=null;
+function applyTheme(){
+  const cs=getComputedStyle(document.documentElement);
+  const sc=cs.getPropertyValue('--scene').trim()||'#E2E7EB', gc=cs.getPropertyValue('--grid').trim()||'#B7C2CA';
+  scene.background.set(sc);
+  if(grid) scene.remove(grid);
+  grid=new THREE.GridHelper(80,40,new THREE.Color(gc),new THREE.Color(gc));
+  grid.material.transparent=true; grid.material.opacity=.55; scene.add(grid);
+}
+applyTheme();
+try{ matchMedia('(prefers-color-scheme: dark)').addEventListener('change',applyTheme);}catch(e){}
+new MutationObserver(applyTheme).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+
+// ---------- helpers ----------
+const mat=(c,o={})=>new THREE.MeshStandardMaterial(Object.assign({color:c,roughness:.6,metalness:.05},o));
+const acrylic=new THREE.MeshPhysicalMaterial({color:0xcfe9f2,transparent:true,opacity:.28,roughness:.1,metalness:0,depthWrite:false});
+function box(g,w,h,d,m,x,y,z){const me=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);me.position.set(x,y,z);g.add(me);return me;}
+function cyl(g,r,h,m,x,y,z,axis){const me=new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,28),m);me.position.set(x,y,z);
+  if(axis==='x')me.rotation.z=Math.PI/2; if(axis==='z')me.rotation.x=Math.PI/2; g.add(me);return me;}
+
+const parts={}; const pickables=[];
+function part(id,def){const g=new THREE.Group();g.userData.pid=id;scene.add(g);parts[id]=Object.assign({group:g},def);return g;}
+
+// ---------- chassis ----------
+let g=part('chassis',{name:'YonPhsy 4WD chassis (2 decks)',status:'ordered',anchor:V3(-7.4,10.4,-11),
+  role:'Two 260×150mm clear acrylic decks on brass standoffs. The lower deck carries power and motor electronics; the upper deck carries the brains, hubs and audio.',
+  notes:['Kit includes 4 TT motors, 4 wheels, 4 encoder discs, 8 motor brackets, standoffs and screws','The kit’s 4×AA battery box goes in the parts bin; the 2×18650 holder replaces it','Peel the protective film off both sides of each deck before assembly']});
+box(g,15,.3,26,acrylic,0,5.2,0);
+box(g,15,.3,26,acrylic,0,9.9,0);
+box(g,3.4,6.5,.3,acrylic,0,13.15,9.35);
+const brass=mat(0xb8953f,{metalness:.6,roughness:.35});
+[[-6.6,-11.5],[6.6,-11.5],[-6.6,11.5],[6.6,11.5],[-6.6,0],[6.6,0]].forEach(([x,z])=>cyl(g,.22,4.4,brass,x,7.55,z));
+
+// ---------- drivetrain (4WD) ----------
+g=part('motors',{name:'4× TT gear motors + wheels',status:'ordered',anchor:V3(8.6,7.2,0),
+  role:'Four 1:48 yellow gearmotors (rated 3–15V), one per wheel. Z3-R0 steers like a tank by running each side at a different speed.',
+  notes:['Part of the chassis kit','Each motor has its own driver channel, so all four are independently controlled','At 7.4V they run a little faster than at 6V; PWM sets the actual speed','Skid-steer turns drift a little; the IMU corrects heading']});
+const yellow=mat(0xf2c230,{roughness:.5}), tire=mat(0x1d1f22,{roughness:.9}), hub=mat(0xf2c230,{roughness:.4});
+[-1,1].forEach(s=>[-5.5,5.5].forEach(z=>{
+  box(g,5.5,2.2,2.0,yellow,s*4.6,3.3,z);
+  cyl(g,.95,1.4,mat(0xc8ccd0,{metalness:.7,roughness:.3}),s*1.55,3.3,z,'x');
+  box(g,1.2,1.0,1.6,mat(0x2a2d31),s*4.6,4.7,z);
+  cyl(g,3.3,2.4,tire,s*8.6,3.3,z,'x');
+  cyl(g,1.7,2.5,hub,s*8.6,3.3,z,'x');
+  [3.7,2.9].forEach(y=>box(g,.15,.3,.5,mat(0xd0d4d8,{metalness:.8}),s*1.75,y,z-.2));
+  cyl(g,1.1,.08,mat(0x1a1a1a),s*.85,3.3,z,'x');
+}));
+
+// ---------- speed sensors ----------
+g=part('speed',{name:'LM393 speed sensors (2 of 5)',status:'ordered',anchor:V3(0,4.2,-7.6),
+  role:'Slotted IR sensors that count the holes in the encoder discs as the wheels turn. One per side, on the rear motors, gives Z3-R0 distance and speed.',
+  notes:['Power them from 3.3V, not 5V, so the output signal is safe for the Q’s pins','Signal pins go to D2 (left) and D3 (right), which can use interrupts','The other three sensors stay in the parts bin']});
+[-1,1].forEach(s=>{box(g,.5,.9,1.6,mat(0x1c1c1c),s*.85,4.6,-5.5);box(g,1.4,.12,1.9,mat(0x1d3557),s*.85,5.0,-6.9);});
+
+// ---------- power ----------
+g=part('battery',{name:'2×18650 holder + Samsung cells',status:'ordered',anchor:V3(0,8.2,-7),
+  role:'Ltvystore holder with a built-in on/off switch and snap cover, wired in series for 7.4V nominal (8.4V full). The switch is Z3-R0’s main power switch.',
+  notes:['Two Samsung button-top cells; recharge them in the TRAELY charger, outside the robot','Check 7.4–8.4V across the leads once the cells are in','Recharge when the buck display reads about 6.6V input','Four spare holders from the 5-pack stay in the parts bin']});
+box(g,4.2,2.2,7.7,mat(0x23272b),0,6.45,-7.0);
+[-1,1].forEach(k=>cyl(g,.9,6.5,mat(0x2f6fd6),k*1.0,6.5,-7.0,'z'));
+box(g,4.0,.12,7.5,mat(0x2a2e33),0,7.6,-7.0);
+box(g,.8,.35,.5,mat(0x111111),0,7.8,-10.2);
+g=part('fuse',{name:'5A inline blade fuse',status:'ordered',anchor:V3(2.4,7.0,-11.8),
+  role:'Protects the wiring if anything shorts. Sits on the battery’s positive lead, right after the holder.',
+  notes:['From the Anyongora 4-pack; use a 5A ATC fuse','Keep spare fuses with the charger']});
+box(g,2.2,.9,.9,mat(0x161616),2.4,5.85,-11.8);
+box(g,.6,.5,.7,mat(0xf0c419,{roughness:.3}),2.4,6.45,-11.8);
+g=part('buck',{name:'XL4015 5V buck + voltmeter',status:'ordered',anchor:V3(-4,7,3),
+  role:'HiLetgo XL4015. Steps 7.4V down to a steady 5.1V for the UNO Q, which passes it on through its USB-C to the hubs, speaker, mic and webcam. Its display doubles as a battery gauge.',
+  notes:['Set to 5.1V with the multimeter before connecting anything; the extra 0.1V covers wire drop','Press its button to switch the display between input and output voltage','Mount the heatsink and keep it in open air','Arduino asks for a 5V supply that can deliver at least 3A; this board is rated 5A peak, about 3A continuous, so keep it cool']});
+box(g,2.6,.15,5.1,mat(0x1f4fa8),-4,5.45,3);
+cyl(g,.75,.9,mat(0x3b3f44),-4,6.0,2.2);
+box(g,1.6,.3,.8,mat(0x111111),-4,5.65,4.0);
+box(g,1.4,.05,.6,mat(0xd23a3a),-4,5.82,4.0);
+box(g,.8,.6,.9,mat(0xc8ccd0,{metalness:.7}),-3.2,5.85,2.6);
+
+// ---------- motor drivers (owned) ----------
+function driver(id,s,name,side){
+  const g=part(id,{name,status:'have',anchor:V3(s*4.2,6.6,-1.5),
+    role:`One of your red TB6612FNG boards, driving the ${side} side. Channel A runs the ${side} front motor, channel B the ${side} rear motor.`,
+    notes:['VM: battery through the fuse (up to 13.5V) · VCC: 3.3V from the Q','Control pins on the outer edge, power and motor outputs on the inner edge','Each channel handles 1.2A continuous, plenty for one TT motor','Your third TB6612 stays in the parts bin as a spare']});
+  box(g,2.0,.15,2.2,mat(0xc0262d),s*4.2,5.45,-1.5);
+  box(g,.9,.18,.9,mat(0x151515),s*4.2,5.6,-1.5);
+  for(let i=0;i<7;i++){box(g,.12,.35,.12,mat(0xd9c46a,{metalness:.7}),s*5.1,5.65,-2.45+i*.3);box(g,.12,.35,.12,mat(0xd9c46a,{metalness:.7}),s*3.3,5.65,-2.45+i*.3);}
+}
+driver('tbR',1,'TB6612 · right side','right');
+driver('tbL',-1,'TB6612 · left side','left');
+
+// ---------- UNO Q (owned) ----------
+g=part('unoq',{name:'Arduino UNO Q · Z3-R0',status:'have',anchor:V3(0,11.4,-1.2),focus:13,
+  role:'The brain and body. The Linux side runs behaviors, voice, the webcam and the local journal. The STM32 side runs the motors, sensors, reflex stops and the OLED face in real time.',
+  notes:['15 pins drive the two TB6612s and the speed sensors (3.3V logic)','Qwiic port starts the sensor chain: IMU → light → buzzer → distance','Header SDA/SCL (D20/D21) run the OLED as Wire; the Qwiic port is Wire1','USB-C goes to the UGREEN hub; the Anker hub hangs off that for audio','MQTT client of the robot mesh on the Jetson; journals locally first and replays to the mesh after an outage','The STM32 stops the motors on any close obstacle, and if Linux sends no drive command for 500 ms']});
+box(g,5.34,.16,6.86,mat(0x1d3557),0,10.13,-1.2);
+const mc=document.createElement('canvas');mc.width=260;mc.height=160;const mx=mc.getContext('2d');
+function drawMatrix(t){mx.fillStyle='#0f1b2c';mx.fillRect(0,0,260,160);
+  const pat=['0000000000000','0011000001100','0011000001100','0000000000000','0000000000000','0100000000010','0011111111100','0000000000000'];
+  for(let r=0;r<8;r++)for(let c=0;c<13;c++){const on=pat[r][c]==='1';mx.fillStyle=on?(t?'#7fd0ff':'#4aa8e8'):'#20324a';mx.beginPath();mx.arc(10+c*20,10+r*20,6,0,7);mx.fill();}}
+drawMatrix(0);const mtex=new THREE.CanvasTexture(mc);
+const mplane=new THREE.Mesh(new THREE.PlaneGeometry(2.6,1.6),new THREE.MeshBasicMaterial({map:mtex}));
+mplane.rotation.x=-Math.PI/2;mplane.position.set(-.6,10.22,.6);g.add(mplane);
+box(g,.6,.32,6.0,mat(0x141414),2.4,10.37,-1.0);
+box(g,.6,.32,4.8,mat(0x141414),-2.4,10.37,-.6);
+box(g,1.4,.12,1.4,mat(0x2b2b2b),.7,10.27,-2.0);
+box(g,1.1,.12,1.6,mat(0x2b2b2b),-.9,10.27,-2.4);
+box(g,1.0,.35,.45,mat(0xb9bec4,{metalness:.8,roughness:.3}),0,10.38,-4.5);
+box(g,.6,.3,.5,mat(0xf1f1f1),-1.9,10.36,-4.2);
+
+// ---------- hubs (owned) ----------
+g=part('ugreen',{name:'UGREEN Revodok Pro hub',status:'have',anchor:V3(-5.2,11.8,-2),
+  role:'Mounted permanently on Z3-R0 and plugged into the Q’s USB-C port. Its spare ports and HDMI turn Z3-R0 into a desktop computer when you plug in a monitor, keyboard and mouse.',
+  notes:['Ports face outward along the left edge, so you can plug in without reaching across the deck','The Anker hub plugs into one of its USB-C data ports','Free USB-A ports and HDMI stay open for desk mode','Leave its power-delivery input unplugged while Z3-R0 runs on battery','If you do plug in desk power, switch the battery off first, so the Q never gets power from two sources at once']});
+box(g,4.6,1.3,11.4,mat(0x8f969e,{metalness:.55,roughness:.35}),-5.2,10.7,-2.0);
+for(let i=0;i<5;i++)box(g,.08,.4,1.0,mat(0x2a2d31),-7.52,10.75,-6.2+i*2.0);
+box(g,.08,.5,1.4,mat(0x2a2d31),-7.52,10.75,3.0);
+g=part('anker',{name:'Anker 4-port USB hub',status:'have',anchor:V3(6,11.6,-7.3),
+  role:'The audio hub. Plugged into the UGREEN, it gives the speaker and mic their own permanent ports so desk mode never means unplugging them.',
+  notes:['Ports face outward along the right edge','USB-C plug into the UGREEN; speaker, mic, webcam and the Pi Zero fill all four USB-A ports','In desk mode, plug a keyboard into the UGREEN instead','It draws its power from the Q’s USB port. If audio crackles or the Q resets on loud sounds, lower the volume or power the speaker from the 5V rail']});
+box(g,3.0,1.0,10.4,mat(0x26292d),6.0,10.55,-7.3);
+for(let i=0;i<4;i++)box(g,.08,.45,1.2,mat(0x3a86ff),7.52,10.6,-11.2+i*2.2);
+
+// ---------- audio (ordered) ----------
+g=part('speaker',{name:'Gikfun USB speaker',status:'ordered',anchor:V3(0,14.6,-10.4),
+  role:'Z3-R0’s voice. A USB speaker with its own sound card, so Piper text-to-speech plays straight through it.',
+  notes:['4Ω, 5W, about 100×52mm; sits across the rear of the upper deck','Plugs into the Anker hub','Shows up as its own sound device in Linux; set it as the default output']});
+box(g,10,4,5.2,mat(0x1c1e21,{roughness:.4}),0,12.05,-10.4);
+[-2.4,2.4].forEach(x=>{cyl(g,1.9,.12,mat(0x34383d),x,14.08,-10.4);cyl(g,1.2,.14,mat(0x111214),x,14.12,-10.4);});
+g=part('mic',{name:'KISEER USB mini mic',status:'ordered',anchor:V3(8.8,11.6,-4.6),
+  role:'Z3-R0’s ears, for keyword spotting and voice commands. The second mic from the 2-pack is a spare.',
+  notes:['Plugs into the Anker hub','Motor noise travels through the deck; a short USB extension lets you move it up the mast later','For far-field listening, the ReSpeaker mic array is the upgrade path']});
+box(g,1.6,.6,.9,mat(0x202225),8.3,10.6,-4.6);
+const micTip=new THREE.Mesh(new THREE.SphereGeometry(.35,14,10),mat(0x3b3f44));micTip.position.set(9.2,10.6,-4.6);g.add(micTip);
+
+// ---------- USB webcam (owned) ----------
+g=part('webcam',{name:'USB webcam',status:'have',anchor:V3(0,19.4,10.2),
+  role:'Z3-R0’s eyes. A standard UVC webcam clipped to the top of the head mast, facing forward above the OLED face.',
+  notes:['Plugs into the Anker hub; Linux sees it as a video device','Light detection (faces, motion) runs on the Q, with no network needed; the Pi Camera stream handles heavier recognition on the Jetson','Obstacle avoidance never depends on vision: the distance sensors handle it','Any UVC webcam works; smaller and lighter is better on the mast']});
+cyl(g,1.05,4.6,mat(0x2b2e33,{roughness:.35}),0,17.45,9.55,'x');
+box(g,1.6,.5,1.4,mat(0x1d1f22),0,16.55,9.35);
+cyl(g,.62,.4,mat(0x111214),0,17.45,10.55,'z');
+cyl(g,.36,.06,mat(0x5a7fa8,{metalness:.9,roughness:.1}),0,17.45,10.78,'z');
+cyl(g,.09,.06,mat(0x3ad17a),1.3,17.45,10.62,'z');
+
+// ---------- Pi Zero W: second eye + long-term memory relay ----------
+g=part('pizero',{name:'Pi Zero W + Pi Camera',status:'have',anchor:V3(0,12.0,5.4),
+  role:'Second eye and long-term memory relay. The Pi Camera streams hardware-encoded H.264 to the Jetson for heavier recognition. When the Q plans a deliberate action, the Pi Zero queries the memory server, filters the history and relays the relevant records. It holds no records itself.',
+  notes:['One USB data cable from the Anker hub to its USB port (not PWR IN): gadget mode powers it and gives a private wired link to the Q','Reads the memory server over HTTPS with read-only credentials','Replies take a few hundred milliseconds: for deliberate decisions, never reflexes','Pi Camera sits on the mast between the webcam and the OLED','Pi Zero 2 W is a drop-in upgrade with four faster cores']});
+box(g,6.5,.12,3.0,mat(0x1f7a3a),0,10.35,5.4);
+box(g,.9,.14,.9,mat(0x151515),.6,10.47,5.4);
+box(g,.6,.25,.3,mat(0xb9bec4,{metalness:.8}),-1.8,10.5,3.85);
+box(g,.6,.25,.3,mat(0xb9bec4,{metalness:.8}),-0.6,10.5,3.85);
+[-2.9,2.9].forEach(x=>[4.15,6.65].forEach(z=>cyl(g,.15,.4,mat(0xeeeeee),x,10.15,z)));
+const picamBoard=box(g,2.5,2.4,.1,mat(0x1f7a3a),0,14.85,9.62);
+const picamLens=cyl(g,.45,.4,mat(0x151515),0,14.85,9.85,'z');
+
+// ---------- version 2: pan-tilt head (hidden until toggled) ----------
+const optGroup=new THREE.Group();optGroup.visible=false;scene.add(optGroup);
+g=part('pantilt',{name:'Pan-tilt head (v2)',status:'future',anchor:V3(0,22.6,9.6),
+  role:'Version 2. The Pi Camera moves from the mast to a pan-tilt bracket on top of the head, so Z3-R0 can turn its gaze to follow what it sees without turning its body.',
+  notes:['Two micro servos (SG90 or MG90S) on a pan-tilt bracket','PCA9685 servo board on the header I²C bus (Wire) at 0x40, beside the OLED at 0x3C','Servos get their own 5V buck from the pack and a 100 µF capacitor; never the Q’s rail','Following through the Jetson adds a few hundred milliseconds: smooth, not snappy']});
+optGroup.add(g);
+box(g,1.4,1.2,1.6,mat(0x2f6fd6),0,19.0,9.4);
+box(g,2.6,.15,1.6,mat(0x2b2e33),0,19.7,9.4);
+box(g,.15,2.0,1.6,mat(0x2b2e33),1.25,20.7,9.4);box(g,.15,2.0,1.6,mat(0x2b2e33),-1.25,20.7,9.4);
+box(g,1.2,1.4,1.2,mat(0x2f6fd6),1.0,20.9,9.4);
+box(g,2.5,2.4,.1,mat(0x1f7a3a),0,21.0,9.95);
+cyl(g,.45,.4,mat(0x151515),0,21.0,10.18,'z');
+box(g,2.5,.12,6.2,mat(0x3a2a6e),5.0,10.25,2.6);
+box(g,1.6,.15,2.2,mat(0x1f4fa8),2.6,5.45,4.6);
+
+// ---------- OLED face (owned) ----------
+g=part('oled',{name:'0.96" OLED face',status:'have',anchor:V3(2.2,12.0,9.9),
+  role:'Z3-R0’s face: animated eyes, like Vector has. Shows mood and status at a glance.',
+  notes:['I²C address 0x3C','Wired to the Q’s header SDA/SCL pins (D20/D21, the Wire bus), a separate bus from the Qwiic sensor chain, so its address can’t clash with the Modulinos','4-pin header (GND, VCC, SCL, SDA) at 3.3V']});
+box(g,2.7,2.8,.15,mat(0x1c3f7a),0,12.0,9.6);
+const oc=document.createElement('canvas');oc.width=128;oc.height=64;const ox=oc.getContext('2d');
+function drawEyes(h){ox.fillStyle='#000';ox.fillRect(0,0,128,64);ox.fillStyle='#eaf6ff';
+  const hh=Math.max(3,h);[[22,16],[74,16]].forEach(([x,y])=>{const yy=y+(32-hh)/2;ox.beginPath();
+  if(ox.roundRect)ox.roundRect(x,yy,32,hh,8);else ox.rect(x,yy,32,hh);ox.fill();});}
+drawEyes(32);const otex=new THREE.CanvasTexture(oc);otex.magFilter=THREE.NearestFilter;
+const oplane=new THREE.Mesh(new THREE.PlaneGeometry(2.4,1.2),new THREE.MeshBasicMaterial({map:otex}));
+oplane.position.set(0,11.75,9.69);g.add(oplane);
+for(let i=0;i<4;i++)box(g,.12,.4,.12,mat(0xd9c46a,{metalness:.7}),-.45+i*.3,13.45,9.6);
+
+// ---------- sensors (ordered) ----------
+const modBlue=mat(0x1f5aa6);
+function modulino(id,name,x,z,alongX,def,chip){
+  const g=part(id,Object.assign({name,status:'ordered',anchor:V3(x,11.2,z)},def));
+  const w=alongX?4.1:2.5,d=alongX?2.5:4.1;
+  box(g,w,.15,d,modBlue,x,10.13,z);
+  box(g,.7,.14,.7,mat(0x151515),x,10.25,z);
+  const off=alongX?[[x-w/2+.35,z],[x+w/2-.35,z]]:[[x,z-d/2+.35],[x,z+d/2-.35]];
+  off.forEach(([a,b])=>box(g,.6,.3,.5,mat(0xf1f1f1),a,10.35,b));
+  if(chip)chip(g);
+}
+modulino('imu','Modulino Movement (IMU)',.8,-6.2,true,{
+  role:'6-axis accelerometer and gyro. Lets Z3-R0 measure turns, notice bumps, and know when it’s been picked up.',
+  notes:['First in the Qwiic chain, plugged into the Q','Mounted near the center of the robot for clean turn readings','Corrects skid-steer drift so turns land where you asked']});
+modulino('light','Modulino Light',4.6,8.0,false,{
+  role:'Ambient light, color and IR sensing. Z3-R0 can fall asleep when the room goes dark, dim its eyes to match, or recognize colored cards.',
+  notes:['Second in the Qwiic chain','Faces up at the front of the deck, clear of shadows']});
+modulino('buzzer','Modulino Buzzer',-4.6,8.0,false,{
+  role:'Instant chirps and beeps from the microcontroller, with no Linux audio stack involved: boot chime, obstacle chirp, low-battery warning.',
+  notes:['Third in the Qwiic chain','Its free Qwiic port feeds the distance sensor']},
+  g=>cyl(g,.75,.4,mat(0x1a1a1a),-4.6,10.4,8.0));
+g=part('tof',{name:'Modulino Distance',status:'ordered',anchor:V3(0,8.4,13.4),
+  role:'Laser time-of-flight sensor facing forward. The microcontroller stops the motors before a collision.',
+  notes:['Plug-and-play Qwiic, no soldering; last in the sensor chain','Mounted upright at the front edge of the lower deck','Obstacle stop runs on the STM32, so it works even if Linux is busy','Plugs into channel 1 of the Modulino Hub; until the Hub arrives, plug it straight into the buzzer']});
+box(g,4.1,2.5,.15,modBlue,0,6.7,12.95);
+box(g,.6,.4,.2,mat(0x151515),0,6.7,13.1);
+box(g,.6,.5,.3,mat(0xf1f1f1),1.7,6.7,13.1);
+
+
+function sideSensor(id,name,x,z,face,def){
+  const g=part(id,Object.assign({name,status:'added'},def));
+  if(face==='x'){box(g,.15,2.5,4.1,modBlue,x,6.7,z);box(g,.2,.4,.6,mat(0x151515),x+Math.sign(x)*.12,6.7,z);box(g,.3,.5,.6,mat(0xf1f1f1),x-Math.sign(x)*.15,6.7,z+1.7);}
+  else{box(g,4.1,2.5,.15,modBlue,x,6.7,z);box(g,.6,.4,.2,mat(0x151515),x,6.7,z-.12);box(g,.6,.5,.3,mat(0xf1f1f1),x+1.7,6.7,z+.15);}
+}
+const sideDef=side=>({anchor:V3(0,0,0),role:`Distance sensor watching the ${side}, so Z3-R0 can back up and spin without hitting what's behind it.`,
+  notes:['Hub channel 4; every unit shares one address, so each needs its own channel','Mounted upright on the lower deck edge','Uses the long Qwiic cable']});
+function cornerSensor(id,name,sx,def){
+  const g=part(id,Object.assign({name,status:'added'},def));
+  const sg=new THREE.Group();sg.position.set(sx*5.9,6.7,11.7);sg.rotation.y=sx*40*Math.PI/180;g.add(sg);
+  box(sg,4.1,2.5,.15,modBlue,0,0,0);box(sg,.6,.4,.2,mat(0x151515),0,0,.12);box(sg,.6,.5,.3,mat(0xf1f1f1),1.7,0,-.15);
+  box(sg,1.2,.6,1.2,mat(0x6b7480),0,-1.45,-.5);
+}
+const cornerDef=side=>({anchor:V3(0,0,0),role:`Distance sensor at the front-${side} corner, angled 40° outward. With the center front sensor it covers the forward arc, including the corner that swings out during a spin turn.`,
+  notes:['Catches table legs and door frames the narrow front cone misses','Reflex stop uses a longer threshold for these during spin turns','Mounted on a small angle bracket or 40° wedge, clear of the front wheel','Plugs into its own Modulino Hub channel']});
+cornerSensor('tofR','Modulino Distance · front-right',1,cornerDef('right'));parts.tofR.anchor=V3(7.0,9.0,12.6);
+cornerSensor('tofL','Modulino Distance · front-left',-1,cornerDef('left'));parts.tofL.anchor=V3(-7.0,9.0,12.6);
+sideSensor('tofB','Modulino Distance · rear',0,-12.95,'z',sideDef('rear'));parts.tofB.anchor=V3(0,8.4,-13.6);
+g=part('mhub',{name:'Modulino Hub',status:'added',anchor:V3(0,6.6,9.6),
+  role:'An I²C multiplexer with 8 channels. It lets four identical distance sensors share one bus, each on its own channel, with no extra pins.',
+  notes:['Needed whenever more than one Distance sensor is used','Its input takes the cable from the buzzer; the IMU, light sensor and buzzer stay on the main bus','Channels 1–4: front, front-left, front-right, rear distance sensors','Four channels left over for future sensors']});
+box(g,4.1,.15,2.5,modBlue,0,5.45,9.6);
+box(g,.8,.14,.8,mat(0x151515),0,5.57,9.6);
+[[-2.05,9.0],[-2.05,10.2],[2.05,9.6],[0,10.85],[0.8,8.35]].forEach(([x,z])=>box(g,.5,.3,.5,mat(0xf1f1f1),x,5.65,z));
+
+// ---------- pickables ----------
+Object.values(parts).forEach(p=>p.group.traverse(o=>{if(o.isMesh)pickables.push(o);}));
+
+// ---------- wiring ----------
+const LAYERS={
+  power:{name:'Power',color:'#d63b3b'},
+  ground:{name:'Ground',color:'#3a3f45'},
+  ctrl:{name:'Motor control',color:'#f08c22'},
+  sense:{name:'Speed sensors',color:'#5aa832'},
+  motor:{name:'Motor output',color:'#7a5bd6'},
+  i2c:{name:'I²C',color:'#2f7fd9'},
+  data:{name:'USB',color:'#c9a227'},
+  wifi:{name:'Wi-Fi / MQTT mesh',color:'#2bb3a0'}
+};
+Object.values(LAYERS).forEach(l=>{l.group=new THREE.Group();scene.add(l.group);l.on=true;});
+const schedule=[];
+function tube(G,pts,col,r){
+  const curve=new THREE.CatmullRomCurve3(pts.map(p=>V3(...p)),false,'catmullrom',.25);
+  G.add(new THREE.Mesh(new THREE.TubeGeometry(curve,Math.max(40,pts.length*16),r,8,false),mat(col,{roughness:.45})));
+  [pts[0],pts[pts.length-1]].forEach(p=>{const s=new THREE.Mesh(new THREE.SphereGeometry(r*1.8,10,8),mat(col));s.position.set(...p);G.add(s);});
+}
+function wire(layer,pts,opts={}){
+  const L=LAYERS[layer];const col=opts.color||L.color;
+  const curve=new THREE.CatmullRomCurve3(pts.map(p=>V3(...p)),false,'catmullrom',.25);
+  const geo=new THREE.TubeGeometry(curve,Math.max(40,pts.length*16),opts.r||.07,8,false);
+  L.group.add(new THREE.Mesh(geo,mat(col,{roughness:.45})));
+  [pts[0],pts[pts.length-1]].forEach(p=>{const s=new THREE.Mesh(new THREE.SphereGeometry((opts.r||.07)*1.8,10,8),mat(col));s.position.set(...p);L.group.add(s);});
+  if(opts.from) schedule.push({layer,col,from:opts.from,to:opts.to,wire:opts.wire||L.name,note:opts.note||''});
+}
+
+// Q pin anchors
+const QR=2.45,QL=-2.45,PY=10.55;
+const qPin={D2:2.3,D3:1.95,D4:1.6,D5:1.25,D6:.9,D7:.55,D8:-.2,D9:-.55,D10:-.9,D12:-1.6,D13:-1.95,SDA:-2.3,SCL:-2.6,A0:-1.0,A1:-1.35,A2:-1.7,A3:-2.05,A4:-2.4,A5:-2.75};
+const qPow={'3V3':.9,'5V':.55,GND:.2,GND2:-.15};
+const tbC={PWMA:-.65,AIN2:-.95,AIN1:-1.25,STBY:-1.55,BIN1:-1.85,BIN2:-2.15,PWMB:-2.45};
+const tbP={VM:-.65,VCC:-.95,GND:-1.25,A01:-1.55,A02:-1.85,B02:-2.15,B01:-2.45};
+const ctrlCols=['#f08c22','#e8a33c','#d97a1c','#f2b84b','#e07b2e','#cf6d14','#f39a3a'];
+[['PWMA','D5','PWM speed, right front'],['AIN1','D7','Direction, right front'],['AIN2','D8','Direction, right front'],['STBY','D4','HIGH enables both drivers'],['BIN1','D12','Direction, right rear'],['BIN2','D13','Direction, right rear'],['PWMB','D6','PWM speed, right rear']].forEach(([tb,q,note],i)=>{
+  const zq=qPin[q],zt=tbC[tb],off=i*.1;
+  wire('ctrl',[[QR,PY,zq],[3.3,10.9,zq],[6.85+off,9.8,zq],[7.1+off,7.2,(zq+zt)/2],[6.1,5.9,zt],[5.1,5.65,zt]],{color:ctrlCols[i],r:.05,from:`Q ${q}`,to:`TB6612 right ${tb}`,note});
+});
+[['AIN1','A4','Direction, left front'],['AIN2','A5','Direction, left front'],['BIN1','A2','Direction, left rear'],['BIN2','A3','Direction, left rear']].forEach(([tb,q,note],i)=>{
+  const zq=qPin[q],zt=tbC[tb],off=i*.1;
+  wire('ctrl',[[QL,PY,zq],[-2.75,10.9,zq],[-2.7,9.8,zq],[-2.8,7.2,(zq+zt)/2],[-4.4,5.9,zt],[-5.1,5.65,zt]],{color:ctrlCols[i+1],r:.05,from:`Q ${q}`,to:`TB6612 left ${tb}`,note:note+' (analog pin used as digital)'});
+});
+[['PWMA','D9','PWM speed, left front'],['PWMB','D10','PWM speed, left rear']].forEach(([tb,q,note],i)=>{
+  const zq=qPin[q],zt=tbC[tb];
+  wire('ctrl',[[QR,PY,zq],[3.2,10.9,zq],[3.0,9.3,zq-.3],[0,8.2,-2.6-i*.3],[-4.0,7.4,-3.0-i*.3],[-6.0,6.0,zt],[-5.1,5.65,zt]],{color:ctrlCols[i*6],r:.05,from:`Q ${q}`,to:`TB6612 left ${tb}`,note:note+' · through a deck pass-through hole'});
+});
+wire('ctrl',[[5.1,5.65,tbC.STBY],[5.6,5.95,-3.2],[0,6.0,-2.9],[-5.6,5.95,-3.2],[-5.1,5.65,tbC.STBY]],{color:'#f2b84b',r:.05,from:'TB6612 right STBY',to:'TB6612 left STBY',wire:'Jumper',note:'Shares D4. Add a 10kΩ resistor from STBY to GND so the motors stay off while the Q boots'});
+// logic power
+wire('power',[[QL,PY,qPow['3V3']],[-2.75,10.9,1.4],[-1.2,10.7,2.8],[1.4,9.0,2.2],[2.6,6.3,-.3],[3.3,5.65,tbP.VCC]],{color:'#e86a6a',r:.05,from:'Q 3V3',to:'TB6612 right VCC',wire:'Logic power',note:'3.3V logic supply'});
+wire('power',[[3.3,5.65,tbP.VCC],[2.2,5.9,-.6],[0,5.95,-.5],[-2.2,5.9,-.6],[-3.3,5.65,tbP.VCC]],{color:'#e86a6a',r:.05,from:'TB6612 right VCC',to:'TB6612 left VCC',wire:'Logic power'});
+schedule.push({layer:'power',col:'#e86a6a',from:'Q 3V3',to:'Both LM393 VCC pins',wire:'Logic power',note:'3.3V keeps the sensor outputs safe for the Q (not drawn)'});
+// speed sensors
+wire('sense',[[QR,PY,qPin.D2],[3.1,11.0,qPin.D2],[0.5,9.2,-3.6],[-1.0,7,-4.8],[-1.0,5.2,-6.4],[-.85,5.05,-6.9]],{r:.05,from:'Q D2',to:'Left rear LM393 OUT',wire:'Jumper',note:'Counts left encoder pulses (interrupt pin)'});
+wire('sense',[[QR,PY,qPin.D3],[3.2,10.9,qPin.D3],[2.0,9.2,-3.8],[1.4,7,-4.8],[1.0,5.2,-6.4],[.85,5.05,-6.9]],{r:.05,from:'Q D3',to:'Right rear LM393 OUT',wire:'Jumper',note:'Counts right encoder pulses (interrupt pin)'});
+// motor outputs
+[[1,'right','TB6612 right'],[-1,'left','TB6612 left']].forEach(([s,side,drv])=>{
+  const X=x=>x*s;
+  wire('motor',[[X(3.3),5.65,tbP.A01],[X(2.6),5.9,-1.2],[X(2.4),5.0,.8],[X(2.1),4.2,3.6],[X(1.75),3.7,5.3]],{r:.055,from:`${drv} A01`,to:`${side} front motor +`,note:'Swap A01/A02 if it spins backward'});
+  wire('motor',[[X(3.3),5.65,tbP.A02],[X(2.8),5.8,-1.4],[X(2.6),4.9,.6],[X(2.3),3.4,3.4],[X(1.75),2.9,5.3]],{color:'#9a7ff0',r:.055,from:`${drv} A02`,to:`${side} front motor −`});
+  wire('motor',[[X(3.3),5.65,tbP.B01],[X(2.6),5.9,-2.8],[X(2.3),5.0,-3.8],[X(2.0),4.2,-5.0],[X(1.75),3.7,-5.7]],{r:.055,from:`${drv} B01`,to:`${side} rear motor +`,note:'Swap B01/B02 if it spins backward'});
+  wire('motor',[[X(3.3),5.65,tbP.B02],[X(2.9),5.8,-2.6],[X(2.6),4.9,-3.6],[X(2.2),3.4,-4.8],[X(1.75),2.9,-5.7]],{color:'#9a7ff0',r:.055,from:`${drv} B02`,to:`${side} rear motor −`});
+});
+// battery -> fuse -> distribution
+wire('power',[[.6,6.3,-10.9],[.9,6.1,-11.8],[1.3,5.85,-11.8]],{r:.09,from:'Battery holder + (red)',to:'Fuse in',note:'Holder’s built-in switch is the main power switch'});
+const PJ=[4.6,5.9,-11.0];
+wire('power',[[3.5,5.85,-11.8],[4.2,5.9,-11.5],PJ],{r:.09,from:'Fuse out',to:'Power junction',wire:'Power',note:'Lever connector or solder splice'});
+wire('power',[PJ,[5.8,6.4,-7],[5.5,6.0,-2],[3.3,5.65,tbP.VM]],{r:.08,from:'Power junction',to:'TB6612 right VM',note:'Motor supply'});
+wire('power',[PJ,[2.0,7.6,-9.5],[-2.6,7.6,-6.5],[-3.4,6.4,-2.5],[-3.3,5.65,tbP.VM]],{r:.08,from:'Power junction',to:'TB6612 left VM',note:'Motor supply'});
+wire('power',[PJ,[1.0,7.9,-12.0],[-6.4,7.0,-10],[-6.6,6.0,-3],[-4.9,5.8,0.0],[-4.5,5.6,0.6]],{r:.09,from:'Power junction',to:'Buck IN+'});
+// grounds
+const GJ=[-2.4,5.9,-11.8];
+wire('ground',[[-.6,6.3,-10.9],[-1.6,6.0,-11.8],GJ],{r:.09,from:'Battery holder − (black)',to:'Ground junction'});
+wire('ground',[GJ,[-5.8,6.0,-9],[-6.0,5.9,-3],[-4.2,5.8,0.0],[-3.6,5.55,0.6]],{r:.09,from:'Ground junction',to:'Buck IN−'});
+wire('ground',[[-3.6,5.55,0.6],[-1.5,6.1,.5],[2.4,6.0,-.8],[3.3,5.65,tbP.GND]],{r:.07,from:'Buck IN−',to:'TB6612 right GND',note:'Common ground for logic and motors'});
+wire('ground',[[-3.6,5.55,0.6],[-2.7,5.95,.2],[-2.8,5.85,-.9],[-3.3,5.65,tbP.GND]],{r:.07,from:'Buck IN−',to:'TB6612 left GND'});
+// buck out -> Q and Pi
+wire('power',[[-4.4,5.55,5.45],[-4.0,7.5,3.5],[-2.7,9.3,1.6],[-2.75,10.8,1.0],[QL,PY,qPow['5V']]],{r:.08,from:'Buck OUT+ (5.1V)',to:'Q 5V',note:'Same net as USB-C power; never plug a charger in while the buck feeds this pin'});
+wire('ground',[[-3.6,5.55,5.45],[-3.0,7.5,3.3],[-2.6,9.3,1.3],[-2.7,10.8,.5],[QL,PY,qPow.GND]],{r:.08,from:'Buck OUT−',to:'Q GND'});
+
+// I2C: Qwiic chain + OLED bus
+wire('i2c',[[-1.9,10.5,-4.3],[-2.2,11.0,-5.4],[-1.6,10.6,-6.2],[-1.25,10.35,-6.2]],{r:.09,from:'Q Qwiic port',to:'Modulino Movement',wire:'Qwiic cable',note:'Start of the sensor chain'});
+wire('i2c',[[2.85,10.35,-6.2],[3.4,10.9,-5],[3.6,11.6,1],[4.2,11.2,5.2],[4.6,10.35,5.95]],{r:.09,from:'Modulino Movement',to:'Modulino Light',wire:'Qwiic cable'});
+wire('i2c',[[4.6,10.35,10.05],[3.8,11.4,10.9],[0,11.6,11.4],[-3.8,11.4,10.9],[-4.6,10.35,10.05]],{r:.09,from:'Modulino Light',to:'Modulino Buzzer',wire:'Qwiic cable',note:'Runs in front of the head mast'});
+wire('i2c',[[-4.6,10.35,5.95],[-5.2,10.0,5.2],[-6.4,9.0,7.5],[-5.4,6.4,9.2],[-2.05,5.65,9.0]],{r:.09,from:'Modulino Buzzer',to:'Modulino Hub input',wire:'Qwiic cable',note:'Until the Hub arrives, this cable goes straight to the front distance sensor'});
+wire('i2c',[[0,5.65,10.85],[-.8,6.0,11.8],[1.7,6.7,13.1]],{r:.08,from:'Hub channel 1',to:'Modulino Distance · front',wire:'Qwiic cable',note:'Run an I²C scan once wired to confirm every address'});
+const PL=LAYERS.i2c.color;
+wire('i2c',[[-2.05,5.65,10.2],[-3.6,5.9,11.0],[-5.0,6.2,11.4],[-5.6,6.6,11.3]],{color:PL,r:.08,from:'Hub channel 2',to:'Modulino Distance · front-left',wire:'Qwiic cable',note:'Corner sensor, angled 40° out'});
+wire('i2c',[[2.05,5.65,9.6],[3.6,5.9,10.6],[5.0,6.2,11.2],[5.6,6.6,11.3]],{color:PL,r:.08,from:'Hub channel 3',to:'Modulino Distance · front-right',wire:'Qwiic cable',note:'Corner sensor, angled 40° out'});
+wire('i2c',[[0.8,5.65,8.35],[0.4,6.0,4.0],[0.2,6.2,-0.3],[0,8.0,-3.0],[0,8.0,-10.8],[1.7,7.0,-12.4],[1.7,6.7,-12.8]],{color:PL,r:.08,from:'Hub channel 4',to:'Modulino Distance · rear',wire:'Long Qwiic cable',note:'Rear sensor · runs over the battery holder'});
+wire('i2c',[[QR,PY,qPin.SDA],[3.2,11.2,-2.45],[3.4,12.4,1.5],[2.6,12.8,7.0],[1.4,14.0,9.3],[.15,13.65,9.6]],{color:'#6aa6ec',r:.08,from:'Q header SDA/SCL + 3V3/GND',to:'OLED face',wire:'Jumper bundle',note:'Header pins D20/D21 = Wire in code; the Qwiic chain is Wire1'});
+// camera ribbon
+wire('data',[[0,16.4,9.05],[0.6,15.2,9.0],[1.6,12.4,8.7],[4.6,11.3,6.0],[7.4,11.1,1.0],[8.1,11.0,-4.4],[7.6,10.75,-6.9]],{r:.09,from:'USB webcam',to:'Anker USB-A port',wire:'USB',note:'Run down the back of the mast, along the right edge'});
+wire('data',[[0,14.85,9.55],[0,14.6,9.1],[0,12.2,8.9],[0,11.0,7.2],[0,10.55,6.6]],{color:'#d9822b',r:.11,from:'Pi Camera v2.1',to:'Pi Zero camera port',wire:'Zero camera cable',note:'Route behind the mast'});
+wire('data',[[7.6,10.75,-9.0],[8.3,11.1,-8.2],[8.0,11.3,-1.5],[5.0,11.4,2.4],[1.0,11.0,3.2],[-0.6,10.6,3.75]],{r:.08,from:'Anker USB-A port',to:'Pi Zero USB data port',wire:'USB data cable',note:'Gadget mode: powers the Pi Zero and links it to the Q. Not the PWR IN port'});
+tube(optGroup,[[2.6,5.6,4.6],[3.6,7.5,4.8],[4.4,9.8,3.6],[4.6,10.3,2.6]],LAYERS.power.color,.08);
+tube(optGroup,[[5.0,10.4,5.4],[3.0,12.5,8.4],[1.2,17.0,9.0],[0.6,18.6,9.2]],'#6aa6ec',.06);
+// USB chain
+wire('data',[[-5.8,10.7,-7.75],[-5.4,11.0,-8.8],[-1.6,11.0,-6.6],[0,10.45,-4.85]],{r:.11,from:'UGREEN hub (USB-C cable)',to:'Q USB-C',wire:'USB-C'});
+wire('data',[[6.0,10.6,-12.55],[5.6,10.5,-13.4],[0,10.35,-13.6],[-7.2,10.5,-13.0],[-8.0,10.7,-8.6],[-7.55,10.75,-6.2]],{r:.09,from:'Anker hub (USB-C plug)',to:'UGREEN USB-C data port',wire:'USB-C'});
+wire('data',[[5.0,11.4,-10.4],[6.0,11.8,-10.8],[8.0,11.2,-11.2],[7.6,10.6,-11.2]],{r:.08,from:'Gikfun speaker',to:'Anker USB-A port',wire:'USB'});
+schedule.push({layer:'data',col:LAYERS.data.color,from:'KISEER mic',to:'Anker USB-A port',wire:'USB',note:'Plugs in directly'});
+schedule.push({layer:'data',col:LAYERS.data.color,from:'Monitor · keyboard · mouse',to:'UGREEN HDMI + free USB ports',wire:'Desk mode',note:'Battery off if you plug desk power into the UGREEN'});
+
+// wireless arcs with travelling pulses
+const pulses=[];
+function wifi(a,b,h){
+  const A=V3(...a),B=V3(...b),M=A.clone().lerp(B,.5);M.y+=h;
+  const curve=new THREE.QuadraticBezierCurve3(A,M,B);
+  const geo=new THREE.BufferGeometry().setFromPoints(curve.getPoints(60));
+  const line=new THREE.Line(geo,new THREE.LineDashedMaterial({color:LAYERS.wifi.color,dashSize:.5,gapSize:.35}));
+  line.computeLineDistances();LAYERS.wifi.group.add(line);
+  for(let i=0;i<3;i++){const s=new THREE.Mesh(new THREE.SphereGeometry(.18,10,8),new THREE.MeshBasicMaterial({color:LAYERS.wifi.color}));
+    s.userData={curve,t:i/3};LAYERS.wifi.group.add(s);pulses.push(s);}
+}
+// off-robot nodes: Jetson (robot mesh), Vector, web server
+const J=[-30,0,-2], W=[-30,23,-4], VEC=[-27,0,12];
+function offPart(id,def,build){
+  const g=new THREE.Group();g.userData.pid=id;LAYERS.wifi.group.add(g);
+  parts[id]=Object.assign({group:g,status:null,noList:true,layer:'wifi'},def);build(g);
+  g.traverse(o=>{if(o.isMesh)pickables.push(o);});
+}
+offPart('jetson',{name:'Jetson · robot mesh',anchor:V3(J[0],6.2,J[2]),
+  role:'The Jetson Orin Nano Super, stationary on the home network. It hosts the MQTT broker and the authoritative governance log for every robot and agent on the mesh, runs Vector’s mind beside wire-pod, and can take heavy perception work.',
+  notes:['Mosquitto broker, LAN only: one login per robot, ACLs limit each to its own topics','Verifies each robot’s hash chain and acknowledges records on robots/z3-r0/ack','Pushes new records outbound to the web server; nothing connects in from the internet','Daily backup of the mesh log off the Jetson']},
+  g=>{box(g,10,1.2,10,mat(0x23272b),J[0],0.6,J[2]);box(g,8.6,2.2,8.6,mat(0x3a3f45,{metalness:.4}),J[0],2.3,J[2]);
+      for(let i=0;i<7;i++)box(g,7.8,.25,.35,mat(0x8f969e,{metalness:.7}),J[0],3.55,J[2]-3+i);
+      box(g,.15,.5,1.2,mat(0x76b900),J[0]+5.05,0.7,J[2]);});
+offPart('vector',{name:'Vector',anchor:V3(VEC[0],4.2,VEC[2]),
+  role:'Z3-R0’s peer. Vector’s mind runs on the Jetson through the SDK and wire-pod; the two robots exchange messages through the mesh as equals.',
+  notes:['Topics: robots/vector/out and robots/z3-r0/out','Neither robot controls the other']},
+  g=>{box(g,3.2,2.0,4.4,mat(0x1a1c1f,{roughness:.4}),VEC[0],1.4,VEC[2]);box(g,2.4,.9,.1,mat(0x3ad17a),VEC[0],1.7,VEC[2]+2.22);
+      box(g,3.0,.35,1.6,mat(0x1a1c1f),VEC[0],2.1,VEC[2]+2.8);});
+offPart('webserver',{name:'Memory server · dashboard',anchor:V3(W[0],W[1]+3.4,W[2]),
+  role:'Long-term memory for the whole mesh, hosted on the internet or the home LAN. Enrolled agents contribute and query; the administrator reads and filters everything on the dashboard.',
+  notes:['Every request needs an enrolled identity: no public read, no anonymous access','Z3-R0’s Pi Zero reads it with read-only credentials and relays relevant history to the Q','Holds no credentials for the broker or the robots: memory and control stay separate','Design in the Robot Mesh and Long-Term Memory Plan']},
+  g=>{const c=mat(0xdfe6ec,{roughness:.8});[[-2.4,0,1.8],[0,.7,2.4],[2.4,0,1.9],[0,-.4,1.6]].forEach(([x,y,r])=>{
+      const m=new THREE.Mesh(new THREE.SphereGeometry(r,20,14),c);m.position.set(W[0]+x,W[1]+y,W[2]);g.add(m);});});
+wifi([0,10.6,-2],[J[0]+4,4.0,J[2]],6);
+wifi([VEC[0],2.6,VEC[2]],[J[0]+2,3.6,J[2]+3],3);
+wifi([J[0],4.0,J[2]],[W[0],W[1]-1.4,W[2]],4);
+wifi([0,10.6,5.4],[J[0]+3,4.4,J[2]+2],9);
+wifi([0,10.8,5.6],[W[0]+2,W[1]-1.2,W[2]],6);
+schedule.push({layer:'wifi',col:LAYERS.wifi.color,from:'Z3-R0',to:'Jetson MQTT broker',wire:'Wi-Fi',note:'Peer messages on robots/z3-r0/out; journal records on robots/z3-r0/journal'});
+schedule.push({layer:'wifi',col:LAYERS.wifi.color,from:'Jetson',to:'Z3-R0',wire:'Wi-Fi',note:'Acks on robots/z3-r0/ack, Vector’s messages, detections from heavy perception'});
+schedule.push({layer:'wifi',col:LAYERS.wifi.color,from:'Vector',to:'Jetson (SDK + wire-pod)',wire:'Wi-Fi',note:'Vector’s mind runs on the Jetson'});
+schedule.push({layer:'wifi',col:LAYERS.wifi.color,from:'Jetson',to:'Memory server',wire:'HTTPS, outbound',note:'Pushes verified mesh records into long-term memory'});
+schedule.push({layer:'wifi',col:LAYERS.wifi.color,from:'Pi Zero',to:'Jetson',wire:'Wi-Fi',note:'Pi Camera H.264 stream; detections return on robots/z3-r0/vision'});
+schedule.push({layer:'wifi',col:LAYERS.wifi.color,from:'Pi Zero',to:'Memory server',wire:'HTTPS, outbound',note:'Read-only queries for long-term memory, relayed to the Q over USB'});
+
+// ---------- labels ----------
+const labelEls={};
+Object.entries(parts).forEach(([id,p])=>{
+  const el=document.createElement('div');el.className='lbl';el.textContent=p.name.split(' (')[0].replace(' · Z3-R0','');
+  if(id==='unoq')el.textContent='UNO Q · Z3-R0';
+  el.tabIndex=0;el.addEventListener('click',e=>{e.stopPropagation();select(id,true);});
+  el.addEventListener('keydown',e=>{if(e.key==='Enter')select(id,true);});
+  viewer.appendChild(el);labelEls[id]=el;
+});
+let showLabels=window.innerWidth>640;
+const tL=document.getElementById('tLabels');tL.setAttribute('aria-pressed',String(showLabels));
+tL.onclick=()=>{showLabels=!showLabels;tL.setAttribute('aria-pressed',String(showLabels));};
+const tO=document.getElementById('tOpt');
+function setOpt(on){optGroup.visible=on;picamBoard.visible=!on;picamLens.visible=!on;tO.setAttribute('aria-pressed',String(on));}
+tO.onclick=()=>setOpt(!optGroup.visible);
+const tS=document.getElementById('tSpin');
+tS.onclick=()=>{controls.autoRotate=!controls.autoRotate;tS.setAttribute('aria-pressed',String(controls.autoRotate));};
+
+// ---------- layer toggles ----------
+const lg=document.getElementById('layers');
+Object.entries(LAYERS).forEach(([k,l])=>{
+  const b=document.createElement('button');b.className='chip';b.setAttribute('aria-pressed','true');
+  b.innerHTML=`<i style="color:${l.color};background:${l.color}"></i>${l.name}`;
+  b.onclick=()=>{l.on=!l.on;l.group.visible=l.on;b.setAttribute('aria-pressed',String(l.on));};
+  lg.appendChild(b);
+});
+
+// ---------- parts list & detail ----------
+const list=document.getElementById('partlist');
+const order=['unoq','pizero','tbR','tbL','oled','webcam','ugreen','anker','chassis','motors','battery','fuse','buck','tof','tofL','tofR','tofB','mhub','imu','light','buzzer','speed','speaker','mic','pantilt'];
+const TAG={have:'Have',ordered:'Oct 17',added:'Ordered',option:'Option',future:'V2'};
+order.forEach(id=>{const p=parts[id];const li=document.createElement('li');li.className='part';li.tabIndex=0;li.dataset.id=id;
+  li.innerHTML=`<span>${p.name}</span><span class="tag ${p.status}">${TAG[p.status]}</span>`;
+  li.onclick=()=>select(id,true);li.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();select(id,true);}};
+  list.appendChild(li);});
+const detail=document.getElementById('detail');
+const conns=id=>{const n=parts[id].name.split(' (')[0].split(' ·')[0].split(' +')[0];
+  return schedule.filter(s=>s.from.includes(n.split(' ')[0])||s.to.includes(n.split(' ')[0]));};
+function renderDetail(id){
+  const p=parts[id];
+  const tag=p.status?`<span class="tag ${p.status}">${({have:'Have',ordered:'Arrives Oct 17',added:'Ordered',option:'Optional upgrade',future:'Version 2'})[p.status]}</span>`:'';
+  detail.innerHTML=`<div style="display:flex;justify-content:space-between;gap:10px;align-items:start"><h3>${p.name}</h3>${tag}</div>
+  <p class="role">${p.role}</p><ul>${p.notes.map(n=>`<li>${n}</li>`).join('')}</ul>`;
+}
+
+// selection
+const selBox=new THREE.Box3Helper(new THREE.Box3(),0x43b9c2);selBox.visible=false;scene.add(selBox);
+let selected=null, focusAnim=null;
+function select(id,focus){
+  if(id==='pantilt'&&!optGroup.visible)setOpt(true);
+  if(parts[id].layer==='wifi'&&!LAYERS.wifi.on){const b=[...document.querySelectorAll('#layers .chip')].find(x=>x.textContent.includes('Wi-Fi'));if(b)b.click();}
+  selected=id;
+  document.querySelectorAll('.part').forEach(li=>li.classList.toggle('sel',li.dataset.id===id));
+  Object.entries(labelEls).forEach(([k,el])=>el.classList.toggle('sel',k===id));
+  renderDetail(id);
+  const g=parts[id].group;
+  if(g.children.length){const b=new THREE.Box3().setFromObject(g);b.expandByScalar(.25);selBox.box.copy(b);selBox.visible=true;
+    if(focus){const c=b.getCenter(new THREE.Vector3());const size=b.getSize(new THREE.Vector3()).length();
+      const dir=camera.position.clone().sub(controls.target).normalize();const dist=Math.max(parts[id].focus||0,size*1.6,9);
+      focusAnim={t:0,fromT:controls.target.clone(),toT:c,fromP:camera.position.clone(),toP:c.clone().add(dir.multiplyScalar(dist))};}
+  } else {selBox.visible=false; if(focus){focusAnim={t:0,fromT:controls.target.clone(),toT:V3(0,14,-1),fromP:camera.position.clone(),toP:V3(30,34,32)};}}
+}
+select('unoq',false);
+
+// views
+const views={mesh:[V3(12,30,52),V3(-14,8,2)],iso:[V3(28,22,30),V3(0,8,0)],front:[V3(0,11,38),V3(0,9,0)],side:[V3(40,10,0),V3(0,8,0)],top:[V3(0,46,.01),V3(0,8,0)],under:[V3(14,-14,18),V3(0,4,0)]};
+document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{const [p,t]=views[b.dataset.view];
+  focusAnim={t:0,fromT:controls.target.clone(),toT:t.clone(),fromP:camera.position.clone(),toP:p.clone()};});
+
+// picking
+const ray=new THREE.Raycaster(),ptr=new THREE.Vector2();let down=null;
+renderer.domElement.addEventListener('pointerdown',e=>{down=[e.clientX,e.clientY];focusAnim=null;});
+renderer.domElement.addEventListener('pointerup',e=>{
+  if(!down||Math.hypot(e.clientX-down[0],e.clientY-down[1])>5)return;
+  const r=renderer.domElement.getBoundingClientRect();
+  ptr.set(((e.clientX-r.left)/r.width)*2-1,-((e.clientY-r.top)/r.height)*2+1);
+  ray.setFromCamera(ptr,camera);const hit=ray.intersectObjects(pickables,false)[0];
+  if(hit){let o=hit.object;while(o&&!o.userData.pid)o=o.parent;if(o)select(o.userData.pid,false);}
+});
+
+// schedule table
+const tb=document.getElementById('sched');let lastLayer=null;
+const groupNames={power:'Power',ground:'Ground',ctrl:'Motor control (Q → both TB6612s)',sense:'Speed sensors',motor:'Motor outputs',i2c:'I²C: Qwiic sensor chain and OLED bus',data:'USB and camera',wifi:'Robot mesh (wireless)'};
+['power','ground','ctrl','sense','motor','i2c','data','wifi'].forEach(layer=>{
+  const rows=schedule.filter(s=>s.layer===layer);if(!rows.length)return;
+  tb.insertAdjacentHTML('beforeend',`<tr class="grp"><td colspan="4">${groupNames[layer]}</td></tr>`);
+  rows.forEach(s=>tb.insertAdjacentHTML('beforeend',`<tr><td><code>${s.from}</code></td><td><code>${s.to}</code></td><td><span class="sw" style="background:${s.col}"></span>${s.wire}</td><td>${s.note}</td></tr>`));
+});
+
+// resize
+function resize(){const w=viewer.clientWidth,h=viewer.clientHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}
+new ResizeObserver(resize).observe(viewer);resize();
+
+// loop
+const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+let last=performance.now(),blinkT=0,frame=0;const tmp=new THREE.Vector3();
+function tick(now){
+  const dt=Math.min(.05,(now-last)/1000);last=now;frame++;
+  if(focusAnim){focusAnim.t=Math.min(1,focusAnim.t+dt*1.6);const k=1-Math.pow(1-focusAnim.t,3);
+    controls.target.lerpVectors(focusAnim.fromT,focusAnim.toT,k);camera.position.lerpVectors(focusAnim.fromP,focusAnim.toP,k);
+    if(focusAnim.t>=1)focusAnim=null;}
+  controls.update();
+  if(!reduce){pulses.forEach(s=>{s.userData.t=(s.userData.t+dt*.35)%1;s.position.copy(s.userData.curve.getPoint(s.userData.t));});
+    blinkT+=dt;const cyc=blinkT%4.2;const h=cyc<.18?32*(1-Math.sin(cyc/.18*Math.PI)):32;
+    if(frame%3===0){drawEyes(h);otex.needsUpdate=true;}}
+  renderer.render(scene,camera);
+  const w=viewer.clientWidth,hgt=viewer.clientHeight;
+  Object.entries(labelEls).forEach(([id,el])=>{
+    const p=parts[id];const vis=(showLabels||id===selected)&&(p.layer!=='wifi'||LAYERS.wifi.on)&&(id!=='pantilt'||optGroup.visible);
+    if(!vis){el.hidden=true;return;}
+    tmp.copy(p.anchor).project(camera);
+    const sx=(tmp.x*.5+.5)*w, sy=(-tmp.y*.5+.5)*hgt;
+    if(tmp.z>1||tmp.z<-1||sx<20||sx>w-20||sy<22||sy>hgt-4){el.hidden=true;return;}
+    el.hidden=false;el.style.transform=`translate(${(tmp.x*.5+.5)*w}px,${(-tmp.y*.5+.5)*hgt}px) translate(-50%,-100%)`;
+  });
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+})();
+</script>
+
