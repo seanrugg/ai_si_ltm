@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.build/
+
+# Secrets / local data
+.env
+.env.local
+*.pem
+*.key
+keys/
+*local.json
+
+# OS
+.DS_Store
+Thumbs.db

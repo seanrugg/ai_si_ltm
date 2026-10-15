@@ -26,7 +26,7 @@ gunicorn + UvicornWorker as a systemd service; React dashboard as static files.
 | Crypto | `pynacl` (Ed25519), `hashlib` (SHA-256) |
 | Auth (members) | Ed25519 signature + opaque 32-byte bearer token, stored as SHA-256 hash |
 | Auth (admin) | `ADMIN_USERNAME`/`ADMIN_PASSWORD` env vars, bcrypt, 30-min httpOnly session cookie |
-| Database | PostgreSQL 15+, `pgvector` extension (vector column reserved for Phase 7) |
+| Database | PostgreSQL 15+, `pgvector` extension (`pgvext` enabled at deploy; vector column reserved for Phase 8) |
 | Dashboard | React 18, Vite 5, React Router, Tailwind CSS 3 |
 | Scheduling | APScheduler (retention rollups, token GC) |
 | Deployment | gunicorn + systemd (backend); Plesk static files (dashboard) |
@@ -66,8 +66,11 @@ ai_si_ltm/
 │   │   ├── __init__.py
 │   │   ├── base.py                  # DeclarativeBase
 │   │   ├── member.py                # Member row
-│   │   ├── record.py                # Record row (append-only)
+│   │   ├── record.py                # Record CHAIN-HEADER row (append-only; per-item immutable)
+│   │   ├── recordpayload.py         # Record PAYLOAD row (mutable; purgeable)
+│   │   ├── keyframe.py              # Content-addressed image blob store (P8)
 │   │   ├── token.py                 # ActiveToken row
+│   │   ├── adminsession.py          # Admin session cookie store
 │   │   └── audit.py                 # AuditLog row
 │   │
 │   ├── services/
@@ -94,7 +97,7 @@ ai_si_ltm/
 │       ├── test_enrollment.py       # Admin approve/reject flow
 │       └── test_admin.py            # Admin endpoints, 403 cases
 │
-├── dashboard/                       # React admin UI (9 views + login)
+├── dashboard/                       # React admin UI (10 routes total)
 │   ├── package.json
 │   ├── vite.config.js               # base: './'
 │   ├── tailwind.config.js
@@ -131,7 +134,8 @@ ai_si_ltm/
 └── cli_agent/                       # Synthesised test member — full pipeline E2E
     ├── __init__.py
     ├── __main__.py                  # python -m cli_agent
-    ├── agent.py                     # commands: genkey | enroll | send | verify | recall
+    ├── agent.py                     # commands: genkey | token | enroll | send | verify | recall
+</parameter"
     └── signing.py                   # pynacl Ed25519 key gen + sign
 ```
 
@@ -139,14 +143,43 @@ ai_si_ltm/
 
 ## Record Hash and Signature (contract shared by all members)
 
-**Canonical form:** JSON object with keys sorted alphabetically, no extra whitespace, UTF-8.
+> **This contract is frozen at P1.** Once members sign records, `body_hash`,
+> `raw`, the canonical encoding, the hash/payload split, and the signature
+> domain prefixes cannot change — every stored `sig` is a signature over the
+> exact bytes that `prev_hash` chains into the next record. Keep hashing cheap
+> (canonicalise the payload, hash once, store the bytes). The verification
+> logic lives in `server/security/`.
+>
+> `raw` is stored as `BYTEA`, not as JSONB — text columns round-trip and
+> normalise differently; `raw` is the single source of truth so
+> `integrity.py` can always recompute `body_hash` and it stays verifiable by
+> every member, in every language.
 
-**Fields included in `hash`:** all top-level fields **except** `hash` and `sig`.
+**Split into a permanent header + a mutable payload.**
 
-```
-hash  = SHA-256(canonical_json_bytes)                    # 32 bytes
-sig   = Ed25519_sign(private_key, hash_bytes)            # 64 bytes
-```
+A record has two tables:
+
+| Header (`records`) | Payload (`recordpayload`) |
+|---|---|
+| Permanent, never mutated (`records_no_mutation` trigger) | Purged on a schedule |
+| Header-only rows only, chain runs through | |
+| one row per header, linked by `id` | |
+
+- **Header** holds the chain: `id, member_id, seq, ts, type, summary, refs, tags, sw, prev_hash, body_hash, sig, hash, created_at`.
+- **Payload** holds the mutable body: `id, header_id, member_id, seq, ts, status, place, peers, body`.
+
+Retention touches only `recordpayload` (plus content-addressed keyframes). The chain never sees body mutations or purges — `records_no_mutation` only ever fires on the header table.
+
+**Canonical form.** Adopt **RFC 8785 (JCS)**. Keys sorted alphabetically everywhere, minimal UTF-8, no insignificant whitespace:
+nested objects sorted (`{ "a": { "a1": 1, "a2": 2 } }`), all numbers written as **decimal** (`1.0`, `0`, `-0.5`), dates/time in **ISO 8601 UTC** (`2026-10-12T00:00:00Z`). No floats in hashed fields. `raw` is the exact bytes; verify against those, not against JSONB or TIMESTAMPTZ.
+
+**Hash.** `body_hash = SHA-256(canonical_bytes(payload, include place + peers + tags))`. Store and chain `body_hash` (not `body`); `hash`/`raw` stay opaque (stored `raw BYTEA`, served as-is, compared by hash), keeping chain verification independent of message framing.
+
+**Signature & domain separation.** Prefix a message before signing so a record signature and a token/nonce signature can never cross signatures:
+- record: `ltms-record-v1 : 64-hex(body_hash)`
+- token/nonce: `ltms-auth-v1 : <32 hex>`
+
+`sig  = Ed25519_sign(private_key, prefix || nonce)`, `hash = SHA-256(sig_bytes)`. This means `prev_hash` bytes are hex-encoded (not raw), so they serialise correctly and stay unambiguous.
 
 `prev_hash` for `seq=1` is a 32-byte zero vector (genesis marker).
 
@@ -154,11 +187,13 @@ sig   = Ed25519_sign(private_key, hash_bytes)            # 64 bytes
 1. Member is enrolled and `status='active'`
 2. `agent` field matches member's `name` (no writing as another member)
 3. `type` is permitted for member's permission set
-4. `seq == last_acknowledged + 1` (no gaps)
-5. `prev_hash == hash(stored_record[last_acknowledged])` or genesis for seq=1
-6. Recomputed `hash` matches provided `hash`
-7. Ed25519 signature over `hash` verifies with member's stored public key
-8. Insert; advance `last_acknowledged`
+41. `hash`/`prev_hash` match header; chain links `prev_hash` → `hash`
+42. `ts` in header matches payload; `ts` ≤ `clock_skew_sec` from `now()`; `type` ∈ `enum`; `seq == last_acknowledged + 1` (no gaps)
+43. `body_hash` matches payload (canonicalised)
+44. `sig` over `hash` verifies with member's stored public key
+45. All header + payload columns match
+46. `ts` not older than `max_replay_sec` (default 3600; per-member)
+47. Insert header + payload, advance `last_acknowledged`
 
 ---
 
@@ -184,30 +219,35 @@ CREATE TABLE members (
 );
 ```
 
-### records  (append-only — trigger prevents UPDATE and DELETE)
+### records — CHAIN-HEADER TABLE (permanent, append-only)
+
+Holds only the immutable chain headers for one member. retention + payload data live in
+`recordpayload`; the trigger only affects this table. The schema is fixed — layout or
+schema changes bump `schema_version` and re-hash the affected member (see the security
+design section at the bottom). Chain links `prev_hash` (genesis marker for `seq = 1`) to
+each `hash`/`body_hash` byte string:
 
 ```sql
 CREATE TABLE records (
-  id                   BIGSERIAL PRIMARY KEY,
-  member_id            UUID NOT NULL REFERENCES members(id),
-  agent                TEXT NOT NULL,             -- denormalised from member.name for queries
-  seq                  BIGINT NOT NULL,
-  ts                   TIMESTAMPTZ NOT NULL,
-  type                 TEXT NOT NULL CHECK (type IN (
-                          'communication','decision','action','event',
-                          'perception','lesson','policy','system')),
-  summary              TEXT,
-  refs                 JSONB DEFAULT '{}',
-  place                TEXT,
-  peers                JSONB DEFAULT '[]',
-  tags                 JSONB DEFAULT '[]',
-  body                 JSONB NOT NULL DEFAULT '{}',
-  sw                   TEXT,
-  prev_hash            BYTEA NOT NULL,
-  hash                 BYTEA NOT NULL,
-  sig                  BYTEA NOT NULL,
-  embedding            VECTOR(1536),              -- NULL until Phase 7
-  created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- CHAIN-HEADER (append-only, immutable). payload lives in recordpayload. No embeddings
+  -- column until P8; the embedding index is built then -- not here. Idempotent schema.
+  id          BIGSERIAL PRIMARY KEY,
+  member_id   UUID NOT NULL REFERENCES members(id),
+  agent       TEXT NOT NULL,             -- denormalised from member.name for queries
+  seq         BIGINT NOT NULL,             -- member-relative, 1..N
+  ts          TIMESTAMPTZ NOT NULL,
+  type        TEXT NOT NULL CHECK (type IN (
+                  'communication','decision','action','event',
+                  'perception','lesson','policy','system')),
+  summary     TEXT,
+  refs         JSONB DEFAULT '{}',
+  place       TEXT,
+  peers       JSONB DEFAULT '[]',
+  body_hash   BYTEA NOT NULL,              -- SHA-256(canonical_payload_bytes)
+  sig         BYTEA NOT NULL,              -- Ed25519 over concat(prefix, hash(bytes))
+  hash        BYTEA NOT NULL,              -- SHA-256(sig_bytes); chain links prev_hash -> hash
+  prev_hash   BYTEA NOT NULL,              -- genesis = 32 x 0x00 at seq=1
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (member_id, seq)
 );
 
@@ -224,30 +264,30 @@ CREATE TRIGGER trg_records_no_mutation
 
 -- Core indexes
 CREATE INDEX idx_records_ts       ON records (ts DESC);
-CREATE INDEX idx_records_agent_seq ON records (member_id, seq);
+CREATE INDEX idx_records_member_seq ON records (member_id, seq DESC);
 CREATE INDEX idx_records_type     ON records (type);
-CREATE INDEX idx_records_place    ON records (place);
 CREATE INDEX idx_records_summary_fts
-  ON records USING GIN (to_tsvector('english', coalesce(summary,'') || ' ' || coalesce(place,'')));
-CREATE INDEX idx_records_embedding
-  ON records USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-```
+  ON records USING GIN (to_tsvector('english', coalesce(summary,'')));
+
 
 ### tokens  (short-lived opaque member tokens)
+
+`member_id` is nullable so a non-member value is permitted for admin sessions.
+`token_hash` is the SHA-256 of the raw 32-byte token; the raw token stays in memory only.
 
 ```sql
 CREATE TABLE tokens (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  member_id    UUID NOT NULL REFERENCES members(id) ON DELETE CASCADE,
-  token_hash   BYTEA NOT NULL UNIQUE,             -- SHA-256 of raw token
+  member_id    UUID REFERENCES members(id),            -- nullable for admin
+  token_hash   BYTEA NOT NULL UNIQUE,                  -- SHA-256(raw 32-byte token)
   permissions  JSONB NOT NULL,
   remote_ip    INET,
   issued_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   expires_at   TIMESTAMPTZ NOT NULL,
-  revoked_at   TIMESTAMPTZ
+  revoked_at   TIMESTAMPTZ NULL
 );
 CREATE INDEX idx_tokens_member ON tokens (member_id) WHERE revoked_at IS NULL;
-```
+
 
 ### audit_log  (recall, access, enrollment, rejects)
 
@@ -267,6 +307,27 @@ CREATE INDEX idx_audit_ts ON audit_log (ts DESC);
 CREATE INDEX idx_audit_member ON audit_log (member_id, ts DESC);
 ```
 
+### recordpayload — mutable, purgable body for one records row
+
+The append-only trigger never fires here; retention and rollups modify this
+table. Layout is fixed — changes bump `schema_version` and re-hash the member.
+
+```sql
+CREATE TABLE recordpayload (
+  -- payload body for one records row. schema fixed — changes bump schema_version.
+  id           INTEGER PRIMARY KEY,
+  keyholder_id UUID NOT NULL,            -- references members(id)
+  seq          BIGINT NOT NULL,
+  status       TEXT,                     -- for outcomes: e.g. 'success','failure'
+  place        TEXT,                     -- where/when the record was made
+  body         JSONB NOT NULL DEFAULT '{}',
+  media_type   JSONB DEFAULT '[]',
+   header_id    BIGINT NOT NULL REFERENCES records(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_recordpayload_seq ON recordpayload (seq DESC);
+CREATE INDEX idx_recordpayload_media ON recordpayload (media_type);
+
+
 ### admin_user
 
 ```sql
@@ -281,22 +342,58 @@ CREATE TABLE admin_user (
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
+### admin_sessions  (admin dashboard cookie store)
+
+Admin login sessions as 30-min httpOnly cookies. Kept separate from member `token`s so the
+member-only `token` lifecycle never affects admin auth, and so admin sessions stay out of the
+member chain.
+
+```sql
+CREATE TABLE admin_sessions (
+  session_id  BYTEA PRIMARY KEY,             -- 32-byte opaque session cookie
+  username    TEXT NOT NULL REFERENCES admin_user(username),
+  issued_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at  TIMESTAMPTZ NOT NULL,
+  revoked_at  TIMESTAMPTZ
+);
+CREATE INDEX idx_admin_sessions_user ON admin_sessions (username, expires_at);
+```
+
+### keyframe  (Content-addressed image store — Phase 8)
+
+Signed thumbnails live here as content-addressed blobs that can be purged independently of
+`records`. Bumped by `schema_version` so payload layout changes never force a chain rebuild.
+
+```sql
+CREATE TABLE keyframe (
+  keyframe_id  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  schema_version BIGINT NOT NULL DEFAULT 1,
+  member_id    UUID NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+  seq          INT NOT NULL,
+  content_hash BYTEA UNIQUE NOT NULL,
+  media_type   TEXT NOT NULL DEFAULT 'image/png',
+  size_at      INT NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_keyframe_member_seq ON keyframe (member_id, seq);
+CREATE INDEX idx_keyframe_content ON keyframe (content_hash);
+```
 
 ---
-
 ## API Surface
 
 ### Public (no auth)
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/auth/enroll` | Submit enrollment request |
+| `POST` | `/api/auth/enroll` | Submit enrollment request (capped per remote IP) |
+| `GET` | `/api/auth/challenge` | One-time nonce + replay window (45 s, bump to 90 s) per IP |
 
 ### Member (Authorization: Bearer \<token\>)
 
 | Method | Path | Permissions | Purpose |
 |---|---|---|---|
-| `POST` | `/api/auth/token` | Ed25519 sig | Exchange nonce+signature for access token |
+| `POST` | `/api/auth/token` | Ed25519 sig | Exchange a fresh `/api/auth/challenge` nonce + signature for access token |
 | `POST` | `/api/records` | `contribute` | Ingest a batch (max 100 records) |
 | `GET` | `/api/records` | `recall` | Filtered recall |
 | `GET` | `/api/recall/context` | `recall` | Context pack for a situation |
@@ -344,7 +441,14 @@ GET /api/recall/context?intent=approach&target=vector&place=living-room
 5. TLS enforced by nginx/Plesk (http→https redirect).
 6. No SQL injection surface: SQLAlchemy parameterised queries only.
 7. Records are hash-chained and signed — an edit leaves a detectable gap.
-8. Admin session is a 30-min httpOnly cookie with a random 32-byte token stored in `tokens` table.
+8. Admin session is a 30-min httpOnly cookie whose 32-byte session id lives in `admin_sessions` (a **dedicated** table — never in `tokens`, which is the member token store).
+
+**Public exceptions** are exactly two, both throttled per remote IP and never open:
+- `/api/auth/enroll` — submits an enrollment request; per-IP capacity cap; the next step is a nonce-bound signature check.
+- `/api/auth/challenge` — hands out a single-use nonce within a short replay window (45 s, bump to 90 s).
+- `/api/auth/token` — verified below with a fresh nonce.
+
+All other `/api/` paths enforce their session cookie or bearer token; a missing/invalid session on a public path (e.g. `/api/admin/*`) is refused with 403.
 
 **What a compromised member can do:** read within its own scope and add records under its own name. Cannot edit/delete history, read other members' data beyond its scope, or command any robot. Immediate revocation via admin dashboard.
 
@@ -509,4 +613,4 @@ LTMS_RETENTION_AUDIT_DAYS=365
 - Jetson Orin mesh-hub implementation (MQTT broker config, Jetson-specific drivers)
 - Vector robot SDK integration (Anki Vector has its own SDK; a thin adapter would connect to the LTMS ingest API the same as any other member)
 - Cloud LLM agent SDKs (each agent writes its own client against the public API)
-- Meaning-based recall implementation (Phase 7 — pgvector column is in the schema; the embedding pipeline and query API come later)
+- Meaning-based recall implementation (Phase 8 — pgvector column is in the schema; the embedding pipeline and query API come later)
