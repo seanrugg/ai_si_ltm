@@ -1,0 +1,6 @@
+[Unit]
+Description=Restart LTMS (triggered by ltms-restart.path)
+
+[Service]
+Type=oneshot
+ExecStart=/bin/systemctl restart ltms.service
