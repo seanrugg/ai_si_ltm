@@ -8,6 +8,7 @@ import Integrity from "./pages/Integrity.jsx";
 import Login from "./pages/Login.jsx";
 import Members from "./pages/Members.jsx";
 import RecordPage from "./pages/RecordPage.jsx";
+import RecallLog from "./pages/RecallLog.jsx";
 import Timeline from "./pages/Timeline.jsx";
 
 const AdminContext = createContext(null);
