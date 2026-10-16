@@ -19,3 +19,10 @@ keys/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local databases and test runs
+*.db
+*.sqlite
+*.sqlite3
+.coverage
+htmlcov/

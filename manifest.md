@@ -1,100 +1,30 @@
 # LTMS Project Manifest
 
-Date: 2026-10-13
-Status: **Work in progress — NOT commit/push-ready.** The scaffold is incomplete
-and does not currently import. See "Blockers" below.
+Updated: 2026-10-15 · Branch: `claude/p1-core-rebuild`
 
-This is a development environment. Nothing here is going to production.
+## Status
 
----
+**P1 and P2 complete.** 80 tests pass on SQLite and on PostgreSQL 16. The CLI
+agent enrolls, logs in, sends 20 records and verifies its chain against a real
+uvicorn + Postgres server.
 
-## What this repo is
+The earlier scaffold (commit `5bee1a5`) was replaced rather than patched: its
+write path never ran (un-awaited calls), its batches weren't atomic, its
+`body_hash` covered the payload (so purging would have broken verification),
+it rejected any record older than 45 s, and `schema.sql` didn't load. The design
+decisions it recorded (header/payload split, JCS, domain separation, challenge
+endpoint, separate admin sessions) are kept and now implemented.
 
-The Long-Term Memory Server (LTMS): an append-only, tamper-evident record store
-for AI/robot mesh members. Design source of truth:
-`LTMS_ARCHITECTURE_PLAN.md` (version 1.0, 12 Oct 2026).
+## Next
 
-Contract details (frozen at P1):
-- Record hash: `body_hash = SHA-256(canonical_bytes(payload))`, RFC 8785 / JCS
-  canonicalization (keys sorted alphabetically, minimal whitespace, no floats in
-  hashed fields).
-- Separation into a permanent CHAIN-HEADER `records` table + a purgable
-  `recordpayload` table.
-- Signature domain separation:
-  - record: `ltms-record-v1\n+ 64-hex(body_hash)`
-  - auth nonce: `ltms-auth-v1\n+ 32-hex(nonce)`
-- Chain link: `hash = SHA-256(sig_raw_bytes)`, chain `prev_hash -> hash`.
-- Genesis `prev_hash` is a 32-byte zero vector.
+1. **P3 dashboard** — Login, Timeline, Members (approve/reject/revoke), Integrity. API is ready.
+2. Admin password change command (`python -m server.manage set-admin-password`).
+3. `PLESK_DEPLOYMENT_PLAN.md` — systemd unit (1 worker, `--proxy-headers`), nginx, Postgres role, backups.
+4. P5 relay on the Pi Zero using `cli_agent/client.py` with a persistent outbox.
 
----
+## Rules for agents working here
 
-## What has been done
-
-### Present on disk (not yet committed — working tree is dirty)
-- `config/default.yaml`, `config/schema.sql` — schema + defaults.
-- `server/security/__init__.py`, `server/security/key.py`, `server/security/token.py`,
-  `server/security/hash/__init__.py` — crypto layer (Ed25519 + JCS hashing).
-- `server/models/*.py` — 9 ORM model files (`Base` declared in `server/models/base.py`).
-- `server/config.py` — pydantic-settings, env-driven, YAML base.
-- `server/db.py` — async SQLAlchemy engine/session + session_scope helper.
-- `server/services/__init__.py` — docstring only; **no service logic yet**.
-
-### Verified working
-- **Crypto layer (key.py / hash.py / token.py)** — the record/nonce signing and
-  verification paths have been exercised end-to-end in `/tmp` against an in-memory
-  engine: signatures verify, domain separation between record/nonce signatures
-  holds, and chain links compute correctly. This layer is the reliable part of the
-  scaffold (once the blocker below is fixed, see "Blockers").
-
-## What needs to be done
-
-### Blockers — doing before anything else
-1. **`server.models` package does not import.** Every model file references
-   `Base` (`class Session(Base)`, etc.) but none of the model files import it
-   (`from server.models.base import Base`). This is a real `NameError`; it is the
-   only thing keeping the model tree from importing at all. Fix: add the `Base`
-   import to each of `member.py`, `record.py`, `recordpayload.py`, `keyframe.py`,
-   `adminsession.py`, `adminuser.py`, `audit.py`, `token.py`, in the import block.
-2. **No tested ingest chain.** The plan's hard requirement is: *unit-test the
-   ingest chain + crypto against an in-memory DB before touching git/push.* That
-   chain logic (`services/`) does not exist yet — only `services/__init__.py`.
-   The verification pass in this session must exercise chain verification
-   (`body_hash` + record signature + `prev_hash -> hash`).
-
-### To build before commit/push (P1 scaffold)
-3. `server/services/` — the ingest chain: recompute `body_hash`, verify the Ed25519
-   signature, enforce `prev_hash -> hash` and monotonic `seq`, reject tampered
-   records. Plus token/nonce auth helpers using `hashed tokens`.
-4. `server/api/` (or whatever the plan specifies) — HTTP routes, request/response
-   schemas, and the FastAPI `create_app` factory in `server/main.py`.
-5. `.gitignore` already exists and is untracked — confirm it covers the `.venv`
-   and `.pytest_cache`.
-6. `manifest.md` (this file).
-
-### Verification gating the commit (must all pass first)
-7. `server.models` imports cleanly: `import server.models`.
-8. `import server.db` and `create_all()` builds every table in an in-memory
-   SQLite engine.
-9. Crypto + ingest-chain unit tests pass green in the ephemeral `/tmp` venv.
-10. **Git hygiene before push:** `git rev-parse --short HEAD` shows no new commit,
-    `git status --porcelain` only contains the intended new files
-    (`config/`, `server/db.py`, `server/services/*`, `server/api/*`,
-    `server/main.py`, tests, `manifest.md`), and **no `.venv` inside the repo tree**.
-
----
-
-## Key facts / environment notes
-- Python 3.14.
-- Deps installed in ephemeral `/tmp` venv (`/private/tmp/vm`). This venv lives
-  **outside** the repo so it stays clean of `.venv`.
-- Deps pulled so far include `pynacl` (verified working). Confirm `asyncpg`,
-  `pydantic`, `pydantic-settings`, `SQLAlchemy` (async variant), `PyYAML`, and any
-  other plan imports are present in the venv before building `services/` and
-  `api/`.
-
----
-
-## Honest end-of-session note
-I was **not** at commit/push-ready when this session ends. The blocker list above
-is accurate and non-negotiable: the models don't currently import, and the ingest
-chain (the core of the scaffold) doesn't exist yet. Do not push at this state.
+* `CONTRACT.md` is frozen. Don't change hashing, canonicalization, prefixes or header fields.
+* Models are the schema source: change `server/models`, then `python -m scripts.dump_schema`.
+* Run `pytest` before committing; run it against Postgres for anything touching queries or locking.
+* No secrets, key files or `.db` files in git.

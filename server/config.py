@@ -1,96 +1,67 @@
-"""Server configuration — pydantic-settings, env-driven, YAML base.
-
-Config is layered: base values come from ``config/default.yaml`` (nested sections
-matching the plan's env-var groups), and every scalar can be overridden by an
-environment variable with the ``LTMS_`` prefix. The group prefixes mirror that
-document — e.g. ``LTMS_INGEST_RATE`` maps onto ``rate_limits.ingest_requests_per_second``.
-"""
+"""Server configuration: ``config/default.yaml`` overlaid by ``LTMS_*`` env vars."""
 from __future__ import annotations
 
-from functools import lru_cache
 from pathlib import Path
+from urllib.parse import quote
 
-from pydantic import Field
+import yaml
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
-class ServerSection(BaseSettings):
-    """Runtime server binding / worker settings."""
-
-    host: str = Field("0.0.0.0", description="Bind address")
-    port: int = Field(8080, ge=1, le=65535, description="Bind port")
-    workers: int = Field(1, ge=1, description="Uvicorn worker count (single-worker by default)")
-
-
-class AuthSection(BaseSettings):
-    """Admin login + replay-window settings."""
-
-    token_ttl_seconds: int = Field(300, ge=0, description="Member token lifetime (s)")
-    admin_session_ttl_seconds: int = Field(
-        1800, ge=0, description="Admin httpOnly cookie lifetime (s)"
-    )
-    max_replay_sec: int = Field(45, ge=0, description="Auth nonce replay window (s)")
-    clock_skew_sec: int = Field(3600, ge=0, description="ts may not exceed this from now() (s)")
-
-
-class RateLimits(BaseSettings):
-    """Per-member request budgets (in-memory limiter, see security layer)."""
-
-    ingest_requests_per_second: int = Field(10, ge=1)
-    recall_requests_per_second: int = Field(5, ge=1)
-    max_batch: int = Field(100, ge=1)
-    max_recall: int = Field(200, ge=1)
-    enroll_per_ip: int = Field(5, ge=0, description="Per-IP capacity cap on /api/auth/enroll")
-    challenge_per_ip: int = Field(10, ge=0, description="Per-IP cap on /api/auth/challenge")
-
-
-class Retention(BaseSettings):
-    """Retention tiers (days) + scheduler timing (local wall-clock)."""
-
-    events_days: int = Field(90, ge=0)
-    keyframes_days: int = Field(30, ge=0)
-    audit_days: int = Field(365, ge=0)
-    rollup_at_local: str = Field("03:00", description="Daily event rollup time (HH:MM local)")
-    purge_keyframes_at_local: str = Field("04:00", description="Daily keyframe purge (HH:MM local)")
-    audit_prune_weekday: int = Field(0, ge=0, le=6, description="Monday=0 ... Sunday=6")
+DEFAULT_YAML = Path(__file__).resolve().parents[1] / "config" / "default.yaml"
 
 
 class ServerConfig(BaseSettings):
-    """Top-level config. Groups map 1:1 to the nested sections above."""
+    model_config = SettingsConfigDict(env_prefix="LTMS_", extra="ignore")
 
-    model_config = SettingsConfigDict(env_prefix="LTMS_", env_file=".env", extra="ignore")
+    # Database
+    database_url: str = ""
+    db_host: str = "localhost"
+    db_port: int = 5432
+    db_name: str = "ltms"
+    db_user: str = "ltms"
+    db_password: str = ""
 
-    # --- server -----------------------------------------------------------
-    server: ServerSection = ServerSection()
+    # Auth
+    admin_username: str = "admin"
+    admin_password: str = ""
+    token_ttl_seconds: int = 300
+    admin_session_ttl_seconds: int = 1800
+    challenge_ttl_seconds: int = 60
+    future_skew_seconds: int = 300
+    cookie_secure: bool = True
 
-    # --- auth (root scalars kept for one-line access) ---------------------
-    admin_username: str = Field("admin", description="Admin username")
-    admin_password: str = Field("", description="Admin password (env-provided)")
+    # Limits
+    ingest_rate: float = 10
+    recall_rate: float = 5
+    max_batch: int = 100
+    max_recall: int = 200
+    enroll_rate_per_ip: int = 5
+    max_pending_enrollments: int = 20
 
-    # --- database ---------------------------------------------------------
-    database_url: str = Field(
-        "sqlite+aiosqlite:///./ltms.db",
-        description="Async DB URL (sqlite for local/test, postgresql for prod)",
-    )
+    # Retention
+    retention_events_days: int = 90
+    retention_audit_days: int = 365
 
-    # --- crypto contract --------------------------------------------------
-    body_hash_required: bool = True
+    # Scheduler (disabled in tests)
+    enable_scheduler: bool = True
 
-    auth: AuthSection = AuthSection()
-    rate_limits: RateLimits = RateLimits()
-    retention: Retention = Retention()
+    @property
+    def resolved_database_url(self) -> str:
+        if self.database_url:
+            return self.database_url
+        if not self.db_password:
+            raise RuntimeError("LTMS_DB_PASSWORD (or LTMS_DATABASE_URL) must be set")
+        return (
+            f"postgresql+asyncpg://{quote(self.db_user)}:{quote(self.db_password)}"
+            f"@{self.db_host}:{self.db_port}/{self.db_name}"
+        )
 
 
-@lru_cache
-def get_config() -> ServerConfig:
-    """Return a cached, fully-resolved config object."""
-    base = {}
-    try:
-        import yaml
-
-        default_yaml = Path(__file__).resolve().parents[1] / "config" / "default.yaml"
-        if default_yaml.exists():
-            base = yaml.safe_load(default_yaml.read_text()) or {}
-    except Exception:
-        base = {}
-    return ServerConfig(**base)
+def load_config(**overrides: object) -> ServerConfig:
+    """YAML defaults < environment < explicit overrides."""
+    base: dict = {}
+    if DEFAULT_YAML.exists():
+        base = yaml.safe_load(DEFAULT_YAML.read_text()) or {}
+    env_cfg = ServerConfig()  # reads env
+    env_set = {k: getattr(env_cfg, k) for k in env_cfg.model_fields_set}
+    return ServerConfig.model_validate({**base, **env_set, **overrides})

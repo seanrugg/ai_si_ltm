@@ -104,7 +104,7 @@ Keep the three core buckets, and add **meaning, not raw streams**. Long-term mem
 
 ## Record format and integrity
 
-Every record, from any member, uses one envelope. Type-specific fields go in `body`.
+Every record, from any member, uses one envelope. The **header** (everything except `payload`, `hash` and `sig`) is permanent; type-specific detail goes in `payload`, which retention may later purge. The exact byte-level rules are in `CONTRACT.md`.
 
 ```json
 {
@@ -118,12 +118,13 @@ Every record, from any member, uses one envelope. Type-specific fields go in `bo
   "place": "living-room",
   "peers": ["vector"],
   "tags": ["social"],
-  "body": {"distance_m": 0.8, "speed_mps": 0.15,
-           "outcome": "reflex_stop", "outcome_detail": "front range 0.25 m"},
+  "outcome": "reflex_stop",
   "sw": "z3r0-app 0.5.0",
   "prev_hash": "4ab7…",
+  "payload_hash": "77d0…",
   "hash": "c21e…",
-  "sig": "9f03…"
+  "sig": "9f03…",
+  "payload": {"distance_m": 0.8, "speed_mps": 0.15, "outcome_detail": "front range 0.25 m"}
 }
 ```
 
@@ -132,11 +133,12 @@ Every record, from any member, uses one envelope. Type-specific fields go in `bo
 | `type` | `communication`, `decision`, `action`, `event`, `perception`, `lesson`, `policy`, `system` |
 | `seq` | Per member, increases by one, never reused |
 | `refs` | Links to other records as `agent:seq`; a lesson links to every record it summarizes; a correction links to the record it corrects |
-| `outcome` (actions) | `success`, `partial`, `reflex_stop`, `stuck`, `abandoned`, `failed`. An action logged before it finishes gets a follow-up record carrying the outcome |
-| `hash` | SHA-256 over the record without `hash` and `sig`, including `prev_hash`; any edit or gap breaks the member's chain |
-| `sig` | The member's Ed25519 signature over `hash` |
+| `outcome` (actions) | `success`, `partial`, `reflex_stop`, `stuck`, `abandoned`, `failed`. Lives in the header so it survives payload purges and can be indexed. An action logged before it finishes gets a follow-up record carrying the outcome |
+| `payload_hash` | SHA-256 of the canonical `payload`; lets the chain verify after the payload is purged |
+| `hash` | SHA-256 of the canonical header (RFC 8785 JSON), which includes `prev_hash` and `payload_hash`; any edit or gap breaks the member's chain |
+| `sig` | The member's Ed25519 signature over `"ltms-record-v1\n"` followed by the 32 raw `hash` bytes |
 
-**On arrival** the server checks, for every record, that the signature matches an enrolled, unrevoked member; that the `agent` field is that member (no writing as someone else); that `seq` and `prev_hash` continue the member's chain; and that the type is one the member may write (only the administrator writes `policy`). A record that fails is rejected and the rejection is logged. A gap in a member's chain is flagged on the dashboard, never silently filled.
+**On arrival** the server checks, for every record, that the signature matches an enrolled, unrevoked member; that the `agent` field is that member (no writing as someone else); that `seq` and `prev_hash` continue the member's chain; and that the type is one the member may write (writing `policy` needs a permission only the administrator grants; `system` is the server's own). A record that fails is rejected and the rejection is logged. A gap in a member's chain is flagged on the dashboard, never silently filled.
 
 ## Contributing records
 
