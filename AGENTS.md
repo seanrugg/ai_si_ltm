@@ -61,7 +61,8 @@ LTMS_DATABASE_URL=sqlite+aiosqlite:///./dev.db LTMS_ADMIN_PASSWORD=dev-password-
   LTMS_COOKIE_SECURE=false uvicorn server.main:app --port 8080
 ```
 
-The dashboard (`dashboard/`, P3) will have its own `npm` commands, listed in `dashboard/README.md`.
+Dashboard work (`dashboard/`): `cd dashboard && npm ci && npm test && npm run build`.
+For a backend with demo data, see `dashboard/README.md` (`python -m scripts.seed_demo`).
 
 ## 4. How the code is organized
 
@@ -74,6 +75,7 @@ The dashboard (`dashboard/`, P3) will have its own `npm` commands, listed in `da
 | Request plumbing | `server/api/deps.py` | `transaction(request)` gives you a session that commits for you. |
 | Reference client | `cli_agent/client.py` | How a member talks to the server. |
 | Tests | `server/tests/` | Fixtures are in `conftest.py`: `http`, `admin`, `mesh`, `db_exec`. |
+| Dashboard | `dashboard/src/` | React pages in `pages/`, shared pieces in `components/ui.jsx`. See `dashboard/README.md`. |
 
 Patterns to copy:
 - A new admin endpoint: copy one in `server/api/admin.py`. It takes `admin: AdminAuth = ADMIN`, opens `async with transaction(request) as session:` and returns a dict.
@@ -101,6 +103,7 @@ Closes #<issue>
 
 Before opening the PR:
 - [ ] `pytest` passes, and the result is pasted above
+- [ ] For dashboard changes: `npm test && npm run build` pass in `dashboard/`, and you include a screenshot if you can
 - [ ] `git diff main --stat` shows only the files the issue expected
 - [ ] No secrets, key files, `.db` or `.venv` in `git status`
 - [ ] If you changed `server/models/`, you ran `python -m scripts.dump_schema` and committed `config/schema.sql`
