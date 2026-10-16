@@ -1,6 +1,6 @@
 # LTMS Project Manifest
 
-Updated: 2026-10-15 · P1/P2 merged to `main` (PR #1)
+Updated: 2026-10-15 · P1–P3 merged to `main`; deployment plan in PR
 
 ## Status
 
@@ -17,10 +17,12 @@ endpoint, separate admin sessions) are kept and now implemented.
 
 ## Next
 
-1. **Guardrails** (PR #2): CI on every PR (SQLite + Postgres, Python 3.11/3.13/3.14), contract guard, `AGENTS.md`, admin CLI `python -m server.manage`.
-2. **P3 dashboard** (PR #3): Login, Timeline, Members (approve/reject/revoke/permissions), Integrity, record page. P4 pages are agent-task issues.
-3. `PLESK_DEPLOYMENT_PLAN.md` — systemd unit (1 worker, `--proxy-headers`), nginx, Postgres role, backups.
-4. P5 relay on the Pi Zero using `cli_agent/client.py` with a persistent outbox.
+Done and merged: guardrails (CI, contract guard, `AGENTS.md`, `server.manage`), P3 dashboard, `main` protected (squash only, 5 required checks).
+
+1. **Deploy (P6)**: follow `PLESK_DEPLOYMENT_PLAN.md`. Plesk Git pulls `main`; `deploy/plesk-deploy.sh` builds and restarts; one-time `deploy/root-setup.sh` as root.
+2. **P4 dashboard pages**: issues #4–#9 (agent tasks).
+3. **Database migrations** before the first schema change on a deployed server.
+4. **P5**: Z3-R0 relay on the Pi Zero using `cli_agent/client.py` with a persistent outbox.
 
 ## Rules for agents working here
 

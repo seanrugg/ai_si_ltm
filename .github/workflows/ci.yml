@@ -66,6 +66,25 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  deploy-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck --severity=warning deploy/*.sh
+      - name: systemd units are valid
+        # Stand-in app folder outside /home (the unit sets ProtectHome=true, and on the
+        # server the app lives under /var/www/vhosts). /bin/true stands in for uvicorn;
+        # note `command -v true` would return the shell builtin, not a file.
+        run: |
+          APP=/srv/ltms-app
+          sudo mkdir -p "$APP/.venv/bin" && sudo ln -sf /bin/true "$APP/.venv/bin/uvicorn"
+          for t in deploy/*.template; do
+            sed -e "s#@APP_DIR@#$APP#g" -e "s#@RUN_USER@#$(id -un)#g" -e "s#@RUN_GROUP@#$(id -gn)#g" "$t" > "/tmp/$(basename "${t%.template}")"
+          done
+          cp deploy/ltms-restart.service /tmp/
+          systemd-analyze verify /tmp/ltms.service /tmp/ltms-restart.path /tmp/ltms-restart.service
+
   contract-guard:
     # The record contract is frozen. A PR that touches it must carry the
     # "contract-change" label, which only the owner should add.

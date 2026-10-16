@@ -21,7 +21,7 @@ serves as the reference example. Other members (Jetson Orin, Anki Vector, future
 UNO Q robots, cloud LLM agents) use the same API.
 
 Deploying to: Plesk VPS (`[ltms-host].cucorn.com`), PostgreSQL on localhost,
-gunicorn + UvicornWorker (**one worker**) as a systemd service; React dashboard as static files.
+uvicorn (**one worker**) as a systemd service; the built dashboard is served by the same process. Code arrives via Plesk Git; see `PLESK_DEPLOYMENT_PLAN.md`.
 
 ---
 
@@ -36,7 +36,7 @@ gunicorn + UvicornWorker (**one worker**) as a systemd service; React dashboard 
 | Database | PostgreSQL 15+ (prod), SQLite (tests only). `pgvector` arrives in P8 |
 | Dashboard | React 18, Vite 5, React Router, Tailwind CSS 3 |
 | Scheduling | APScheduler 3 (in-process) |
-| Deployment | gunicorn + systemd (backend); Plesk static files (dashboard) |
+| Deployment | Plesk Git pull → `deploy/plesk-deploy.sh` (venv, dashboard build) → systemd restart; Plesk nginx proxies to 127.0.0.1:8090 |
 
 ---
 
@@ -48,7 +48,8 @@ ai_si_ltm/
 ├── AGENTS.md                        ← rules + workflow for coding agents
 ├── CONTRACT.md                      ← byte-level record contract (frozen, v1)
 ├── LTMS_ARCHITECTURE_PLAN.md        ← this file
-├── PLESK_DEPLOYMENT_PLAN.md         ← written before deployment (P6)
+├── PLESK_DEPLOYMENT_PLAN.md         ← step-by-step deploy, updates, backups (P6)
+├── deploy/                          # systemd units, Plesk deploy script, nginx directives, backup
 ├── pyproject.toml                   # one package: ltms_contract, server, cli_agent
 │
 ├── ltms_contract/                   # shared by server, CLI agent, robots
@@ -206,7 +207,7 @@ Rollups into signed `system` summary records need a server signing identity — 
 | **P3** — Recall + dashboard | Dashboard: Login, Timeline, Members (approve), Integrity | Admin approves a test agent; Timeline shows its records with hashes | ✅ 15 Oct |
 | **P4** — Full dashboard | Conversation, Decision Trace, Outcomes, Lessons, Recall Log, Settings (+ `PUT`) | All pages render real data | API ready; pages are agent-task issues |
 | **P5** — Z3-R0 recall | Pi Zero relay service using `cli_agent/client.py`; UNO Q context pack calls | Q receives context before a deliberate action | |
-| **P6** — Remote access | VPS, Let's Encrypt, `PLESK_DEPLOYMENT_PLAN.md` | Dashboard loads over HTTPS; unenrolled request → 401/403 | |
+| **P6** — Remote access | VPS, Let's Encrypt, `PLESK_DEPLOYMENT_PLAN.md` | Dashboard loads over HTTPS; `scripts/smoke_test.py` passes | Plan + scripts ready (dry-run tested); deploy pending |
 | **P7** — Outside AI members + server identity | Cloud agents enroll with `recall:scoped`; server key signs `system` rollup records | Outside agent enrolls, contributes, recalls within scope | |
 | **P8** — Lessons + vector | Reflecting agent writes lessons; pgvector column + embedding pipeline | "Similar situation" query returns relevant records | |
 

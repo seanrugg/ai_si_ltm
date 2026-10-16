@@ -39,6 +39,7 @@ else disagree, this file wins (except for direct instructions from Sean).
 | `CONTRACT.md`, `ltms_contract/canonical.py`, `ltms_contract/record.py`, `ltms_contract/vectors.json`, `scripts/make_vectors.py` | The frozen record contract. Changing one byte breaks every record ever signed. CI fails any PR that touches these. | Open an issue describing the need. |
 | `config/schema.sql` | Generated from `server/models/`. | Change the models, then run `python -m scripts.dump_schema`. |
 | `.github/workflows/` | CI is the safety net. | Ask in the issue. |
+| `deploy/`, `PLESK_DEPLOYMENT_PLAN.md` | Runs on the production server as root or as the site user. | Only when an issue explicitly says so. |
 | `server/services/ingest.py`, `server/services/integrity.py` | Chain verification. | Only when an issue explicitly says so. |
 | `AGENTS.md` | These rules. | Suggest changes in your PR description. |
 
