@@ -6,6 +6,7 @@ import { EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui.jsx
 // The audit log actions the server emits (recall is the default view).
 const ACTIONS = [
   "recall",
+  "all",
   "ingest_reject",
   "enroll_request",
   "enroll_approve",
@@ -18,7 +19,26 @@ const ACTIONS = [
   "token_denied",
   "retention_purge",
 ];
-const PAGE = 50;
+
+// `detail` from the API is an object, never a string. Render it compactly as
+// "key: value" pairs joined by spaces. For a recall, endpoint plus its query
+// fields are the useful bits.
+function detailText(entry) {
+  if (entry.action === "recall") {
+    const d = entry.detail || {};
+    const parts = ["endpoint: " + d.endpoint];
+    const query = Object.fromEntries(Object.entries(d).filter(([k]) => k !== "endpoint"));
+    for (const [k, v] of Object.entries(query)) parts.push(`${k}: ${v}`);
+    return parts.join(" ");
+  }
+  const d = entry.detail || {};
+  return Object.entries(d)
+    .map(([k, v]) => {
+      if (typeof v === "object") return `${k}: ${JSON.stringify(v)}`;
+      return `${k}: ${v}`;
+    })
+    .join(" ");
+}
 
 function humanize(action) {
   return action.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -37,7 +57,7 @@ export default function RecallLog() {
     setLoading(true);
     setError(null);
     try {
-      const res = await api("/admin/recall-log", { params: draft });
+      const res = await api("/admin/recall-log", { params: { limit: PAGE, offset, ...draft } });
       setEntries((prev) => (offset ? [...prev, ...res.entries] : res.entries));
       setMore(res.entries.length === PAGE);
     } catch (err) {
@@ -104,9 +124,8 @@ export default function RecallLog() {
         <ul className="panel" aria-label="Audit log entries, newest first">
           {entries.map((e) => (
             <li key={`${e.id}-${e.ts}`} className="border-b border-ink-line last:border-b-0">
-              <button
-                type="button"
-                aria-expanded="false"
+              <div
+                role="row"
                 aria-label={`Entry ${humanize(e.action)} by ${e.actor}`}
                 className="grid w-full grid-cols-[5.5rem_1fr_auto] items-baseline gap-x-3 px-3 py-2 text-left hover:bg-ink-hover
                            md:grid-cols-[7.5rem_1fr_auto_auto]"
@@ -116,19 +135,19 @@ export default function RecallLog() {
                 </span>
                 <span className="truncate text-sm">
                   <span className="mr-2 font-bold">{e.actor}</span>
-                  <span className="truncate text-paper-muted">{e.detail || <span className="text-paper-faint">(no detail)</span>}</span>
+                  <span className="truncate text-paper-muted">{detailText(e) || <span className="text-paper-faint">(no detail)</span>}</span>
                 </span>
                 <span className="justify-self-end">
                   <span className="inline-block rounded border px-1.5 text-xs border-ink-line text-paper-muted">
                     {humanize(e.action)}
                   </span>
                 </span>
-                {e.response_count > 0 && (
+                {e.response_count !== null && (
                   <span className="justify-self-end hidden text-xs text-paper-muted md:block">
-                    {e.response_count} resp
+                    {e.response_count} {e.response_count === 1 ? "result" : "results"}
                   </span>
                 )}
-              </button>
+              </div>
             </li>
           ))}
         </ul>

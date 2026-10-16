@@ -67,7 +67,7 @@ const router = createHashRouter([
       { path: "/decision-trace/:agent/:seq", element: <ComingSoon title="Decision trace" endpoint="GET /api/admin/decision-trace" /> },
       { path: "/outcomes", element: <ComingSoon title="Outcomes" endpoint="GET /api/admin/outcomes" /> },
       { path: "/lessons", element: <ComingSoon title="Lessons and policies" endpoint="GET /api/admin/lessons" /> },
-      { path: "/recall-log", element: <ComingSoon title="Recall log" endpoint="GET /api/admin/recall-log" /> },
+      { path: "/recall-log", element: <RecallLog /> },
       { path: "/settings", element: <ComingSoon title="Settings" endpoint="GET /api/admin/settings" /> },
       { path: "*", element: <Navigate to="/" replace /> },
     ],
