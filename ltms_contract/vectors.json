@@ -1,0 +1,167 @@
+{
+  "contract_version": 1,
+  "note": "Fields starting with '_' are expected intermediate values, not part of the record.",
+  "canonical": [
+    {
+      "input": {
+        "b": 2,
+        "a": 1,
+        "c": {
+          "z": [
+            3,
+            2,
+            1
+          ],
+          "y": null
+        }
+      },
+      "output": "{\"a\":1,\"b\":2,\"c\":{\"y\":null,\"z\":[3,2,1]}}"
+    },
+    {
+      "input": {
+        "floats": [
+          1.0,
+          0.1,
+          1e+21,
+          1e-07,
+          -0.0,
+          123.456,
+          0.8,
+          0.15
+        ],
+        "ints": [
+          0,
+          -1,
+          9007199254740991
+        ]
+      },
+      "output": "{\"floats\":[1,0.1,1e+21,1e-7,0,123.456,0.8,0.15],\"ints\":[0,-1,9007199254740991]}"
+    },
+    {
+      "input": {
+        "s": "tab\tnewline\nquote\"backslash\\ctrl\u0001 é é € 😀"
+      },
+      "output": "{\"s\":\"tab\\tnewline\\nquote\\\"backslash\\\\ctrl\\u0001 é é € 😀\"}"
+    },
+    {
+      "input": {
+        "€": 1,
+        "\r": 2,
+        "דּ": 3,
+        "1": 4,
+        "😀": 5,
+        "": 6,
+        "ö": 7
+      },
+      "output": "{\"\\r\":2,\"1\":4,\"\":6,\"ö\":7,\"€\":1,\"😀\":5,\"דּ\":3}"
+    },
+    {
+      "input": {
+        "empty_obj": {},
+        "empty_list": [],
+        "t": true,
+        "f": false
+      },
+      "output": "{\"empty_list\":[],\"empty_obj\":{},\"f\":false,\"t\":true}"
+    }
+  ],
+  "record": {
+    "secret_seed_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "public_key": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+    "chain": [
+      {
+        "v": 1,
+        "agent": "z3-r0",
+        "seq": 1,
+        "ts": "2026-10-20T19:04:10.000-04:00",
+        "type": "communication",
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "payload_hash": "af33243244fc515ae15f97c875620020b33e4a8d0751fd7936837df8ba6a261e",
+        "summary": "Vector chirped hello",
+        "place": "living-room",
+        "peers": [
+          "vector"
+        ],
+        "tags": [
+          "social"
+        ],
+        "hash": "fe810aeb4008d70a32861992e5e0975ed3d06508525400feebc92a4a772f024f",
+        "sig": "d1528826a9e004c16523fb46c9a5eca47aef577e369185144196283d8ddb2199918d9b35abd9653a0e9aa112071069f56b579f46909accd803b5acde61b3620e",
+        "payload": {
+          "direction": "in",
+          "text": "beep boop",
+          "confidence": 0.93
+        },
+        "_expected_header_canonical": "{\"agent\":\"z3-r0\",\"payload_hash\":\"af33243244fc515ae15f97c875620020b33e4a8d0751fd7936837df8ba6a261e\",\"peers\":[\"vector\"],\"place\":\"living-room\",\"prev_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"seq\":1,\"summary\":\"Vector chirped hello\",\"tags\":[\"social\"],\"ts\":\"2026-10-20T19:04:10.000-04:00\",\"type\":\"communication\",\"v\":1}",
+        "_expected_payload_canonical": "{\"confidence\":0.93,\"direction\":\"in\",\"text\":\"beep boop\"}",
+        "_expected_signing_message_hex": "6c746d732d7265636f72642d76310afe810aeb4008d70a32861992e5e0975ed3d06508525400feebc92a4a772f024f"
+      },
+      {
+        "v": 1,
+        "agent": "z3-r0",
+        "seq": 2,
+        "ts": "2026-10-20T19:04:12.500-04:00",
+        "type": "decision",
+        "prev_hash": "fe810aeb4008d70a32861992e5e0975ed3d06508525400feebc92a4a772f024f",
+        "payload_hash": "70b36cf3946cbf404e97339978e04c65c7eb56baf2f95f979b017a752b9f9135",
+        "summary": "Approach Vector",
+        "place": "living-room",
+        "peers": [
+          "vector"
+        ],
+        "refs": {
+          "input": "z3-r0:1"
+        },
+        "hash": "c34494a1ad59c57393a489e0d9875aab5ac21f327eae24ae66e8a1d90ca8023d",
+        "sig": "53fbe6cfff831e47703b9e532f82f5fed632cb73b7987ae924b2b0281f5fd2d5807d58ca351aaf81ebce3c8b2e3ce5c00a37a3d1c85e46c06e45c8b782d62201",
+        "payload": {
+          "options": [
+            "approach",
+            "wait"
+          ],
+          "chosen": "approach"
+        },
+        "_expected_header_canonical": "{\"agent\":\"z3-r0\",\"payload_hash\":\"70b36cf3946cbf404e97339978e04c65c7eb56baf2f95f979b017a752b9f9135\",\"peers\":[\"vector\"],\"place\":\"living-room\",\"prev_hash\":\"fe810aeb4008d70a32861992e5e0975ed3d06508525400feebc92a4a772f024f\",\"refs\":{\"input\":\"z3-r0:1\"},\"seq\":2,\"summary\":\"Approach Vector\",\"ts\":\"2026-10-20T19:04:12.500-04:00\",\"type\":\"decision\",\"v\":1}",
+        "_expected_payload_canonical": "{\"chosen\":\"approach\",\"options\":[\"approach\",\"wait\"]}",
+        "_expected_signing_message_hex": "6c746d732d7265636f72642d76310ac34494a1ad59c57393a489e0d9875aab5ac21f327eae24ae66e8a1d90ca8023d"
+      },
+      {
+        "v": 1,
+        "agent": "z3-r0",
+        "seq": 3,
+        "ts": "2026-10-20T19:04:14.902-04:00",
+        "type": "action",
+        "prev_hash": "c34494a1ad59c57393a489e0d9875aab5ac21f327eae24ae66e8a1d90ca8023d",
+        "payload_hash": "09d732e518c87e555be13fa249ce99bbefef322e3f7475135d8c79834bc6ea9e",
+        "summary": "Approach Vector",
+        "place": "living-room",
+        "peers": [
+          "vector"
+        ],
+        "tags": [
+          "social"
+        ],
+        "refs": {
+          "decision": "z3-r0:2"
+        },
+        "outcome": "reflex_stop",
+        "sw": "z3r0-app 0.5.0",
+        "hash": "e5740e80da4ac3574ccb04da8ff07ba1a367ba2b7c9c64969815bc53c7707cd6",
+        "sig": "723104ac40f784acd67606f1a4e0262f55c163e3897d053d16f62bbfda50685e0e2c7498a451c8ad2bdc8279a93b52e06e1f357b0acbb6a7d485cd2e056b6b0e",
+        "payload": {
+          "distance_m": 0.8,
+          "speed_mps": 0.15,
+          "outcome_detail": "front range 0.25 m"
+        },
+        "_expected_header_canonical": "{\"agent\":\"z3-r0\",\"outcome\":\"reflex_stop\",\"payload_hash\":\"09d732e518c87e555be13fa249ce99bbefef322e3f7475135d8c79834bc6ea9e\",\"peers\":[\"vector\"],\"place\":\"living-room\",\"prev_hash\":\"c34494a1ad59c57393a489e0d9875aab5ac21f327eae24ae66e8a1d90ca8023d\",\"refs\":{\"decision\":\"z3-r0:2\"},\"seq\":3,\"summary\":\"Approach Vector\",\"sw\":\"z3r0-app 0.5.0\",\"tags\":[\"social\"],\"ts\":\"2026-10-20T19:04:14.902-04:00\",\"type\":\"action\",\"v\":1}",
+        "_expected_payload_canonical": "{\"distance_m\":0.8,\"outcome_detail\":\"front range 0.25 m\",\"speed_mps\":0.15}",
+        "_expected_signing_message_hex": "6c746d732d7265636f72642d76310ae5740e80da4ac3574ccb04da8ff07ba1a367ba2b7c9c64969815bc53c7707cd6"
+      }
+    ]
+  },
+  "auth": {
+    "nonce": "1111111111111111111111111111111111111111111111111111111111111111",
+    "signing_message_hex": "6c746d732d617574682d76310a1111111111111111111111111111111111111111111111111111111111111111",
+    "sig": "c01d2b1a2206b6aa134688bfc058610aff5088d2e0cb015b334e34b8cc6b777eaa7f251ea1d02510dc4e99682fde6b3262c752f9d074ede5bcabed252339cb09"
+  }
+}

@@ -1,95 +1,88 @@
-"""Full-chain re-verification for a member (admin integrity view).
+"""Full chain re-verification from stored bytes.
 
-Integrity re-verifies every header of a member's chain from genesis against the
-persisted payload, recomputing ``body_hash`` and the chain links and checking
-each signature. This is how the admin dashboard detects a tampered chain — an
-edit to a stored ``recordpayload`` changes its ``body_hash`` and breaks the link;
-an edit to a stored header breaks the ``hash`` -> ``prev_hash`` chain.
-
-The result is a per-member status summary: ``"ok"`` when every header verifies,
-or ``"broken"`` at the first header that fails, with the failing ``seq`` and
-reason.
+For each record, in seq order:
+  * seq is contiguous from 1
+  * SHA-256(header_raw) == hash, and the signature over it verifies
+  * prev_hash links to the previous record's hash (genesis for seq 1)
+  * the queryable columns agree with header_raw (catches edits that bypass the trigger)
+  * if the payload is still stored, SHA-256(payload_raw) == payload_hash
+Finally the member's chain head (last_ack_seq / last_hash) must match the last record.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import json
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.models.member import Member
-from server.models.record import RecordHeader
-from server.models.recordpayload import RecordPayload
-from server.security.key import Ed25519PublicKey
-from server.services.chain import GENESIS_PREV_HASH, ChainError, verify_chain
+from ltms_contract import GENESIS_HASH, record_signing_message, sha256, verify_signature
+from server.models import Member, Record, RecordPayload
 
-# Verified in a single pass; these windows are only used to bound how far in the
-# future/past a historical record may sit. For re-verification of old records we
-# allow a generous skew so archived history is never flagged as stale.
-_REPLAY_SEC = 3600 * 24 * 30
-_SKEW_SEC = 3600 * 24
+_COLUMN_FIELDS = ("agent", "seq", "type", "prev_hash", "payload_hash", "summary", "place", "outcome")
 
 
-async def verify_member_chain(
-    session: AsyncSession, member: Member, *, now: datetime | None = None
-) -> dict:
-    """Re-verify a member's full chain; return ``{"status", "seq", "code", ...}``.
+async def verify_member(session: AsyncSession, member: Member, *, batch: int = 500) -> dict:
+    report = {
+        "member": member.name,
+        "member_id": str(member.id),
+        "status": "ok",
+        "records": 0,
+        "payloads_present": 0,
+        "payloads_purged": 0,
+        "head_seq": member.last_ack_seq,
+        "error": None,
+    }
 
-    ``status`` is ``"ok"`` (all headers verified) or ``"broken"`` (a header
-    failed), with the first failing ``seq`` and the :class:`ChainError` ``code``
-    when broken.
-    """
-    now = now or datetime.now(timezone.utc)
-    verifying = Ed25519PublicKey(member.public_key)
+    def fail(seq: int | None, code: str, message: str) -> dict:
+        report["status"] = "broken"
+        report["error"] = {"seq": seq, "code": code, "message": message}
+        return report
 
-    stmt = (
-        select(RecordPayload, RecordHeader)
-        .where(RecordHeader.member_id == member.id)
-        .order_by(RecordHeader.seq.asc())
-    )
-    rows = await session.execute(stmt)
-
-    prev_header = None
-    for payload, header in rows.all():
-        prev_view: dict | None = (
-            {"seq": prev_header.seq, "hash": prev_header.hash}
-            if prev_header is not None
-            else None
-        )
-        try:
-            verify_chain(
-                payload.body,
-                header={
-                    "seq": header.seq,
-                    "ts": header.ts,
-                    "type": header.type,
-                    "body_hash": header.body_hash,
-                    "sig": header.sig,
-                    "hash": header.hash,
-                    "prev_hash": header.prev_hash,
-                    "agent": header.agent,
-                },
-                prev_header=prev_view,
-                verifying=verifying,
-                now=now,
-                replay_sec=_REPLAY_SEC,
-                skew_sec=_SKEW_SEC,
-                seq=header.seq,
-                type_=header.type,
-                agent=header.agent,
+    expected_seq, prev = 1, GENESIS_HASH
+    while True:
+        rows = (
+            await session.execute(
+                select(Record, RecordPayload)
+                .outerjoin(RecordPayload, RecordPayload.record_id == Record.id)
+                .where(Record.member_id == member.id, Record.seq >= expected_seq)
+                .order_by(Record.seq)
+                .limit(batch)
             )
-        except ChainError as exc:
-            return {"status": "broken", "member": str(member.id), "seq": header.seq, "code": exc.code}
-        prev_header = header
+        ).all()
+        if not rows:
+            break
+        for rec, payload in rows:
+            if rec.seq != expected_seq:
+                return fail(expected_seq, "gap", f"missing seq {expected_seq} (next stored is {rec.seq})")
+            if sha256(rec.header_raw).hex() != rec.hash:
+                return fail(rec.seq, "hash", "stored header bytes do not match hash")
+            if not verify_signature(member.public_key, record_signing_message(rec.hash), rec.sig):
+                return fail(rec.seq, "sig", "signature does not verify")
+            header = json.loads(rec.header_raw)
+            if header.get("prev_hash") != prev:
+                return fail(rec.seq, "chain", "prev_hash does not link to the previous record")
+            for field in _COLUMN_FIELDS:
+                if header.get(field) != getattr(rec, field):
+                    return fail(rec.seq, "column_mismatch", f"column {field!r} disagrees with signed header")
+            if payload is not None:
+                report["payloads_present"] += 1
+                if sha256(payload.payload_raw).hex() != rec.payload_hash:
+                    return fail(rec.seq, "payload_hash", "stored payload does not match payload_hash")
+            else:
+                report["payloads_purged"] += 1
+            report["records"] += 1
+            prev = rec.hash
+            expected_seq += 1
+        if len(rows) < batch:
+            break
 
-    return {"status": "ok", "member": str(member.id)}
+    if report["records"] == 0:
+        report["status"] = "empty"
+    if member.last_ack_seq != expected_seq - 1 or member.last_hash != prev:
+        return fail(member.last_ack_seq, "head", "member chain head does not match the last stored record")
+    return report
 
 
-async def integrity_summary(session: AsyncSession) -> list[dict]:
-    """Return the integrity status of every member in the system."""
-    stmt = select(Member)
-    members = await session.scalars(stmt)
-    results = []
-    for member in members:
-        results.append(await verify_member_chain(session, member))
-    return results
+async def verify_all(session: AsyncSession) -> list[dict]:
+    members = await session.scalars(select(Member).where(Member.status.in_(("active", "revoked"))).order_by(Member.name))
+    return [await verify_member(session, m) for m in members]

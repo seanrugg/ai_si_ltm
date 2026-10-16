@@ -1,30 +1,29 @@
-# Default configuration. Environment variables override these (see config.py).
-server:
-  host: 0.0.0.0
-  port: 8080
-  # Single-worker by default. See "Concurrency" in the architecture plan:
-  # horizontal scaling (uvicorn --workers N) is only safe with a Postgres-backed
-  # limiter + SELECT for UPDATE locking; document it before enabling.
-  workers: 1
+# LTMS defaults. Every key can be overridden by an environment variable named
+# LTMS_<KEY> in upper case (e.g. LTMS_TOKEN_TTL_SECONDS=600).
+# Secrets (LTMS_DB_PASSWORD, LTMS_ADMIN_PASSWORD) have no defaults here.
 
-auth:
-  token_ttl_seconds: 300     # 5 min
-  admin_session_ttl_seconds: 1800   # 30 min
-  max_replay_sec: 45         # /api/auth/challenge nonce window (bump to 90 if needed)
-  clock_skew_sec: 3600       # ts may not exceed this from now()
+# Database. LTMS_DATABASE_URL, if set, wins over the LTMS_DB_* parts.
+db_host: localhost
+db_port: 5432
+db_name: ltms
+db_user: ltms
 
-rate_limits:
-  ingest_requests_per_second: 10
-  recall_requests_per_second: 5
-  max_batch: 100
-  max_recall: 200
-  enroll_per_ip: 5           # /api/auth/enroll capacity per remote IP
-  challenge_per_ip: 10       # /api/auth/challenge capacity per remote IP
+# Auth
+admin_username: admin
+token_ttl_seconds: 300          # member bearer token lifetime
+admin_session_ttl_seconds: 1800 # admin cookie lifetime (30 min)
+challenge_ttl_seconds: 60       # /api/auth/challenge nonce lifetime
+future_skew_seconds: 300        # reject record ts further than this in the future
+cookie_secure: true             # set false only for local http development
 
-retention:
-  events_days: 90
-  keyframes_days: 30
-  audit_days: 365
-  rollup_at_local: "03:00"
-  purge_keyframes_at_local: "04:00"
-  audit_prune_weekday: 0     # Monday
+# Limits (per member unless noted)
+ingest_rate: 10                 # ingest requests/s
+recall_rate: 5                  # recall requests/s
+max_batch: 100                  # records per POST /api/records
+max_recall: 200                 # records per GET /api/records
+enroll_rate_per_ip: 5           # enroll requests per IP per hour
+max_pending_enrollments: 20     # refuse new enroll requests beyond this
+
+# Retention (days)
+retention_events_days: 90       # payloads of event/perception records
+retention_audit_days: 365

@@ -1,176 +1,201 @@
-"""Recall: filtered query over a member's records + context-pack composition.
+"""Recall: filtered queries and situation "context packs".
 
-The member recall path (plan §"Member (Authorization)") answers two questions:
-
-1. ``recall_records`` — return a filtered, paginated slice of the member's own
-   ``recordpayload`` rows (plus the header rows they chain to).
-2. ``recall_context`` — compose a bounded context pack for a situation: recent
-   outcomes of the requested action, peer comms in the last 24h, applicable
-   lessons, and relevant policies, capped at ``MAX_CONTEXT`` total entries.
-
-Both are scoped to the requesting member — a member never sees another member's
-records.
+Every member-facing recall goes through :func:`effective_scope`, so a member
+holding only ``recall:scoped`` never sees records outside its granted scope,
+whatever filters it sends.
 """
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import cast, exists, func, literal, or_, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import Select
 
-from server.models.member import Member
-from server.models.record import RecordHeader
-from server.models.recordpayload import RecordPayload
-
-MAX_RECALL = 200
-MAX_CONTEXT = 25
+from server.models import Record, RecordPayload
 
 
-def _scope_clause(member: Member):
-    """SQLAlchemy filter restricting rows to ``member``'s own records."""
-    return RecordPayload.member_id == member.id
+class RecallDenied(Exception):
+    pass
 
 
-async def recall_records(
-    session: AsyncSession,
-    member: Member,
-    *,
-    type_: str | None = None,
-    agent: str | None = None,
-    place: str | None = None,
-    from_: datetime | None = None,
-    to: datetime | None = None,
-    limit: int = 25,
+@dataclass
+class Scope:
+    """None for a field means unrestricted."""
+
+    types: list[str] | None = None
+    agents: list[str] | None = None
+    places: list[str] | None = None
+
+
+def effective_scope(permissions: list[str], scope: dict | None) -> Scope:
+    """Full scope with ``recall``; the granted scope with only ``recall:scoped``
+    (an empty scope then means nothing is visible); RecallDenied otherwise."""
+    if "recall" in permissions:
+        return Scope()
+    if "recall:scoped" in permissions:
+        s = scope or {}
+        return Scope(types=s.get("types", []), agents=s.get("agents"), places=s.get("places"))
+    raise RecallDenied("member lacks a recall permission")
+
+
+def _json_list_contains(session: AsyncSession, column, value: str):
+    """Portable "JSON array column contains value"."""
+    if session.bind.dialect.name == "postgresql":
+        return column.op("@>")(cast(literal(json.dumps([value])), JSONB))
+    each = func.json_each(column).table_valued("value").alias()
+    return exists(select(literal(1)).select_from(each).where(each.c.value == value))
+
+
+def apply_scope(stmt: Select, scope: Scope) -> Select:
+    if scope.types is not None:
+        stmt = stmt.where(Record.type.in_(scope.types))
+    if scope.agents is not None:
+        stmt = stmt.where(Record.agent.in_(scope.agents))
+    if scope.places is not None:
+        stmt = stmt.where(Record.place.in_(scope.places))
+    return stmt
+
+
+@dataclass
+class RecordFilter:
+    type: str | None = None
+    agent: str | None = None
+    place: str | None = None
+    peer: str | None = None
+    tag: str | None = None
+    outcome: str | None = None
+    since: datetime | None = None
+    until: datetime | None = None
+    q: str | None = None
+    limit: int = 25
+    offset: int = 0
+
+
+def build_query(session: AsyncSession, f: RecordFilter, scope: Scope) -> Select:
+    stmt = select(Record)
+    if f.type:
+        stmt = stmt.where(Record.type == f.type)
+    if f.agent:
+        stmt = stmt.where(Record.agent == f.agent)
+    if f.place:
+        stmt = stmt.where(Record.place == f.place)
+    if f.outcome:
+        stmt = stmt.where(Record.outcome == f.outcome)
+    if f.since:
+        stmt = stmt.where(Record.ts >= f.since)
+    if f.until:
+        stmt = stmt.where(Record.ts < f.until)
+    if f.peer:
+        stmt = stmt.where(_json_list_contains(session, Record.peers, f.peer))
+    if f.tag:
+        stmt = stmt.where(_json_list_contains(session, Record.tags, f.tag))
+    if f.q:
+        stmt = stmt.where(func.lower(func.coalesce(Record.summary, "")).contains(f.q.lower()))
+    return apply_scope(stmt, scope)
+
+
+async def fetch_payloads(session: AsyncSession, records: list[Record]) -> dict[int, RecordPayload]:
+    if not records:
+        return {}
+    rows = await session.scalars(
+        select(RecordPayload).where(RecordPayload.record_id.in_([r.id for r in records]))
+    )
+    return {p.record_id: p for p in rows}
+
+
+def to_wire(record: Record, payload: RecordPayload | None, *, include_payload: bool = True) -> dict:
+    """The record exactly as the member signed it (re-verifiable by anyone with
+    the member's public key), plus ``payload`` or a purge marker."""
+    out = json.loads(record.header_raw)
+    out["hash"] = record.hash
+    out["sig"] = record.sig
+    if include_payload:
+        if payload is not None:
+            out["payload"] = json.loads(payload.payload_raw)
+        else:
+            out["payload"] = None
+            out["payload_purged"] = True
+    return out
+
+
+async def query_records(
+    session: AsyncSession, f: RecordFilter, scope: Scope, *, include_payload: bool = True
 ) -> list[dict]:
-    """Return a member's own records matching the filters, newest first.
-
-    ``limit`` is clamped to ``MAX_RECALL``. Every returned record carries its
-    header fields (so callers have ``seq``, ``ts``, ``type``, ``hash``) merged
-    with the payload ``body``.
-    """
-    stmt = select(RecordPayload, RecordHeader).join(
-        RecordHeader, RecordPayload.header_id == RecordHeader.id
-    ).where(_scope_clause(member))
-
-    if type_ is not None:
-        stmt = stmt.where(RecordHeader.type == type_)
-    if agent is not None:
-        stmt = stmt.where(RecordHeader.agent == agent)
-    if place is not None:
-        stmt = stmt.where(RecordHeader.place == place)
-    if from_ is not None:
-        stmt = stmt.where(RecordHeader.ts >= from_)
-    if to is not None:
-        stmt = stmt.where(RecordHeader.ts <= to)
-
-    stmt = stmt.order_by(RecordHeader.seq.desc()).limit(min(limit, MAX_RECALL))
-
-    rows = await session.scalars(stmt)
-    results: list[dict] = []
-    for payload, header in rows:
-        entry = dict(payload.body) if isinstance(payload.body, dict) else {}
-        entry.update(
-            {
-                "header_id": header.id,
-                "member_id": str(header.member_id),
-                "agent": header.agent,
-                "seq": header.seq,
-                "ts": header.ts.isoformat(),
-                "type": header.type,
-                "summary": header.summary,
-                "place": header.place,
-                "peers": header.peers or [],
-                "body_hash": header.body_hash.hex(),
-                "hash": header.hash.hex(),
-                "prev_hash": header.prev_hash.hex(),
-                "status": payload.status,
-            }
-        )
-        results.append(entry)
-    return results
+    stmt = build_query(session, f, scope).order_by(Record.ts.desc(), Record.id.desc())
+    stmt = stmt.limit(f.limit).offset(f.offset)
+    rows = list(await session.scalars(stmt))
+    payloads = await fetch_payloads(session, rows) if include_payload else {}
+    return [to_wire(r, payloads.get(r.id), include_payload=include_payload) for r in rows]
 
 
-async def recall_context(
+CONTEXT_CAP = 25
+
+
+async def context_pack(
     session: AsyncSession,
-    member: Member,
+    scope: Scope,
     *,
-    intent: str | None = None,
-    target: str | None = None,
-    place: str | None = None,
+    intent: str | None,
+    target: str | None,
+    place: str | None,
+    agent: str | None = None,
     now: datetime | None = None,
 ) -> dict:
-    """Compose a bounded context pack for a situation.
+    """A small bundle for "I'm about to <intent> <target> in <place>".
 
-    Returns ``{"outcomes": [...], "peer_comms": [...], "lessons": [...],
-    "policies": [...], "total": N}`` where ``total`` is capped at
-    :data:`MAX_CONTEXT`. Each list carries up to the number of entries of its
-    kind that fit in the remaining budget.
+    * ``outcomes``  – last 10 actions matching intent/target/place that carry an outcome
+    * ``comms``     – the target's communications (or ones naming it) in the last 24 h
+    * ``lessons``   – lessons touching the target, place or intent
+    * ``policies``  – the newest policies
+    Capped at 25 records total, in that priority order.
     """
     now = now or datetime.now(timezone.utc)
-    day_ago = now - timedelta(days=1)
-    budget = MAX_CONTEXT
 
-    pack: dict[str, list] = {"outcomes": [], "peer_comms": [], "lessons": [], "policies": []}
+    def base(**kw) -> Select:
+        return build_query(session, RecordFilter(**kw), scope)
 
-    async def _fill(kind: str, stmt) -> None:
-        """Query ``stmt`` and append rows to ``pack[kind]`` until budget is spent."""
-        nonlocal budget
-        if budget <= 0:
-            return
-        rows = await session.scalars(stmt.limit(budget))
-        for payload, header in rows:
-            entry = dict(payload.body) if isinstance(payload.body, dict) else {}
-            entry.update(
-                {
-                    "agent": header.agent,
-                    "seq": header.seq,
-                    "ts": header.ts.isoformat(),
-                    "type": header.type,
-                    "summary": header.summary,
-                    "place": header.place,
-                }
-            )
-            pack[kind].append(entry)
-            budget -= 1
-
-    # 1. Recent outcomes of the requested action (the primary recall signal).
-    if target is not None:
-        stmt = select(RecordPayload, RecordHeader).join(
-            RecordHeader, RecordPayload.header_id == RecordHeader.id
-        ).where(
-            _scope_clause(member),
-            RecordHeader.type == "action",
-            RecordHeader.place == place if place is not None else True,
-        )
-        await _fill("outcomes", stmt)
-
-    # 2. Peer communications in the last 24h.
-    stmt = select(RecordPayload, RecordHeader).join(
-        RecordHeader, RecordPayload.header_id == RecordHeader.id
-    ).where(
-        _scope_clause(member),
-        RecordHeader.type == "communication",
-        RecordHeader.ts >= day_ago,
+    outcomes_q = base(type="action", place=place, peer=target, q=intent, agent=agent).where(
+        Record.outcome.is_not(None)
     )
-    await _fill("peer_comms", stmt)
+    comm_conds = []
+    if target:
+        comm_conds = [Record.agent == target, _json_list_contains(session, Record.peers, target)]
+    comms_q = base(type="communication", since=now - timedelta(hours=24))
+    if comm_conds:
+        comms_q = comms_q.where(or_(*comm_conds))
+    lesson_conds = []
+    if target:
+        lesson_conds.append(_json_list_contains(session, Record.peers, target))
+    if place:
+        lesson_conds.append(Record.place == place)
+    if intent:
+        lesson_conds.append(func.lower(func.coalesce(Record.summary, "")).contains(intent.lower()))
+    lessons_q = base(type="lesson")
+    if lesson_conds:
+        lessons_q = lessons_q.where(or_(*lesson_conds))
+    policies_q = base(type="policy")
 
-    # 3. Applicable lessons.
-    stmt = select(RecordPayload, RecordHeader).join(
-        RecordHeader, RecordPayload.header_id == RecordHeader.id
-    ).where(
-        _scope_clause(member),
-        RecordHeader.type == "lesson",
-    )
-    await _fill("lessons", stmt)
-
-    # 4. Relevant policies.
-    stmt = select(RecordPayload, RecordHeader).join(
-        RecordHeader, RecordPayload.header_id == RecordHeader.id
-    ).where(
-        _scope_clause(member),
-        RecordHeader.type == "policy",
-    )
-    await _fill("policies", stmt)
-
-    pack["total"] = sum(len(v) for v in pack.values())
+    sections: list[tuple[str, Select, int]] = [
+        ("outcomes", outcomes_q, 10),
+        ("comms", comms_q, 5),
+        ("lessons", lessons_q, 5),
+        ("policies", policies_q, 5),
+    ]
+    pack: dict[str, list] = {}
+    remaining = CONTEXT_CAP
+    for name, stmt, limit in sections:
+        take = min(limit, remaining)
+        if take <= 0:
+            pack[name] = []
+            continue
+        rows = list(await session.scalars(stmt.order_by(Record.ts.desc(), Record.id.desc()).limit(take)))
+        payloads = await fetch_payloads(session, rows)
+        pack[name] = [to_wire(r, payloads.get(r.id)) for r in rows]
+        remaining -= len(rows)
+    pack["count"] = CONTEXT_CAP - remaining
+    pack["query"] = {"intent": intent, "target": target, "place": place}
     return pack

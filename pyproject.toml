@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ltms"
+version = "0.2.0"
+description = "Long-Term Memory Server: append-only, signed, tamper-evident memory for an AI/robot mesh"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "gunicorn>=22",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "SQLAlchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.29",
+    "pynacl>=1.5",
+    "PyYAML>=6.0",
+    "bcrypt>=4.1",
+    "apscheduler>=3.10,<4",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "aiosqlite>=0.20"]
+
+[tool.setuptools.packages.find]
+include = ["ltms_contract*", "server*", "cli_agent*"]
+exclude = ["server.tests*"]
+
+[tool.setuptools.package-data]
+ltms_contract = ["vectors.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["server/tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]

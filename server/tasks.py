@@ -1,14 +1,33 @@
-"""APScheduler retention jobs.
-
-The jobs and the scheduler setup live in :mod:`server.services.retention`; this
-module re-exports them so the APScheduler dependency stays isolated to one place
-and ``from server.tasks import setup_scheduler`` works from the app factory.
-"""
+"""Scheduled maintenance (APScheduler, in-process)."""
 from __future__ import annotations
 
-from server.services.retention import (  # noqa: F401
-    _job_audit_prune,
-    _job_purge_expired_tokens,
-    _job_rollup_events,
-    setup_scheduler,
-)
+import logging
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+from server.services import retention
+
+log = logging.getLogger("ltms.tasks")
+
+
+def start_scheduler(app) -> AsyncIOScheduler:
+    cfg = app.state.config
+
+    async def run(name, fn, *args):
+        async with app.state.sessionmaker() as session:
+            try:
+                result = await fn(session, *args)
+                await session.commit()
+                log.info("%s: %s", name, result)
+            except Exception:
+                await session.rollback()
+                log.exception("%s failed", name)
+
+    sched = AsyncIOScheduler(timezone="UTC")
+    sched.add_job(run, "interval", minutes=5, args=("purge_expired_auth", retention.purge_expired_auth))
+    sched.add_job(run, "cron", hour=7, minute=0,  # 03:00 US Eastern
+                  args=("purge_event_payloads", retention.purge_event_payloads, cfg.retention_events_days))
+    sched.add_job(run, "cron", day_of_week="mon", hour=8, minute=0,
+                  args=("prune_audit_log", retention.prune_audit_log, cfg.retention_audit_days))
+    sched.start()
+    return sched
