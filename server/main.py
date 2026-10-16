@@ -64,7 +64,11 @@ def create_app(config: ServerConfig | None = None, *, create_tables: bool = True
         request.state.request_id = rid[:64]
         response = await call_next(request)
         response.headers["x-request-id"] = request.state.request_id
-        response.headers["cache-control"] = "no-store"
+        if request.url.path.startswith("/api"):
+            response.headers["cache-control"] = "no-store"
+        response.headers["x-content-type-options"] = "nosniff"
+        response.headers["x-frame-options"] = "DENY"
+        response.headers["referrer-policy"] = "no-referrer"
         return response
 
     @app.get("/api/health", include_in_schema=False)
@@ -75,6 +79,16 @@ def create_app(config: ServerConfig | None = None, *, create_tables: bool = True
     app.include_router(member.router)
     app.include_router(admin.router)
     register_exception_handlers(app)
+
+    if cfg.dashboard_dir:
+        from pathlib import Path
+
+        from fastapi.staticfiles import StaticFiles
+
+        dist = Path(cfg.dashboard_dir)
+        if not (dist / "index.html").exists():
+            raise RuntimeError(f"LTMS_DASHBOARD_DIR={dist} has no index.html; run `npm run build` in dashboard/")
+        app.mount("/", StaticFiles(directory=dist, html=True), name="dashboard")
     return app
 
 

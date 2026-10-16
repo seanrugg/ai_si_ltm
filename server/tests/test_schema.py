@@ -56,3 +56,17 @@ def test_app_starts_with_scheduler(config):
     with TestClient(app) as client:
         assert client.get("/api/health").json()["ok"] is True
         assert client.get("/docs").status_code == 404  # no public pages
+
+
+def test_serves_built_dashboard_when_configured(config, tmp_path):
+    from fastapi.testclient import TestClient
+    from server.main import create_app
+
+    (tmp_path / "index.html").write_text("<!doctype html><title>LTMS</title>")
+    app = create_app(config.model_copy(update={"dashboard_dir": str(tmp_path)}))
+    with TestClient(app) as client:
+        page = client.get("/")
+        assert page.status_code == 200 and "LTMS" in page.text
+        assert page.headers["x-frame-options"] == "DENY"
+        assert client.get("/api/health").json()["ok"] is True
+        assert client.get("/api/admin/me").status_code == 401  # API still wins over static files

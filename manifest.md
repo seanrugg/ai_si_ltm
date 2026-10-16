@@ -18,7 +18,7 @@ endpoint, separate admin sessions) are kept and now implemented.
 ## Next
 
 1. **Guardrails** (PR #2): CI on every PR (SQLite + Postgres, Python 3.11/3.13/3.14), contract guard, `AGENTS.md`, admin CLI `python -m server.manage`.
-2. **P3 dashboard**: Login, Timeline, Members (approve/reject/revoke), Integrity. API is ready.
+2. **P3 dashboard** (PR #3): Login, Timeline, Members (approve/reject/revoke/permissions), Integrity, record page. P4 pages are agent-task issues.
 3. `PLESK_DEPLOYMENT_PLAN.md` — systemd unit (1 worker, `--proxy-headers`), nginx, Postgres role, backups.
 4. P5 relay on the Pi Zero using `cli_agent/client.py` with a persistent outbox.
 
