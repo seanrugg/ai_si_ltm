@@ -6,7 +6,8 @@ React 18 + Vite 5 + Tailwind 3. Admin-only; talks to `/api/admin/*` with the
 ```bash
 cd dashboard
 npm ci
-npm test            # vitest (pure helpers in src/lib)
+npm run lint        # eslint: undefined names, unused vars, hook rules
+npm test            # vitest (helpers in src/lib and page helpers)
 npm run build       # → dist/
 npm run dev         # http://localhost:5173, proxies /api to localhost:8080
 ```
@@ -31,14 +32,14 @@ add `LTMS_DASHBOARD_DIR=dashboard/dist` to the uvicorn command and open http://l
 | `src/api/useApi.js` | `useApi(path, params)` returns `{data, error, loading, reload}` |
 | `src/components/ui.jsx` | `PageHeader`, `StatusBadge`, `HashStrip`, `Loading`, `ErrorNote`, `EmptyState` |
 | `src/components/RecordRow.jsx` | Expandable record row + `RecordDetail` |
-| `src/pages/` | One file per route. `ComingSoon.jsx` marks pages not built yet |
+| `src/pages/` | One file per route |
 
 ## Adding a page
 
 1. Copy `src/pages/Integrity.jsx` (it's the simplest complete page).
 2. Fetch with `useApi("/admin/<endpoint>", params)`; render `Loading`, `ErrorNote`, and an `EmptyState` that tells the admin what to do.
-3. Swap the `ComingSoon` route in `src/App.jsx` for your page.
-4. `npm test && npm run build` must pass.
+3. Add the route in `src/App.jsx` (and a link in `src/components/Shell.jsx` if it belongs in the sidebar).
+4. `npm run lint && npm test && npm run build` must pass.
 
 Design tokens are in `tailwind.config.js`: `ink` backgrounds, `paper` text,
 `led` (amber) for the one primary action per screen, `ok/warn/bad` for status
