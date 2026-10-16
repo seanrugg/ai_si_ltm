@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  tests:
+    name: tests (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13", "3.14"]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ltms
+          POSTGRES_PASSWORD: ltms
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ltms"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          allow-prereleases: true
+          cache: pip
+      - run: pip install -e '.[dev]'
+      - name: pytest (SQLite)
+        run: pytest
+      - name: pytest (PostgreSQL 16)
+        env:
+          LTMS_TEST_DATABASE_URL: postgresql+asyncpg://ltms:ltms@localhost:5432/postgres
+        run: pytest
+      - name: schema.sql applies cleanly
+        env:
+          PGPASSWORD: ltms
+        run: |
+          psql -h localhost -U ltms -d postgres -c "CREATE DATABASE schemacheck"
+          psql -h localhost -U ltms -d schemacheck -v ON_ERROR_STOP=1 -q -f config/schema.sql
+
+  contract-guard:
+    # The record contract is frozen. A PR that touches it must carry the
+    # "contract-change" label, which only the owner should add.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check protected files
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          protected='^(CONTRACT\.md|ltms_contract/(canonical|record)\.py|ltms_contract/vectors\.json|scripts/make_vectors\.py)$'
+          changed=$(git diff --name-only "$BASE" "$HEAD" | grep -E "$protected" || true)
+          if [ -z "$changed" ]; then echo "No protected files changed."; exit 0; fi
+          echo "Protected contract files changed:"; echo "$changed"
+          case ",$LABELS," in
+            *,contract-change,*) echo "Label contract-change present: allowed."; exit 0 ;;
+          esac
+          echo "::error::These files define the frozen record contract. Revert the changes, or ask the owner to add the 'contract-change' label."
+          exit 1

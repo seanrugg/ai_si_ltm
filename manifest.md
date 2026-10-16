@@ -1,6 +1,6 @@
 # LTMS Project Manifest
 
-Updated: 2026-10-15 · Branch: `claude/p1-core-rebuild`
+Updated: 2026-10-15 · P1/P2 merged to `main` (PR #1)
 
 ## Status
 
@@ -17,12 +17,14 @@ endpoint, separate admin sessions) are kept and now implemented.
 
 ## Next
 
-1. **P3 dashboard** — Login, Timeline, Members (approve/reject/revoke), Integrity. API is ready.
-2. Admin password change command (`python -m server.manage set-admin-password`).
+1. **Guardrails** (PR #2): CI on every PR (SQLite + Postgres, Python 3.11/3.13/3.14), contract guard, `AGENTS.md`, admin CLI `python -m server.manage`.
+2. **P3 dashboard**: Login, Timeline, Members (approve/reject/revoke), Integrity. API is ready.
 3. `PLESK_DEPLOYMENT_PLAN.md` — systemd unit (1 worker, `--proxy-headers`), nginx, Postgres role, backups.
 4. P5 relay on the Pi Zero using `cli_agent/client.py` with a persistent outbox.
 
 ## Rules for agents working here
+
+See `AGENTS.md` for the full rules. In short:
 
 * `CONTRACT.md` is frozen. Don't change hashing, canonicalization, prefixes or header fields.
 * Models are the schema source: change `server/models`, then `python -m scripts.dump_schema`.

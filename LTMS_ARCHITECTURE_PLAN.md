@@ -45,6 +45,7 @@ gunicorn + UvicornWorker (**one worker**) as a systemd service; React dashboard 
 ```
 ai_si_ltm/
 ├── README.md
+├── AGENTS.md                        ← rules + workflow for coding agents
 ├── CONTRACT.md                      ← byte-level record contract (frozen, v1)
 ├── LTMS_ARCHITECTURE_PLAN.md        ← this file
 ├── PLESK_DEPLOYMENT_PLAN.md         ← written before deployment (P6)
@@ -69,6 +70,7 @@ ai_si_ltm/
 │   ├── config.py                    # ServerConfig (YAML < env < overrides)
 │   ├── db.py                        # engine / sessionmaker (kept on app.state)
 │   ├── tasks.py                     # APScheduler jobs
+│   ├── manage.py                    # admin CLI: set-admin-password, list-members, approve, integrity
 │   ├── models/                      # member, record (+payload, triggers), auth, audit
 │   ├── security/                    # tokens, passwords, rate limiter
 │   ├── services/                    # ingest, recall, enrollment, auth, integrity, retention
@@ -231,7 +233,7 @@ keeps the chain valid; CLI end-to-end.
 
 ## Decisions (resolved)
 
-1. **First admin** — `LTMS_ADMIN_PASSWORD` on first start creates the account; later changes are a manage command (P3).
+1. **First admin** — `LTMS_ADMIN_PASSWORD` on first start creates the account; change it with `python -m server.manage set-admin-password`.
 2. **Token TTL** — 300 s. The client re-logs in automatically 20 s before expiry.
 3. **Max batch** — global 100. Per-member override not needed yet.
 4. **`recall:scoped`** — `{types, agents, places}` set by the admin at approval; types must be listed.
