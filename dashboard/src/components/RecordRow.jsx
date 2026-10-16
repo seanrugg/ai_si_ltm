@@ -36,7 +36,7 @@ function Value({ name, value }) {
 export function RecordDetail({ record }) {
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      <section>
+      <section className="min-w-0">
         <h3 className="mb-2 text-sm font-bold text-paper-muted">Signed header</h3>
         <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1 text-sm">
           {HEADER_FIELDS.filter((f) => record[f] !== undefined).map((f) => (
@@ -61,7 +61,7 @@ export function RecordDetail({ record }) {
           </dd>
         </dl>
       </section>
-      <section>
+      <section className="min-w-0">
         <h3 className="mb-2 text-sm font-bold text-paper-muted">Payload</h3>
         {record.payload_purged ? (
           <p className="text-sm text-paper-muted">

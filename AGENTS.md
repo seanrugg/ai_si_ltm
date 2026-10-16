@@ -62,7 +62,8 @@ LTMS_DATABASE_URL=sqlite+aiosqlite:///./dev.db LTMS_ADMIN_PASSWORD=dev-password-
   LTMS_COOKIE_SECURE=false uvicorn server.main:app --port 8080
 ```
 
-Dashboard work (`dashboard/`): `cd dashboard && npm ci && npm test && npm run build`.
+Dashboard work (`dashboard/`): `cd dashboard && npm ci && npm run lint && npm test && npm run build`.
+`npm run lint` catches undefined names and unused variables that the build does not.
 For a backend with demo data, see `dashboard/README.md` (`python -m scripts.seed_demo`).
 
 ## 4. How the code is organized
@@ -104,7 +105,8 @@ Closes #<issue>
 
 Before opening the PR:
 - [ ] `pytest` passes, and the result is pasted above
-- [ ] For dashboard changes: `npm test && npm run build` pass in `dashboard/`, and you include a screenshot if you can
+- [ ] For dashboard changes: `npm run lint && npm test && npm run build` pass in `dashboard/`
+- [ ] No screenshots needed. The reviewer checks the page in a browser; don't spend time on screenshot tooling
 - [ ] `git diff main --stat` shows only the files the issue expected
 - [ ] No secrets, key files, `.db` or `.venv` in `git status`
 - [ ] If you changed `server/models/`, you ran `python -m scripts.dump_schema` and committed `config/schema.sql`

@@ -20,7 +20,7 @@ endpoint, separate admin sessions) are kept and now implemented.
 Done and merged: guardrails (CI, contract guard, `AGENTS.md`, `server.manage`), P3 dashboard, `main` protected (squash only, 5 required checks).
 
 1. **Deploy (P6)**: follow `PLESK_DEPLOYMENT_PLAN.md`. Plesk Git pulls `main`; `deploy/plesk-deploy.sh` builds and restarts; one-time `deploy/root-setup.sh` as root.
-2. **P4 dashboard pages**: issues #4–#9 (agent tasks).
+2. **P4 dashboard pages**: done (#4 by Ornith, #5–#9 in the P4 PR). Settings editing from the dashboard still needs a decision.
 3. **Database migrations** before the first schema change on a deployed server.
 4. **P5**: Z3-R0 relay on the Pi Zero using `cli_agent/client.py` with a persistent outbox.
 

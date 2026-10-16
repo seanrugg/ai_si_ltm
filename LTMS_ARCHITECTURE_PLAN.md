@@ -205,7 +205,7 @@ Rollups into signed `system` summary records need a server signing identity — 
 | **P1** — Repo scaffold | contract, schema, server package, tests | `pytest` green against SQLite **and** PostgreSQL | ✅ 15 Oct |
 | **P2** — Ingest + auth live | `main.py` runs, token + ingest pipeline, CLI agent sends 20 records | `cli_agent send` → records in PostgreSQL, `cli_agent verify` OK | ✅ 15 Oct (uvicorn + Postgres 16 + CLI over HTTP) |
 | **P3** — Recall + dashboard | Dashboard: Login, Timeline, Members (approve), Integrity | Admin approves a test agent; Timeline shows its records with hashes | ✅ 15 Oct |
-| **P4** — Full dashboard | Conversation, Decision Trace, Outcomes, Lessons, Recall Log, Settings (+ `PUT`) | All pages render real data | API ready; pages are agent-task issues |
+| **P4** — Full dashboard | Conversation, Decision Trace, Outcomes, Lessons, Recall Log, Settings (+ `PUT`) | All pages render real data | ✅ 15 Oct (settings are read-only; editing needs a decision) |
 | **P5** — Z3-R0 recall | Pi Zero relay service using `cli_agent/client.py`; UNO Q context pack calls | Q receives context before a deliberate action | |
 | **P6** — Remote access | VPS, Let's Encrypt, `PLESK_DEPLOYMENT_PLAN.md` | Dashboard loads over HTTPS; `scripts/smoke_test.py` passes | Plan + scripts ready (dry-run tested); deploy pending |
 | **P7** — Outside AI members + server identity | Cloud agents enroll with `recall:scoped`; server key signs `system` rollup records | Outside agent enrolls, contributes, recalls within scope | |

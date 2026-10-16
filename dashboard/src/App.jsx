@@ -3,11 +3,15 @@ import { createHashRouter, Navigate, Outlet, RouterProvider, useNavigate } from 
 import { api, setUnauthorizedHandler } from "./api/client.js";
 import Shell from "./components/Shell.jsx";
 import { Loading } from "./components/ui.jsx";
-import ComingSoon from "./pages/ComingSoon.jsx";
+import Conversation from "./pages/Conversation.jsx";
+import DecisionTrace from "./pages/DecisionTrace.jsx";
 import Integrity from "./pages/Integrity.jsx";
+import Lessons from "./pages/Lessons.jsx";
 import Login from "./pages/Login.jsx";
 import Members from "./pages/Members.jsx";
+import Outcomes from "./pages/Outcomes.jsx";
 import RecordPage from "./pages/RecordPage.jsx";
+import Settings from "./pages/Settings.jsx";
 import RecallLog from "./pages/RecallLog.jsx";
 import Timeline from "./pages/Timeline.jsx";
 
@@ -53,7 +57,6 @@ function RequireAdmin() {
   );
 }
 
-// Pages for P4 point at the API they will use; see the agent-task issues.
 const router = createHashRouter([
   { path: "/login", element: <Login /> },
   {
@@ -63,12 +66,12 @@ const router = createHashRouter([
       { path: "/members", element: <Members /> },
       { path: "/integrity", element: <Integrity /> },
       { path: "/record/:agent/:seq", element: <RecordPage /> },
-      { path: "/conversation", element: <ComingSoon title="Conversation" endpoint="GET /api/admin/conversation" /> },
-      { path: "/decision-trace/:agent/:seq", element: <ComingSoon title="Decision trace" endpoint="GET /api/admin/decision-trace" /> },
-      { path: "/outcomes", element: <ComingSoon title="Outcomes" endpoint="GET /api/admin/outcomes" /> },
-      { path: "/lessons", element: <ComingSoon title="Lessons and policies" endpoint="GET /api/admin/lessons" /> },
+      { path: "/conversation", element: <Conversation /> },
+      { path: "/decision-trace/:agent/:seq", element: <DecisionTrace /> },
+      { path: "/outcomes", element: <Outcomes /> },
+      { path: "/lessons", element: <Lessons /> },
       { path: "/recall-log", element: <RecallLog /> },
-      { path: "/settings", element: <ComingSoon title="Settings" endpoint="GET /api/admin/settings" /> },
+      { path: "/settings", element: <Settings /> },
       { path: "*", element: <Navigate to="/" replace /> },
     ],
   },
