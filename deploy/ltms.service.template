@@ -1,0 +1,31 @@
+# systemd unit for the LTMS server. root-setup.sh fills in @APP_DIR@ and @RUN_USER@.
+[Unit]
+Description=LTMS - Long-Term Memory Server
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@RUN_USER@
+Group=@RUN_GROUP@
+WorkingDirectory=@APP_DIR@
+EnvironmentFile=/etc/ltms/ltms.env
+# One worker on purpose: rate limits live in process memory.
+# Listens on localhost only; Plesk's nginx is the only way in.
+ExecStart=@APP_DIR@/.venv/bin/uvicorn server.main:app --host 127.0.0.1 --port 8090 --workers 1 --proxy-headers --forwarded-allow-ips 127.0.0.1 --no-server-header --log-level info
+Restart=on-failure
+RestartSec=5
+
+# Hardening: the service can't write to disk or gain privileges.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

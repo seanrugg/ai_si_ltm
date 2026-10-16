@@ -7,6 +7,8 @@ their previous one; the server verifies, stores, and serves it back for recall.
 * **Design:** `Robot-Mesh-and-Long-Term-Memory-Plan.md`
 * **Implementation plan & status:** `LTMS_ARCHITECTURE_PLAN.md`
 * **Record contract (frozen v1):** `CONTRACT.md`, vectors in `ltms_contract/vectors.json`
+* **Deploying to Plesk:** `PLESK_DEPLOYMENT_PLAN.md`
+* **Rules for coding agents:** `AGENTS.md`
 
 ## Quick start (local)
 
@@ -50,7 +52,7 @@ LTMS_DB_PASSWORD=... LTMS_ADMIN_PASSWORD=... uvicorn server.main:app --port 8080
 LTMS_TEST_DATABASE_URL=postgresql+asyncpg://ltms@localhost/postgres pytest
 ```
 
-Run **one** worker in production (rate limits are in-process).
+Run **one** worker in production (rate limits are in-process). For the Plesk server, follow `PLESK_DEPLOYMENT_PLAN.md`.
 
 ## Writing a member
 

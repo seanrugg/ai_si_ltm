@@ -30,3 +30,6 @@ htmlcov/
 # Dashboard
 dashboard/node_modules/
 dashboard/dist/
+
+# Plesk deploy runtime
+tmp/

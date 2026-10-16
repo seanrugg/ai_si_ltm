@@ -66,6 +66,21 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  deploy-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck --severity=warning deploy/*.sh
+      - name: systemd units are valid
+        run: |
+          for t in deploy/*.template; do
+            sed -e "s#@APP_DIR@#$PWD#g" -e "s#@RUN_USER@#$(id -un)#g" -e "s#@RUN_GROUP@#$(id -gn)#g" "$t" > "/tmp/$(basename "${t%.template}")"
+          done
+          cp deploy/ltms-restart.service /tmp/
+          mkdir -p .venv/bin && ln -sf "$(command -v true)" .venv/bin/uvicorn
+          systemd-analyze verify /tmp/ltms.service /tmp/ltms-restart.path /tmp/ltms-restart.service
+
   contract-guard:
     # The record contract is frozen. A PR that touches it must carry the
     # "contract-change" label, which only the owner should add.

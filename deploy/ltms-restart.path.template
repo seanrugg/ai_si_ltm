@@ -1,0 +1,11 @@
+# Restarts LTMS whenever a Plesk Git deployment touches tmp/restart.txt,
+# so updates never need root.
+[Unit]
+Description=Restart LTMS after a Plesk Git deployment
+
+[Path]
+PathChanged=@APP_DIR@/tmp/restart.txt
+Unit=ltms-restart.service
+
+[Install]
+WantedBy=multi-user.target
