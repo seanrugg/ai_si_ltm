@@ -45,6 +45,10 @@ class ServerConfig(BaseSettings):
     # Scheduler (disabled in tests)
     enable_scheduler: bool = True
 
+    # Optional: serve the built dashboard (dashboard/dist) from this process.
+    # Production uses nginx for static files; this is for local/LAN use.
+    dashboard_dir: str = ""
+
     @property
     def resolved_database_url(self) -> str:
         if self.database_url:

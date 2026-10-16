@@ -50,6 +50,22 @@ jobs:
           psql -h localhost -U ltms -d postgres -c "CREATE DATABASE schemacheck"
           psql -h localhost -U ltms -d schemacheck -v ON_ERROR_STOP=1 -q -f config/schema.sql
 
+  dashboard:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
   contract-guard:
     # The record contract is frozen. A PR that touches it must carry the
     # "contract-change" label, which only the owner should add.
