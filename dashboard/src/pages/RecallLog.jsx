@@ -19,6 +19,7 @@ const ACTIONS = [
   "token_denied",
   "retention_purge",
 ];
+const PAGE = 50;
 
 // `detail` from the API is an object, never a string. Render it compactly as
 // "key: value" pairs joined by spaces. For a recall, endpoint plus its query
@@ -27,7 +28,7 @@ function detailText(entry) {
   if (entry.action === "recall") {
     const d = entry.detail || {};
     const parts = ["endpoint: " + d.endpoint];
-    const query = Object.fromEntries(Object.entries(d).filter(([k]) => k !== "endpoint"));
+    const query = Object.fromEntries(Object.entries(d).filter(([k]) => k !== "endpoint" && k !== "limit" && k !== "offset"));
     for (const [k, v] of Object.entries(query)) parts.push(`${k}: ${v}`);
     return parts.join(" ");
   }
@@ -125,7 +126,6 @@ export default function RecallLog() {
           {entries.map((e) => (
             <li key={`${e.id}-${e.ts}`} className="border-b border-ink-line last:border-b-0">
               <div
-                role="row"
                 aria-label={`Entry ${humanize(e.action)} by ${e.actor}`}
                 className="grid w-full grid-cols-[5.5rem_1fr_auto] items-baseline gap-x-3 px-3 py-2 text-left hover:bg-ink-hover
                            md:grid-cols-[7.5rem_1fr_auto_auto]"
