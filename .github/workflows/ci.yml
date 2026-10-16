@@ -73,11 +73,12 @@ jobs:
       - name: shellcheck
         run: shellcheck --severity=warning deploy/*.sh
       - name: systemd units are valid
-        # The unit uses ProtectHome=true, so the app must live outside /home,
-        # as it does on the server (/var/www/vhosts/...). Use a stand-in under /srv.
+        # Stand-in app folder outside /home (the unit sets ProtectHome=true, and on the
+        # server the app lives under /var/www/vhosts). /bin/true stands in for uvicorn;
+        # note `command -v true` would return the shell builtin, not a file.
         run: |
           APP=/srv/ltms-app
-          sudo mkdir -p "$APP/.venv/bin" && sudo ln -sf "$(command -v true)" "$APP/.venv/bin/uvicorn"
+          sudo mkdir -p "$APP/.venv/bin" && sudo ln -sf /bin/true "$APP/.venv/bin/uvicorn"
           for t in deploy/*.template; do
             sed -e "s#@APP_DIR@#$APP#g" -e "s#@RUN_USER@#$(id -un)#g" -e "s#@RUN_GROUP@#$(id -gn)#g" "$t" > "/tmp/$(basename "${t%.template}")"
           done
