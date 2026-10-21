@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, text
 
+from server.config import PayloadRule, load_config
 from server.models import Record
 from server.services import retention
 
@@ -17,7 +18,7 @@ def test_integrity_ok_then_purge_keeps_chain(mesh, admin, db_exec):
     rep = admin.get("/api/admin/integrity").json()["members"][0]
     assert rep["status"] == "ok" and rep["records"] == 3 and rep["payloads_purged"] == 0
 
-    purged = db_exec(lambda s: retention.purge_event_payloads(s, days=90))
+    purged = db_exec(lambda s: retention.purge_payloads(s, load_config().retention_payload_rules))
     assert purged == 1  # only the old perception; actions are kept forever
     rep = admin.get("/api/admin/integrity").json()["members"][0]
     assert rep["status"] == "ok" and rep["payloads_purged"] == 1
@@ -52,3 +53,31 @@ def test_expired_auth_cleanup(mesh, db_exec):
     z3.login()
     counts = db_exec(lambda s: retention.purge_expired_auth(s, now=datetime.now(timezone.utc) + timedelta(days=2)))
     assert counts["tokens"] == 1
+
+
+def test_payload_rules_by_type_tag_and_keep(mesh, db_exec):
+    z3 = mesh.member("z3-r0")
+    days_ago = lambda d: (datetime.now(timezone.utc) - timedelta(days=d)).isoformat()  # noqa: E731
+    z3.append("perception", ts=days_ago(40), summary="window", tags=["telemetry"], payload={"cm": [12, 80]})
+    z3.append("perception", ts=days_ago(40), summary="saw Vector", payload={"label": "vector"})
+    z3.append("action", ts=days_ago(40), summary="motor log", tags=["telemetry"], payload={"amps": [0.4]})
+    z3.append("perception", ts=days_ago(200), summary="first sight of Vector", tags=["keep"], payload={"x": 1})
+    z3.append("perception", ts=days_ago(200), summary="old, untagged", payload={"x": 2})
+    z3.append("action", ts=days_ago(200), summary="old action", payload={"d": 1})
+    z3.flush()
+
+    purged = db_exec(lambda s: retention.purge_payloads(s, load_config().retention_payload_rules))
+    gone = {r["summary"] for r in z3.records(limit=50) if r.get("payload_purged")}
+    # telemetry goes at 30 days whatever its type; other perceptions at 90; `keep` and actions never
+    assert gone == {"window", "motor log", "old, untagged"} and purged == 3
+
+
+def test_payload_rules_are_validated_and_overridable(monkeypatch):
+    import pytest
+    for bad in ({"days": 5}, {"type": "policy", "days": 5}, {"type": "musing", "days": 5},
+                {"tag": "keep", "days": 5}, {"tag": "telemetry", "days": 0}):
+        with pytest.raises(ValueError):
+            PayloadRule(**bad)
+    monkeypatch.setenv("LTMS_RETENTION_PAYLOAD_RULES", '[{"tag": "telemetry", "days": 14}]')
+    rules = load_config().retention_payload_rules
+    assert [(r.type, r.tag, r.days) for r in rules] == [(None, "telemetry", 14)]

@@ -26,7 +26,7 @@ def start_scheduler(app) -> AsyncIOScheduler:
     sched = AsyncIOScheduler(timezone="UTC")
     sched.add_job(run, "interval", minutes=5, args=("purge_expired_auth", retention.purge_expired_auth))
     sched.add_job(run, "cron", hour=7, minute=0,  # 03:00 US Eastern
-                  args=("purge_event_payloads", retention.purge_event_payloads, cfg.retention_events_days))
+                  args=("purge_payloads", retention.purge_payloads, cfg.retention_payload_rules))
     sched.add_job(run, "cron", day_of_week="mon", hour=8, minute=0,
                   args=("prune_audit_log", retention.prune_audit_log, cfg.retention_audit_days))
     sched.start()

@@ -2,12 +2,47 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 from urllib.parse import quote
 
 import yaml
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from ltms_contract import RECORD_TYPES
+
 DEFAULT_YAML = Path(__file__).resolve().parents[1] / "config" / "default.yaml"
+
+
+class PayloadRule(BaseModel):
+    """Purge the payloads of matching records once they are older than ``days``.
+
+    ``type`` and ``tag`` are both optional; when both are given a record must
+    match both. Headers are never purged, and records tagged ``keep`` are
+    never touched by any rule.
+    """
+    type: Optional[str] = None
+    tag: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    days: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def _check(self) -> "PayloadRule":
+        if self.type is None and self.tag is None:
+            raise ValueError("a retention rule needs a type, a tag, or both")
+        if self.type is not None and self.type not in RECORD_TYPES:
+            raise ValueError(f"unknown record type {self.type!r}")
+        if self.type in ("policy", "system"):
+            raise ValueError(f"{self.type} payloads are never purged")
+        if self.tag == "keep":
+            raise ValueError("'keep' marks records that are never purged; it can't be a rule")
+        return self
+
+
+DEFAULT_PAYLOAD_RULES = [
+    {"type": "event", "days": 90},
+    {"type": "perception", "days": 90},
+    {"tag": "telemetry", "days": 30},
+]
 
 
 class ServerConfig(BaseSettings):
@@ -39,7 +74,8 @@ class ServerConfig(BaseSettings):
     max_pending_enrollments: int = 20
 
     # Retention
-    retention_events_days: int = 90
+    retention_payload_rules: list[PayloadRule] = Field(
+        default_factory=lambda: [PayloadRule(**r) for r in DEFAULT_PAYLOAD_RULES])
     retention_audit_days: int = 365
 
     # Scheduler (disabled in tests)

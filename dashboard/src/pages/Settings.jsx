@@ -15,7 +15,7 @@ const LABELS = {
   cookie_secure: "Cookie requires HTTPS", future_skew_seconds: "Allowed clock skew (future)",
   ingest_rate: "Writes per member", recall_rate: "Reads per member", enroll_rate_per_ip: "Enrollment requests per IP",
   max_batch: "Records per batch", max_recall: "Records per read", max_pending_enrollments: "Pending enrollments",
-  retention_events_days: "Event/perception payloads kept", retention_audit_days: "Audit log kept",
+  retention_payload_rules: "Payloads purged after", retention_audit_days: "Audit log kept",
   enable_scheduler: "Scheduled jobs", dashboard_dir: "Dashboard files",
 };
 
@@ -26,7 +26,13 @@ function duration(seconds) {
   return `${seconds} s`;
 }
 
+function describeRule(rule) {
+  const what = [rule.type ?? "any type", rule.tag ? `tagged ${rule.tag}` : null].filter(Boolean).join(" ");
+  return `${what}: ${rule.days} days`;
+}
+
 export function formatValue(key, value) {
+  if (Array.isArray(value)) return value.length ? value.map(describeRule).join(" · ") : "Never";
   if (typeof value === "boolean") return value ? "On" : "Off";
   if (value === "" || value === null || value === undefined) return "Not set";
   if (typeof value === "number") {

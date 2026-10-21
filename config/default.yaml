@@ -25,5 +25,13 @@ enroll_rate_per_ip: 5           # enroll requests per IP per hour
 max_pending_enrollments: 20     # refuse new enroll requests beyond this
 
 # Retention (days)
-retention_events_days: 90       # payloads of event/perception records
+# Payload purge rules. Headers (summary, time, place, chain) are kept forever;
+# only the payload (raw details) of a matching record is deleted after `days`.
+# A rule matches on type, tag, or both. Records tagged `keep` are never purged.
+# Policy and system payloads can't be purged. Env override, as JSON:
+#   LTMS_RETENTION_PAYLOAD_RULES='[{"tag":"telemetry","days":14}]'
+retention_payload_rules:
+  - {type: event, days: 90}
+  - {type: perception, days: 90}
+  - {tag: telemetry, days: 30}       # sensor windows of any type
 retention_audit_days: 365

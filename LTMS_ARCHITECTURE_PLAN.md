@@ -191,7 +191,7 @@ Errors are always `{"error": {"code", "message"}}`.
 | Job | Schedule | Action |
 |---|---|---|
 | `purge_expired_auth` | every 5 min | Delete expired challenges; tokens/sessions a day after expiry |
-| `purge_event_payloads` | daily 07:00 UTC (03:00 ET) | Delete **payloads** of `event`/`perception` records older than 90 days; headers stay; audit entry written |
+| `purge_payloads` | daily 07:00 UTC (03:00 ET) | Delete **payloads** matched by `retention_payload_rules` (default: `event` and `perception` after 90 days, anything tagged `telemetry` after 30). Headers stay; records tagged `keep` are never purged; policy payloads can't be; one audit entry per rule |
 | `prune_audit_log` | Mondays 08:00 UTC | Delete audit rows older than 365 days |
 
 Rollups into signed `system` summary records need a server signing identity — planned with P7.
