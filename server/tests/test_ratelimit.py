@@ -83,11 +83,11 @@ def test_lru_eviction():
     lim.allow("a", now=now)
     # adding "d" must evict "b" (least recently used), not "a"
     lim.allow("d", now=now)
-    # "b" comes back with a fresh, full bucket
-    assert lim.allow("b", now=now) is True
-    for _ in range(4):
+    # "a" survived: it still has exactly 3 of its 5 tokens (an evicted key would have 5)
+    for _ in range(3):
+        assert lim.allow("a", now=now) is True
+    assert lim.allow("a", now=now) is False
+    # "b" was evicted: it comes back with a full bucket of 5 (it had 4 left)
+    for _ in range(5):
         assert lim.allow("b", now=now) is True
     assert lim.allow("b", now=now) is False
-    # "a" (recently used) is still present: adding "e" evicts "c", not "a"
-    lim.allow("e", now=now)
-    assert lim.allow("a", now=now) is True
