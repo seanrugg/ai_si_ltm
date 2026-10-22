@@ -17,6 +17,12 @@ else disagree, this file wins (except for direct instructions from Sean).
 2. **Only work on a GitHub issue labeled `agent-task`**, or on something Sean
    asked you for directly. If the issue is unclear, comment on it with your
    question and stop. Do not guess at scope.
+   **Picking work:** when Sean says "continue development" (or similar) without
+   naming a task, take the **lowest-numbered open issue labeled `agent-task`
+   that has no open PR**. Never start an issue labeled `needs-sean`: those are
+   parked or waiting on a design decision. If no `agent-task` issue is open,
+   stop and say so. The "Next" list in `manifest.md` is background, not a task list.
+   List the queue with: `gh issue list --label agent-task --state open`
 3. **Stay inside the files the issue names.** If you think another file must
    change, say so in the PR description and explain why. Do not refactor,
    rename or "tidy" code you were not asked to touch.
