@@ -88,20 +88,38 @@ SUMMARIES = [
     "Vector finished its shift at 18:00",
 ]
 
-# 10 natural-language questions, each with the summary text it should find.
-# Questions paraphrase the summaries (they don't repeat them word for word) and
-# each targets a unique fact, so there is exactly one right answer per question.
+# Natural-language questions, each with the summary text it should find and a
+# difficulty tag. Questions paraphrase the summaries (they don't repeat them
+# word for word) and each targets a unique fact, so there is exactly one right
+# answer per question.
+#
+# Easy questions share an obvious content word with their answer (a sanity
+# check). Hard questions share NO content word with their answer (names like
+# Z3-R0 / Vector and articles are exempt), and each has at least one distractor
+# in SUMMARIES that shares words with the question but is the wrong answer.
 QUESTIONS = [
-    ("when did Z3-R0 get to the charger in the morning?", "Z3-R0 docked at the charger at 06:00"),
-    ("what did Vector pick up in the kitchen?", "Vector picked up a red block in the kitchen"),
-    ("how fast did Z3-R0 cross the hallway?", "Z3-R0 crossed the hallway at 0.2 m/s"),
-    ("how low did Vector's battery get?", "Vector's battery dropped to 12 percent"),
-    ("what animal did Vector spot on the rug?", "Vector saw a cat on the rug"),
-    ("what did Z3-R0 refill?", "Z3-R0 refilled its water tank"),
-    ("what did Vector find under the sofa?", "Vector found a lost sock under the sofa"),
-    ("how full did Z3-R0's battery get?", "Z3-R0 charged to 100 percent"),
-    ("when did Vector play a chime?", "Vector played a chime at 07:00"),
-    ("what did Z3-R0 report as low?", "Z3-R0 reported low coolant"),
+    # easy
+    ("when did Z3-R0 get to the charger in the morning?", "Z3-R0 docked at the charger at 06:00", "easy"),
+    ("what did Vector pick up in the kitchen?", "Vector picked up a red block in the kitchen", "easy"),
+    ("how fast did Z3-R0 cross the hallway?", "Z3-R0 crossed the hallway at 0.2 m/s", "easy"),
+    ("how low did Vector's battery get?", "Vector's battery dropped to 12 percent", "easy"),
+    ("what animal did Vector spot on the rug?", "Vector saw a cat on the rug", "easy"),
+    ("what did Z3-R0 refill?", "Z3-R0 refilled its water tank", "easy"),
+    ("what did Vector find under the sofa?", "Vector found a lost sock under the sofa", "easy"),
+    ("how full did Z3-R0's battery get?", "Z3-R0 charged to 100 percent", "easy"),
+    ("when did Vector play a chime?", "Vector played a chime at 07:00", "easy"),
+    ("what did Z3-R0 report as low?", "Z3-R0 reported low coolant", "easy"),
+    # hard: no content word shared with the answer; a distractor shares words
+    ("how low did Vector's power get?", "Vector's battery dropped to 12 percent", "hard"),
+    ("what condensed on Vector's window?", "Vector's camera lens fogged up", "hard"),
+    ("what did Vector lose near the rug?", "Vector found a lost sock under the sofa", "hard"),
+    ("at the counter, what did Vector lift?", "Vector picked up a red block in the kitchen", "hard"),
+    ("at the gate, who did Z3-R0 meet?", "Z3-R0 met the operator at the dock", "hard"),
+    ("at noon, when did Vector clock out?", "Vector finished its shift at 18:00", "hard"),
+    ("in the kitchen, how full did Z3-R0's battery get?", "Z3-R0 charged to 100 percent", "hard"),
+    ("in the hallway, when did Vector play a sound?", "Vector played a chime at 07:00", "hard"),
+    ("what went well for Z3-R0 at the dock?", "Z3-R0 logged a successful docking", "hard"),
+    ("in the hallway, how many hazards did Z3-R0 spot?", "Z3-R0 logged three obstacle detections", "hard"),
 ]
 
 
@@ -177,9 +195,10 @@ def benchmark_model(model_name: str, threads: int) -> dict:
         [v for v in model.embed(_prepare_texts(model_name, list(SUMMARIES), is_query=False))]
     )
 
-    recall1_hits = 0
-    recall3_hits = 0
-    for question, expected_text in QUESTIONS:
+    recall1_hits = {"easy": 0, "hard": 0}
+    recall3_hits = {"easy": 0, "hard": 0}
+    counts = {"easy": 0, "hard": 0}
+    for question, expected_text, difficulty in QUESTIONS:
         expected_idx = SUMMARIES.index(expected_text)  # raises if text missing
         q_vec = np.vstack(
             [v for v in model.query_embed(_prepare_texts(model_name, [question], is_query=True))]
@@ -187,12 +206,15 @@ def benchmark_model(model_name: str, threads: int) -> dict:
         sims = cosine_similarity(q_vec, summary_vecs)
         top3 = np.argsort(sims)[::-1][:3]
         if expected_idx == top3[0]:
-            recall1_hits += 1
+            recall1_hits[difficulty] += 1
         if expected_idx in top3:
-            recall3_hits += 1
+            recall3_hits[difficulty] += 1
+        counts[difficulty] += 1
 
-    recall1 = recall1_hits / len(QUESTIONS)
-    recall3 = recall3_hits / len(QUESTIONS)
+    recall1_easy = recall1_hits["easy"] / counts["easy"]
+    recall3_easy = recall3_hits["easy"] / counts["easy"]
+    recall1_hard = recall1_hits["hard"] / counts["hard"]
+    recall3_hard = recall3_hits["hard"] / counts["hard"]
 
     # --- peak memory, measured after the retrieval step (all vectors resident) ---
     peak_rss = peak_rss_mb()
@@ -204,21 +226,28 @@ def benchmark_model(model_name: str, threads: int) -> dict:
         "embeddings_per_sec": round(embeddings_per_sec, 1),
         "peak_rss_mb": round(peak_rss, 1),
         "dimension": dimension,
-        "recall1": round(recall1, 2),
-        "recall3": round(recall3, 2),
+        "recall1_easy": round(recall1_easy, 2),
+        "recall3_easy": round(recall3_easy, 2),
+        "recall1_hard": round(recall1_hard, 2),
+        "recall3_hard": round(recall3_hard, 2),
     }
 
 
 def print_table(results: list[dict]) -> None:
     """Print results as a markdown table."""
     print()
-    print("| Model | Load (s) | Single (ms) | Emb/s | Peak RSS (MB) | Dim | R@1 | R@3 |")
-    print("|-------|----------|-------------|-------|---------------|-----|-----|-----|")
+    print(
+        "| Model | Load (s) | Single (ms) | Emb/s | Peak RSS (MB) | Dim | "
+        "R@1 easy | R@1 hard | R@3 easy | R@3 hard |"
+    )
+    print(
+        "|-------|----------|-------------|-------|---------------|-----|----------|----------|----------|----------|"
+    )
     for r in results:
         print(
             f"| {r['model']} | {r['load_seconds']} | {r['single_ms']} | "
             f"{r['embeddings_per_sec']} | {r['peak_rss_mb']} | {r['dimension']} | "
-            f"{r['recall1']} | {r['recall3']} |"
+            f"{r['recall1_easy']} | {r['recall1_hard']} | {r['recall3_easy']} | {r['recall3_hard']} |"
         )
     print()
 
@@ -274,7 +303,8 @@ def main(argv: list[str] | None = None) -> int:
             results.append(r)
             print(f"  done: load={r['load_seconds']}s, single={r['single_ms']}ms, "
                   f"{r['embeddings_per_sec']} emb/s, {r['peak_rss_mb']}MB, dim={r['dimension']}, "
-                  f"R@1={r['recall1']}, R@3={r['recall3']}")
+                  f"R@1 easy={r['recall1_easy']} hard={r['recall1_hard']}, "
+                  f"R@3 easy={r['recall3_easy']} hard={r['recall3_hard']}")
         except Exception as exc:
             detail = ""
             if isinstance(exc, subprocess.CalledProcessError) and exc.stderr:

@@ -16,42 +16,49 @@ the numbers.
 - fastembed version: 0.9.0
 - Summaries: 40 distinct LTMS record summaries (Z3-R0/Vector domain; kitchen,
   hallway, dock, battery, times, people, objects)
-- Questions: 10 paraphrased natural-language questions, each with exactly one
-  right answer; scored with recall@1 and recall@3 using cosine similarity
+- Questions: 20 natural-language questions, 10 easy and 10 hard, each with
+  exactly one right answer; scored with recall@1 and recall@3 using cosine
+  similarity, reported separately for the easy and hard sets
 
 ## Notes on method
 
-- Each model runs in its **own child process**, so peak RSS is per-model and not
-  cumulative. Peak memory is measured after the retrieval step (all summary
-  vectors resident), using `resource.getrusage` (bytes on macOS, KiB on Linux).
+- Each model runs in its **own child process** (`--one`), so peak RSS is
+  per-model and not cumulative. Peak memory is measured after the retrieval
+  step (all summary vectors resident), using `resource.getrusage` (bytes on
+  macOS, KiB on Linux).
 - Batch throughput is the median of 5 repeats (the first run is warm-up).
+- Easy questions share an obvious content word with their answer; hard questions
+  share **no** content word with their answer and each has a distractor summary
+  that shares words with the question but is the wrong answer.
 - `nomic-ai/nomic-embed-text-v1.5` requires `search_query: ` on questions and
   `search_document: ` on documents; fastembed 0.9 does not add these prefixes
-  automatically, so they are added for that model only (its own model description
-  marks the prefixes as "necessary"). BGE and MiniLM are embedded raw.
+  automatically, so they are added for that model only (its own model
+  description marks the prefixes as "necessary"). BGE and MiniLM are embedded
+  raw.
 
 ## Results
 
-| Model | Load (s) | Single (ms) | Emb/s | Peak RSS (MB) | Dim | R@1 | R@3 |
-|-------|----------|-------------|-------|---------------|-----|-----|-----|
-| BAAI/bge-small-en-v1.5 | 0.09 | 5.2 | 218.2 | 298.4 | 384 | 0.9 | 1.0 |
-| sentence-transformers/all-MiniLM-L6-v2 | 0.07 | 3.0 | 446.1 | 271.1 | 384 | 0.9 | 1.0 |
-| nomic-ai/nomic-embed-text-v1.5 | 0.33 | 27.9 | 39.2 | 881.7 | 768 | 0.9 | 1.0 |
+| Model | Load (s) | Single (ms) | Emb/s | Peak RSS (MB) | Dim | R@1 easy | R@1 hard | R@3 easy | R@3 hard |
+|-------|----------|-------------|-------|---------------|-----|----------|----------|----------|----------|
+| BAAI/bge-small-en-v1.5 | 0.09 | 5.2 | 218.2 | 297.8 | 384 | 0.9 | 0.4 | 1.0 | 0.7 |
+| sentence-transformers/all-MiniLM-L6-v2 | 0.07 | 2.5 | 442.4 | 270.8 | 384 | 0.9 | 0.2 | 1.0 | 0.6 |
+| nomic-ai/nomic-embed-text-v1.5 | 0.32 | 28.2 | 38.8 | 883.0 | 768 | 0.9 | 0.3 | 1.0 | 0.7 |
 
 ## Which model to pick
 
-All three models recall the memories equally well (R@1 = 0.9, R@3 = 1.0), so
-recall no longer differentiates them; the choice is speed and memory. With
-identical recall and the same 384-dimensional vectors, the cheapest model wins.
+**BAAI/bge-small-en-v1.5.** On the easy set all three models tie (R@1 = 0.9,
+R@3 = 1.0), but that set is a ceiling and doesn't discriminate. On the hard
+set, bge-small leads: R@1 = 0.4 and R@3 = 0.7, ahead of MiniLM (0.2 / 0.6) and
+nomic (0.3 / 0.7). This matches public retrieval benchmarks showing bge-small
+ahead of MiniLM on semantic-search tasks. The speed and memory gap versus
+MiniLM is small (5 ms vs 2.5 ms, 298 MB vs 271 MB) and does not compensate for
+the lower hard-set recall, so bge-small is the best choice for P8's semantic
+search.
 
-**sentence-transformers/all-MiniLM-L6-v2.** It is the fastest (3.0 ms per
-query, 446 emb/s) and the lightest (271.1 MB peak RSS) while tying the best
-recall — the best fit for a small, memory-constrained CPU-only VPS.
+**sentence-transformers/all-MiniLM-L6-v2** is the runner-up: fastest (2.5 ms,
+442 emb/s) and lightest (271 MB), but clearly behind bge-small on the hard
+recall set. Only pick it if latency is the overriding constraint.
 
-**BAAI/bge-small-en-v1.5** is a fine close second (5.2 ms, 298.4 MB, 384 dim)
-if the project wants to stay with the originally planned BGE model; it gives up
-some speed and memory for no recall gain.
-
-**nomic-ai/nomic-embed-text-v1.5** is not worth it: slowest (27.9 ms), by far
-the most memory (881.7 MB), larger 768-dimensional vectors, and no recall
-advantage over the other two.
+**nomic-ai/nomic-embed-text-v1.5** is not worth it: slowest (28 ms), by far
+the most memory (883 MB), larger 768-dimensional vectors, and no recall
+advantage over bge-small on either set.
