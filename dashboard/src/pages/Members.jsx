@@ -11,7 +11,7 @@ const PERMISSIONS = [
   { id: "recall:scoped", help: "Read only the types, members and places you list" },
   { id: "policy", help: "Write policy records (rules other members follow)" },
 ];
-const TYPES = ["communication", "decision", "action", "event", "perception", "lesson", "policy"];
+const TYPES = ["communication", "thought", "decision", "action", "event", "perception", "lesson", "policy"];
 
 const splitList = (s) => s.split(",").map((x) => x.trim()).filter(Boolean);
 

@@ -42,6 +42,7 @@ GENESIS_HASH = "0" * 64
 
 RECORD_TYPES = (
     "communication",
+    "thought",
     "decision",
     "action",
     "event",
