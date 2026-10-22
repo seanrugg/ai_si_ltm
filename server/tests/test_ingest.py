@@ -131,3 +131,13 @@ def test_records_table_is_append_only(mesh, db_exec):
     # Payloads, by design, can be deleted (retention).
     db_exec(delete(RecordPayload))
     assert db_exec(select(Record.summary)).scalar() == "original"
+
+
+def test_thought_records_are_accepted_and_filterable(mesh):
+    z3 = mesh.member("z3-r0")
+    z3.append("perception", summary="Vector beeped")
+    z3.append("thought", summary="Vector may want to play", refs={"because": "z3-r0:1"})
+    z3.append("decision", summary="Turn toward Vector", refs={"because": "z3-r0:2"})
+    z3.flush()
+    got = z3.records(type="thought")
+    assert [r["summary"] for r in got] == ["Vector may want to play"]

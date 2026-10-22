@@ -4,7 +4,7 @@ import { api } from "../api/client.js";
 import RecordRow from "../components/RecordRow.jsx";
 import { EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui.jsx";
 
-const TYPES = ["communication", "decision", "action", "event", "perception", "lesson", "policy", "system"];
+const TYPES = ["communication", "thought", "decision", "action", "event", "perception", "lesson", "policy", "system"];
 const OUTCOMES = ["success", "partial", "reflex_stop", "stuck", "abandoned", "failed"];
 const PAGE = 50;
 const FILTERS = ["agent", "type", "outcome", "place", "q"];

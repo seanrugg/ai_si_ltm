@@ -108,3 +108,17 @@ def test_published_vectors():
         clean = {k: v for k, v in rec.items() if not k.startswith("_")}
         assert header_bytes(header_of(clean)).decode() == rec["_expected_header_canonical"]
         verify_record(clean, pk)
+
+
+def test_thought_is_a_record_type():
+    """`thought` (added 2026-10-21) signs, verifies and is listed; unknown types still fail."""
+    from ltms_contract import RECORD_TYPES
+    assert "thought" in RECORD_TYPES
+    key = generate_key()
+    rec = build_record(key, agent="z3-r0", seq=1, prev_hash=GENESIS_HASH, type="thought",
+                       ts="2026-10-21T20:00:00Z", summary="Vector may be asleep", payload={"p": 0.6})
+    assert verify_record(rec, bytes(key.verify_key)).header["type"] == "thought"
+    with pytest.raises(ContractError) as e:
+        build_record(key, agent="z3-r0", seq=1, prev_hash=GENESIS_HASH, type="musing",
+                     ts="2026-10-21T20:00:00Z", payload={})
+    assert e.value.code == "bad_type"

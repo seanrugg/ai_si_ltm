@@ -130,7 +130,7 @@ Every record, from any member, uses one envelope. The **header** (everything exc
 
 | Field | Rule |
 | --- | --- |
-| `type` | `communication`, `decision`, `action`, `event`, `perception`, `lesson`, `policy`, `system` |
+| `type` | `communication`, `thought`, `decision`, `action`, `event`, `perception`, `lesson`, `policy`, `system` |
 | `seq` | Per member, increases by one, never reused |
 | `refs` | Links to other records as `agent:seq`; a lesson links to every record it summarizes; a correction links to the record it corrects |
 | `outcome` (actions) | `success`, `partial`, `reflex_stop`, `stuck`, `abandoned`, `failed`. Lives in the header so it survives payload purges and can be indexed. An action logged before it finishes gets a follow-up record carrying the outcome |

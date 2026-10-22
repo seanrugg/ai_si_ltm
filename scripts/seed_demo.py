@@ -76,6 +76,8 @@ def main() -> None:
         vec.flush()
         z3.append("communication", ts=ts(when - 1), summary="Heard Vector", peers=["vector"],
                   refs={"input": f"vector:{v['seq']}"}, place="living-room", payload={"confidence": 0.91})
+        z3.append("thought", ts=ts(when - 1.5), summary="Vector sounds close; slow down on the rug",
+                  peers=["vector"], place="living-room", payload={"basis": "audio direction, rug friction"})
         scenario(z3, 4, rng)
         z3.flush()
     z3.append("lesson", ts=ts(5), summary="Approach Vector at 0.1 m/s on the rug", place="living-room",

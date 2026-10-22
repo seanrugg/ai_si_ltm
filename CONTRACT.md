@@ -26,7 +26,7 @@ A record is a JSON object in three parts:
 | `agent` | yes | member name, `^[a-z0-9][a-z0-9._-]{0,63}$`; must equal the enrolled name |
 | `seq` | yes | integer ≥ 1; exactly previous + 1 |
 | `ts` | yes | RFC 3339 string **with offset** (`Z` or `±hh:mm`), fractional seconds optional. Hashed as the exact string sent |
-| `type` | yes | `communication` `decision` `action` `event` `perception` `lesson` `policy` `system` |
+| `type` | yes | `communication` `thought` `decision` `action` `event` `perception` `lesson` `policy` `system` (see 1.1) |
 | `prev_hash` | yes | previous record's `hash`; seq 1 uses 64 zeros |
 | `payload_hash` | yes | `SHA-256(JCS(payload))`, lowercase hex |
 | `summary` | no | string ≤ 500 |
@@ -41,6 +41,32 @@ No other header fields are allowed — put anything else in `payload`. An absent
 optional field and a field set to `null` hash differently; omit fields you don't use.
 
 Payload: any JSON object, canonical size ≤ 64 KiB.
+
+### 1.1 Record types
+
+The **author** chooses `type` when it signs the record. Relays and the server
+never assign or change it (any change breaks the signature); the server only
+checks that the type is listed here and that the member may write it.
+
+| Type | Use it for | Example summary |
+|---|---|---|
+| `perception` | something sensed, outside or inside the member | "Obstacle 12 cm ahead", "Battery 71%" |
+| `thought` | reasoning that commits to nothing: plans, predictions, questions, interpretations | "Vector may be asleep; check the dock first" |
+| `decision` | a commitment to act, or not to act | "Slow to 0.1 m/s near Vector" |
+| `action` | something the member did; set `outcome` when known | "Drove forward 0.5 m" |
+| `communication` | a message sent or received between members or people | "Hello Z3" |
+| `event` | something that happened to the member, not sensed or chosen | "Docked", "Rebooted" |
+| `lesson` | a conclusion drawn from experience, meant to change future behavior | "Approach Vector slowly on the rug" |
+| `policy` | a rule from an operator (needs the `policy` permission) | "No driving after 9 pm" |
+| `system` | reserved for the server | — |
+
+Conventions (tags, not types): sensing inside the member's own body (battery,
+motor heat, mood) is a `perception` tagged `internal`. Periodic sensor windows
+are `perception` records tagged `telemetry`, with a short range summary in
+`summary` and the samples in `payload`. Link cause and effect with `refs`, e.g.
+a decision's `refs: {"because": "z3-r0:41"}`.
+
+`thought` was added to v1 on 2026-10-21, before any production record was signed.
 
 ## 2. Canonical JSON (RFC 8785 / JCS)
 
