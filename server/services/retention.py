@@ -9,25 +9,42 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models import AdminSession, AuditLog, AuthChallenge, Record, RecordPayload, Token
 
-PURGEABLE_TYPES = ("event", "perception")
+KEEP_TAG = "keep"  # records with this tag are never purged
 
 
-async def purge_event_payloads(session: AsyncSession, days: int, now: datetime | None = None) -> int:
+async def purge_payloads(session: AsyncSession, rules, now: datetime | None = None) -> int:
+    """Delete the payloads of records matched by each rule (see ``PayloadRule``).
+
+    Each rule runs on its own, so a record matched by several rules goes at the
+    shortest age. Returns the number of payloads deleted; each rule that
+    deleted something is recorded in the audit log.
+    """
+    from server.services.recall import _json_list_contains  # shared JSON-array test
+
     now = now or datetime.now(timezone.utc)
-    cutoff = now - timedelta(days=days)
-    ids = select(Record.id).where(Record.type.in_(PURGEABLE_TYPES), Record.ts < cutoff)
-    result = await session.execute(delete(RecordPayload).where(RecordPayload.record_id.in_(ids)))
-    count = result.rowcount or 0
-    if count:
-        session.add(AuditLog(actor="system", action="retention_purge",
-                             detail={"what": "payloads", "types": list(PURGEABLE_TYPES),
-                                     "older_than": cutoff.isoformat(), "count": count}))
-    return count
+    total = 0
+    for rule in rules:
+        cutoff = now - timedelta(days=rule.days)
+        # tags may be SQL NULL; on Postgres "NOT (NULL @> ...)" is NULL, so test it explicitly
+        not_kept = or_(Record.tags.is_(None), ~_json_list_contains(session, Record.tags, KEEP_TAG))
+        ids = select(Record.id).where(Record.ts < cutoff, not_kept)
+        if rule.type is not None:
+            ids = ids.where(Record.type == rule.type)
+        if rule.tag is not None:
+            ids = ids.where(_json_list_contains(session, Record.tags, rule.tag))
+        result = await session.execute(delete(RecordPayload).where(RecordPayload.record_id.in_(ids)))
+        count = result.rowcount or 0
+        if count:
+            session.add(AuditLog(actor="system", action="retention_purge",
+                                 detail={"what": "payloads", "type": rule.type, "tag": rule.tag,
+                                         "older_than": cutoff.isoformat(), "count": count}))
+        total += count
+    return total
 
 
 async def purge_expired_auth(session: AsyncSession, now: datetime | None = None) -> dict:
