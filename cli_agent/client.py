@@ -107,6 +107,20 @@ class LTMSClient:
                 raise LTMSError(422, bad["code"], f"seq {bad['seq']}: {bad['message']}")
         return responses
 
+    # ------------------------------------------------------------------ relay
+    def relay(self, records: list[dict]) -> dict:
+        """Submit records signed by *other* members of this hub's swarm, unchanged.
+
+        Needs the hub role (and so the ``relay`` permission). The response's
+        ``heads`` gives each author's chain head after the batch; like a member's
+        own flush, it stops at the first rejection (see ``results``).
+        """
+        return self._call("POST", "/api/records", json={"records": records})
+
+    def head_of(self, agent: str) -> dict:
+        """Another member's chain head (hub of that member's swarm only)."""
+        return self._call("GET", "/api/records/head", params={"agent": agent})
+
     # ------------------------------------------------------------------ read
     def records(self, **params) -> list[dict]:
         if "from_" in params:

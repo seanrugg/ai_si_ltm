@@ -4,11 +4,12 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query, Request
+from sqlalchemy import select
 
 from server.api.deps import MemberAuth, current_member, request_id, require, transaction
 from server.api.schemas import RecordBatch
 from server.models import AuditLog, Member
-from server.services import recall
+from server.services import recall, swarms
 from server.services.errors import ServiceError
 from server.services.ingest import ingest_batch
 
@@ -35,10 +36,22 @@ async def post_records(
 
 
 @router.get("/records/head")
-async def chain_head(request: Request, auth: MemberAuth = Depends(current_member)) -> dict:
-    """The member's own chain head, so it can resume after a restart."""
+async def chain_head(request: Request, agent: str | None = None,
+                     auth: MemberAuth = Depends(current_member)) -> dict:
+    """A chain head, so a member can resume after a restart.
+
+    Without ``agent``: the caller's own head. With ``agent``: another member's
+    head, only for the hub of that member's swarm (a relay resyncing its queue).
+    """
     async with transaction(request) as session:
         member = await session.get(Member, auth.member_id)
+        if agent is not None and agent != member.name:
+            relay_swarm = await swarms.hub_swarm_id(session, member)
+            other = await session.scalar(select(Member).where(Member.name == agent))
+            row = await swarms.open_membership(session, other.id) if other is not None else None
+            if relay_swarm is None or row is None or row.swarm_id != relay_swarm:
+                raise ServiceError(403, "not_in_swarm", f"{agent!r} is not a member of this relay's swarm")
+            member = other
         return {"name": member.name, "last_ack_seq": member.last_ack_seq, "last_hash": member.last_hash}
 
 
