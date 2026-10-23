@@ -45,6 +45,21 @@ CREATE TABLE members (
 	UNIQUE (name)
 );
 
+CREATE TABLE swarms (
+	id VARCHAR(64) NOT NULL, 
+	name VARCHAR(64) NOT NULL, 
+	description TEXT, 
+	public_key BYTEA NOT NULL, 
+	status VARCHAR(16) NOT NULL, 
+	is_home BOOLEAN NOT NULL, 
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	revoked_at TIMESTAMP WITH TIME ZONE, 
+	PRIMARY KEY (id), 
+	CONSTRAINT ck_swarms_status CHECK (status IN ('active', 'revoked')), 
+	UNIQUE (name), 
+	UNIQUE (public_key)
+);
+
 CREATE TABLE admin_sessions (
 	session_hash BYTEA NOT NULL, 
 	admin_id UUID NOT NULL, 
@@ -126,6 +141,26 @@ CREATE TRIGGER trg_records_no_mutation BEFORE UPDATE OR DELETE ON records FOR EA
 
 CREATE TRIGGER trg_records_no_truncate BEFORE TRUNCATE ON records FOR EACH STATEMENT EXECUTE FUNCTION records_no_mutation();
 
+CREATE TABLE swarm_members (
+	id BIGSERIAL NOT NULL, 
+	swarm_id VARCHAR(64) NOT NULL, 
+	member_id UUID NOT NULL, 
+	role VARCHAR(16) NOT NULL, 
+	joined_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	left_at TIMESTAMP WITH TIME ZONE, 
+	appointment JSONB, 
+	PRIMARY KEY (id), 
+	CONSTRAINT ck_swarm_members_role CHECK (role IN ('hub', 'member', 'observer')), 
+	FOREIGN KEY(swarm_id) REFERENCES swarms (id), 
+	FOREIGN KEY(member_id) REFERENCES members (id)
+);
+
+CREATE INDEX idx_swarm_members_swarm ON swarm_members (swarm_id);
+
+CREATE UNIQUE INDEX uq_swarm_members_hub ON swarm_members (swarm_id) WHERE role = 'hub' AND left_at IS NULL;
+
+CREATE UNIQUE INDEX uq_swarm_members_open ON swarm_members (member_id) WHERE left_at IS NULL;
+
 CREATE TABLE tokens (
 	id UUID NOT NULL, 
 	member_id UUID NOT NULL, 
@@ -150,5 +185,20 @@ CREATE TABLE record_payloads (
 	PRIMARY KEY (record_id), 
 	FOREIGN KEY(record_id) REFERENCES records (id)
 );
+
+CREATE TABLE record_provenance (
+	record_id BIGINT NOT NULL, 
+	swarm_id VARCHAR(64), 
+	relay_member_id UUID, 
+	received_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	PRIMARY KEY (record_id), 
+	FOREIGN KEY(record_id) REFERENCES records (id), 
+	FOREIGN KEY(swarm_id) REFERENCES swarms (id), 
+	FOREIGN KEY(relay_member_id) REFERENCES members (id)
+);
+
+CREATE INDEX idx_record_provenance_relay ON record_provenance (relay_member_id);
+
+CREATE INDEX idx_record_provenance_swarm ON record_provenance (swarm_id);
 
 COMMIT;

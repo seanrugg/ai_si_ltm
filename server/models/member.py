@@ -11,7 +11,9 @@ from server.models.base import Base, JSONType, UTCDateTime, utcnow
 
 MEMBER_KINDS = ("robot", "agent", "assistant", "relay")
 MEMBER_STATUSES = ("pending", "active", "revoked", "rejected")
-PERMISSIONS = ("contribute", "recall", "recall:scoped", "policy")
+# "relay": submit records written by other members of the same swarm, unchanged.
+# Granted together with the swarm's hub role (see server/services/swarms.py).
+PERMISSIONS = ("contribute", "recall", "recall:scoped", "policy", "relay")
 
 
 class Member(Base):
