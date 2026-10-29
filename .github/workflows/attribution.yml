@@ -1,0 +1,33 @@
+name: Attribution
+
+# Every PR must say which harness, model and machine did the work (AGENTS.md rule 9),
+# so squash commits on main record it. Re-runs when the description is edited.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  attribution:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the attribution block
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+          body = os.environ.get("BODY") or ""
+          missing = []
+          for key in ("Agent-Harness", "Agent-Model", "Agent-Host"):
+              values = [v.strip() for v in re.findall(rf"^{key}:[ \t]*(.*)$", body, re.MULTILINE)]
+              if not any(v and not v.startswith("<") for v in values):
+                  missing.append(key)
+          if missing:
+              print("Missing or placeholder: " + ", ".join(missing))
+              print("Add the attribution block from AGENTS.md rule 9 to the PR description.")
+              sys.exit(1)
+          print("Attribution OK")
+          PY
