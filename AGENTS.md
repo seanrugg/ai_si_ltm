@@ -12,8 +12,10 @@ else disagree, this file wins (except for direct instructions from Sean).
 ## 1. Ground rules
 
 1. **One task, one branch, one pull request.** Never commit to `main`; it is
-   protected. Branch name: `agent/<your-name>/<issue-number>-<short-slug>`,
-   for example `agent/qwen/12-cli-dry-run`.
+   protected. Branch name: `agent/<model-slug>/<issue-number>-<short-slug>`,
+   for example `agent/nemotron-3-nano-4b/12-cli-dry-run` or
+   `agent/claude-opus-5-5/12-cli-dry-run`. `<model-slug>` is the **model**, not
+   the tool: lowercase, with `:` `.` and spaces turned into `-`.
 2. **Only work on a GitHub issue labeled `agent-task`**, or on something Sean
    asked you for directly. If the issue is unclear, comment on it with your
    question and stop. Do not guess at scope.
@@ -37,6 +39,11 @@ else disagree, this file wins (except for direct instructions from Sean).
 7. **Do not merge your own PR.** Sean merges.
 8. **If you get stuck, stop and report.** A clear "I could not do X because Y"
    beats a large speculative change.
+9. **Say which model did the work.** Every PR description ends with the
+   attribution block (see section 5). CI fails a PR without it. Find your model
+   with `ollama ps` or your tool's settings; **never guess**. If you can't tell,
+   write `unknown` and say why. If the model changed partway through, add one
+   `Agent-Model` line per model.
 
 ## 2. Do-not-touch list
 
@@ -107,6 +114,10 @@ Closes #<issue>
 
 ## Anything I was unsure about
 - <or "none">
+
+Agent-Harness: <qwen-code | claude-code | ...>
+Agent-Model: <exact model tag; add the quant for local models, e.g. nemotron-3-nano:4b (ollama q4_K_M)>
+Agent-Host: <mac-studio-a | mac-studio-b | cloud | ...>
 ```
 
 Before opening the PR:
@@ -117,6 +128,7 @@ Before opening the PR:
 - [ ] No secrets, key files, `.db` or `.venv` in `git status`
 - [ ] If you changed `server/models/`, you ran `python -m scripts.dump_schema` and committed `config/schema.sql`
 - [ ] New behavior has a test
+- [ ] The attribution block is filled in with your real model, not a placeholder
 
 ## 6. Vocabulary
 
