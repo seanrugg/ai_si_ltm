@@ -108,7 +108,11 @@ Nonces are single-use and expire after 60 s. Tokens last 5 min; send them as
 
 In order, for each record in a batch:
 
-1. `agent` equals the token's member
+1. `agent` equals the token's member — **or**, when the token's member is the
+   appointed hub of an active swarm (it holds `relay`), `agent` is an active
+   member of that swarm with `contribute`. A relayed record is then checked in
+   steps 2–6 against its **author's** key and chain, exactly as if the author
+   had sent it; the relay can carry records but not create or alter them
 2. structure (§1), then `payload_hash`, then `hash`, then `sig` with the member's key
 3. `type` is allowed: `system` never; `policy` only with the `policy` permission
 4. `ts` is not more than 5 min in the future (old timestamps are fine — robots buffer offline)
@@ -123,7 +127,13 @@ Max 100 records per batch.
 
 Rejection codes: `wrong_agent` `bad_record` `bad_header` `bad_version` `bad_type`
 `bad_ts` `genesis` `bad_payload` `payload_too_large` `payload_hash` `hash` `sig`
-`type_forbidden` `future_ts` `conflict` `gap` `chain`.
+`type_forbidden` `future_ts` `conflict` `gap` `chain`; for relayed records also
+`not_in_swarm` (author isn't in the relay's swarm), `not_active` and `forbidden`
+(author revoked, or lacks `contribute`).
+
+Each result line names its `agent`, and the response's `heads` gives every
+touched author's `last_ack_seq` / `last_hash`. Relays, swarms and provenance
+don't change the record format; see `docs/swarms.md`.
 
 ## 5. What a member must persist
 

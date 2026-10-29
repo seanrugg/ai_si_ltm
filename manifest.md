@@ -22,7 +22,7 @@ Done and merged: guardrails (CI, contract guard, `AGENTS.md`, `server.manage`), 
 1. **Deploy (P6)**: follow `PLESK_DEPLOYMENT_PLAN.md`. Plesk Git pulls `main`; `deploy/plesk-deploy.sh` builds and restarts; one-time `deploy/root-setup.sh` as root.
 2. **P4 dashboard pages**: done (#4 by Ornith, #5–#9 in the P4 PR). Settings editing from the dashboard still needs a decision.
 3. **Database migrations**: parked (#12, `needs-sean`). The plan is to grow by adding tables, so none are needed until the first real `ALTER`. Agents: don't start this.
-4. **P5**: Z3-R0 relay, together with swarms and provenance (#15, `needs-sean`) on the Pi Zero using `cli_agent/client.py` with a persistent outbox.
+4. **P5**: swarms, the hub relay path and provenance are built (#15; see `docs/swarms.md`). Still to come: the Jetson replicator (MQTT → LTMS), swarm admin endpoints and dashboard views (agent tasks), and Z3-R0's Pi Zero relay. on the Pi Zero using `cli_agent/client.py` with a persistent outbox.
 
 Agent work queue: open issues labeled `agent-task` (see `AGENTS.md`, rule 2).
 

@@ -53,7 +53,7 @@ else disagree, this file wins (except for direct instructions from Sean).
 | `config/schema.sql` | Generated from `server/models/`. | Change the models, then run `python -m scripts.dump_schema`. |
 | `.github/workflows/` | CI is the safety net. | Ask in the issue. |
 | `deploy/`, `PLESK_DEPLOYMENT_PLAN.md` | Runs on the production server as root or as the site user. | Only when an issue explicitly says so. |
-| `server/services/ingest.py`, `server/services/integrity.py` | Chain verification. | Only when an issue explicitly says so. |
+| `server/services/ingest.py`, `server/services/integrity.py`, `server/services/swarms.py`, `scripts/swarm_key.py` | Chain verification, and who may relay for whom. | Only when an issue explicitly says so. |
 | `AGENTS.md` | These rules. | Suggest changes in your PR description. |
 
 ## 3. Setup and commands
@@ -135,4 +135,5 @@ Before opening the PR:
 - **member**: a robot or agent with an Ed25519 key, enrolled by the admin.
 - **record**: one signed memory entry. It has a **header** (permanent), a **payload** (may be purged later) and a **seal** (`hash`, `sig`).
 - **chain**: each member's records link through `prev_hash`. A gap or edit is visible on the Integrity page.
+- **swarm / hub / relay**: a group of members; its hub (the Jetson) may submit members' records unchanged. See `docs/swarms.md`.
 - **context pack**: what a robot asks for before acting: recent outcomes, communications, lessons and policies.

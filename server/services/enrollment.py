@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ltms_contract.record import NAME_RE
 from server.models import AuditLog, Member, Token
 from server.models.member import MEMBER_KINDS, PERMISSIONS
+from server.services import swarms
 from server.services.errors import ServiceError
 
 
@@ -23,7 +24,9 @@ def _validate_permissions(perms: list[str]) -> list[str]:
     bad = [p for p in perms if p not in PERMISSIONS]
     if bad:
         raise ServiceError(422, "bad_permissions", f"unknown permissions: {', '.join(bad)}")
-    return sorted(set(perms))
+    # "relay" comes only with a signed hub appointment (server/services/swarms.py),
+    # never from an enrollment request or a permissions edit.
+    return sorted(set(perms) - {"relay"})
 
 
 def _validate_scope(scope: dict | None) -> dict | None:
@@ -147,6 +150,9 @@ async def set_permissions(session: AsyncSession, member_id, *, admin: str,
         raise ServiceError(409, "bad_state", f"member is {member.status}")
     before = {"permissions": member.permissions, "scope": member.scope}
     permissions, scope = _validate_permissions(permissions), _validate_scope(scope)
+    row = await swarms.open_membership(session, member.id)
+    if row is not None and row.role == "hub":
+        permissions = sorted([*permissions, "relay"])  # kept while it is the appointed hub
     member.permissions = permissions
     member.scope = scope
     # Outstanding tokens carry the old permission snapshot; force a fresh login.
