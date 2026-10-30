@@ -23,9 +23,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "aiosqlite>=0.20"]
+mcp = ["mcp>=2,<3"]  # ltms_mcp uses MCPServer, added in mcp 2.0
 
 [tool.setuptools.packages.find]
-include = ["ltms_contract*", "server*", "cli_agent*"]
+include = ["ltms_contract*", "server*", "cli_agent*", "ltms_mcp*"]
 exclude = ["server.tests*"]
 
 [tool.setuptools.package-data]
