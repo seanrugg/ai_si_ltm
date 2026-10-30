@@ -20,7 +20,7 @@ def _setup(mesh, db_exec, home):
     free.append("event", summary="free")
     free.flush()
     watcher = mesh.member("watcher", permissions=("recall:scoped",),
-                          scope={"swarms": ["echo-base"]})
+                          scope={"types": ["event"], "swarms": ["echo-base"]})
     return hub, z3, free, watcher
 
 
@@ -46,7 +46,7 @@ def test_moving_a_member_keeps_old_provenance_visible(mesh, db_exec, home):
 def test_empty_swarm_list_sees_nothing(mesh, db_exec, home):
     _setup(mesh, db_exec, home)
     blind = mesh.member("blind-swarm", permissions=("recall:scoped",),
-                        scope={"swarms": []})
+                        scope={"types": ["event"], "swarms": []})
     assert blind.records() == []
 
 
@@ -65,3 +65,13 @@ def test_full_recall_still_sees_everything(mesh, db_exec, home):
     seen = full.records(limit=200)
     assert len(seen) == 3
     assert {r["agent"] for r in seen} == {"z3-r0", "free-agent"}
+
+
+def test_swarms_without_types_sees_nothing(mesh, db_exec, home):
+    """Deny by default: types is a required allowlist, even with a swarm scope."""
+    hub, z3 = mesh.member("jetson-hub", kind="relay"), mesh.member("z3-r0")
+    home.add(z3)
+    home.appoint(hub)
+    hub.relay(sign(z3, 2))
+    no_types = mesh.member("no-types", permissions=("recall:scoped",), scope={"swarms": ["echo-base"]})
+    assert no_types.records() == []

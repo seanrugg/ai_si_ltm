@@ -38,14 +38,10 @@ def effective_scope(permissions: list[str], scope: dict | None) -> Scope:
     if "recall" in permissions:
         return Scope()
     if "recall:scoped" in permissions:
-        if not scope:
-            # No scope granted at all: nothing is visible.
-            return Scope(types=[], agents=None, places=None, swarms=None)
-        s = scope
-        # A granted scope constrains only the fields it lists; an absent field is
-        # unrestricted (None). "types" used to default to [], which made a
-        # swarms-only (or agents-only) scope see nothing.
-        return Scope(types=s.get("types"), agents=s.get("agents"), places=s.get("places"),
+        # Deny by default: "types" is a required allowlist, so a scope that lists
+        # no types (or no scope at all) sees nothing. agents/places/swarms narrow it further.
+        s = scope or {}
+        return Scope(types=s.get("types", []), agents=s.get("agents"), places=s.get("places"),
                      swarms=s.get("swarms"))
     raise RecallDenied("member lacks a recall permission")
 
