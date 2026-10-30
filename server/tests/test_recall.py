@@ -81,6 +81,43 @@ def test_scoped_member_sees_only_its_scope(mesh, populated):
     assert blind.records() == []
 
 
+def test_type_accepts_several(populated):
+    z3, _ = populated
+    z3.append("thought", summary="Maybe Vector is asleep"); z3.flush()
+    types = {r["type"] for r in z3.records(type="thought,action")}
+    assert types == {"thought", "action"}
+    # a single value still works
+    assert {r["type"] for r in z3.records(type="action")} == {"action"}
+
+
+def test_bad_type_is_422(populated):
+    z3, _ = populated
+    with pytest.raises(LTMSError) as exc:
+        z3.records(type="not-a-type")
+    assert exc.value.status == 422 and exc.value.code == "bad_type"
+
+
+def test_exclude_tag_hides_tagged_keeps_untagged(populated):
+    z3, _ = populated
+    z3.append("perception", summary="telemetry", tags=["telemetry"])
+    z3.append("perception", summary="plain", place="hallway")
+    z3.flush()
+    kept = z3.records(exclude_tag="telemetry")
+    assert "telemetry" not in {r["summary"] for r in kept}
+    assert "plain" in {r["summary"] for r in kept}
+    # records without any tags are kept
+    assert all("telemetry" not in (r.get("tags") or []) for r in kept)
+
+
+def test_scoped_member_multi_type_stays_in_scope(mesh):
+    guest = mesh.member("cloud-agent", kind="agent", permissions=["contribute", "recall:scoped"],
+                        scope={"types": ["lesson", "policy"]})
+    guest.append("lesson", summary="l"); guest.append("lesson", summary="l2"); guest.append("action", summary="a")
+    guest.flush()
+    got = {r["type"] for r in guest.records(type="lesson,action")}
+    assert got == {"lesson"}
+
+
 def test_no_recall_permission(mesh):
     writer = mesh.member("writer", permissions=["contribute"])
     with pytest.raises(LTMSError) as exc:

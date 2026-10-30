@@ -11,7 +11,7 @@ from sqlalchemy import func, or_, select
 
 from server.api.deps import ADMIN_COOKIE, AdminAuth, client_ip, current_admin, transaction
 from server.api.schemas import AdminLogin, ApproveRequest, PermissionsRequest, ReasonRequest
-from server.models import AuditLog, Member, Record, RecordProvenance, Swarm
+from server.models import AuditLog, Member, Record, RecordPayload, RecordProvenance, Swarm
 from server.services import auth as auth_service
 from server.services import enrollment, integrity, recall, swarms
 from server.services.errors import ServiceError
@@ -125,14 +125,53 @@ async def timeline(
     since: datetime | None = Query(None, alias="from"),
     until: datetime | None = Query(None, alias="to"),
     q: str | None = None,
+    exclude_tag: str | None = None,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ) -> dict:
-    f = recall.RecordFilter(type=type, agent=agent, place=place, peer=peer, tag=tag, outcome=outcome,
-                            since=since, until=until, q=q, limit=limit, offset=offset)
+    f = recall.RecordFilter(type=type, agent=agent, place=place, peer=peer, tag=tag, exclude_tag=exclude_tag,
+                            outcome=outcome, since=since, until=until, q=q, limit=limit, offset=offset)
     async with transaction(request) as session:
         records = await recall.query_records(session, f, recall.Scope())
         return {"records": records, "count": len(records), "limit": limit, "offset": offset}
+
+
+@router.get("/admin/volume")
+async def volume(
+    request: Request, days: int = Query(14, ge=1, le=90), admin: AdminAuth = ADMIN,
+) -> dict:
+    """Records and payload bytes per day, member and type over the last `days` days.
+
+    Grouping happens in SQL. `payload_bytes` sums RecordPayload.size, so a purged
+    payload counts as 0 bytes.
+    """
+    async with transaction(request) as session:
+        if session.bind.dialect.name == "postgresql":
+            day = func.to_char(func.date_trunc("day", Record.ts), "YYYY-MM-DD")
+        else:
+            day = func.date(Record.ts)
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+        stmt = (
+            select(
+                day.label("day"),
+                Record.agent,
+                Record.type,
+                func.count(Record.id).label("records"),
+                func.coalesce(func.sum(RecordPayload.size), 0).label("payload_bytes"),
+            )
+            .outerjoin(RecordPayload, RecordPayload.record_id == Record.id)
+            .where(Record.ts >= since)
+            .group_by(day, Record.agent, Record.type)
+            .order_by(day.desc(), Record.agent, Record.type)
+        )
+        rows = (await session.execute(stmt)).all()
+        return {
+            "days": days,
+            "rows": [
+                {"day": r.day, "agent": r.agent, "type": r.type, "records": r.records, "payload_bytes": r.payload_bytes}
+                for r in rows
+            ],
+        }
 
 
 @router.get("/admin/records/{agent}/{seq}")

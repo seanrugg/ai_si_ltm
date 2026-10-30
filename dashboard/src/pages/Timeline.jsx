@@ -20,12 +20,21 @@ export default function Timeline() {
   const [more, setMore] = useState(false);
   const [auto, setAuto] = useState(false);
   const [draft, setDraft] = useState(filters);
+  // off by default: telemetry is hidden unless the box is checked
+  const [showTelemetry, setShowTelemetry] = useState(false);
 
   async function load(offset = 0) {
     setLoading(true);
     setError(null);
     try {
-      const res = await api("/admin/timeline", { params: { ...filters, limit: PAGE, offset } });
+      const res = await api("/admin/timeline", {
+        params: {
+          ...filters,
+          limit: PAGE,
+          offset,
+          ...(showTelemetry ? {} : { exclude_tag: "telemetry" }),
+        },
+      });
       setRecords((prev) => (offset ? [...prev, ...res.records] : res.records));
       setMore(res.records.length === PAGE);
     } catch (err) {
@@ -52,6 +61,7 @@ export default function Timeline() {
     e.preventDefault();
     const next = {};
     for (const [k, v] of Object.entries(draft)) if (v) next[k] = v.trim();
+    if (!showTelemetry) next.exclude_tag = "telemetry";
     setParams(next);
   }
 
@@ -72,10 +82,28 @@ export default function Timeline() {
       <form onSubmit={apply} className="mb-4 flex flex-wrap items-end gap-2" aria-label="Filter records">
         <input className="field w-36" placeholder="Member" value={draft.agent}
                onChange={(e) => setDraft({ ...draft, agent: e.target.value })} aria-label="Member" />
-        <select className="field" value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value })} aria-label="Type">
-          <option value="">Any type</option>
-          {TYPES.map((t) => <option key={t}>{t}</option>)}
-        </select>
+        <div className="flex flex-wrap gap-2 items-end" aria-label="Type">
+          <span className="text-xs text-paper-muted">Type</span>
+          {TYPES.map((t) => {
+            const checked = (draft.type || "").split(",").includes(t);
+            return (
+              <label key={t} className="flex items-center gap-1 text-sm cursor-pointer">
+                <input type="checkbox" checked={checked} className="accent-led"
+                       onChange={(e) => {
+                         const sel = (draft.type || "").split(",").filter(Boolean);
+                         if (e.target.checked) sel.push(t); else sel.splice(sel.indexOf(t), 1);
+                         setDraft({ ...draft, type: sel.join(",") });
+                       }} />
+                {t}
+              </label>
+            );
+          })}
+        </div>
+        <label className="flex items-center gap-2 text-sm text-paper-muted cursor-pointer">
+          <input type="checkbox" checked={showTelemetry} className="accent-led"
+                 onChange={(e) => setShowTelemetry(e.target.checked)} />
+          Show telemetry
+        </label>
         <select className="field" value={draft.outcome} onChange={(e) => setDraft({ ...draft, outcome: e.target.value })} aria-label="Outcome">
           <option value="">Any outcome</option>
           {OUTCOMES.map((o) => <option key={o} value={o}>{o.replace("_", " ")}</option>)}
