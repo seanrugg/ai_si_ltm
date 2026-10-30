@@ -124,7 +124,8 @@ def main() -> None:
     ltms_client = LTMSClient(cfg.ltms_server, key_path=cfg.key_path)
     outbox = Outbox(cfg.outbox_path)
 
-    mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="jetson-hub")
+    # clean_session=False: the broker queues QoS 1 records for the hub while it is down.
+    mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="jetson-hub", clean_session=False)
     publish = make_publish(mqtt_client)
     hub = Hub(ltms_client, outbox, publish, cfg.swarm)
     mqtt_client.on_connect = make_on_connect(cfg.swarm)
