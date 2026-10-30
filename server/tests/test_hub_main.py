@@ -19,6 +19,7 @@ def base_env() -> dict[str, str]:
     return {
         "LTMS_SERVER": "http://localhost:8080",
         "LTMS_KEY_PATH": "keys/jetson-hub.json",
+        "SWARM": "echo-base",
     }
 
 
@@ -60,7 +61,7 @@ def test_load_config_overrides():
 
 
 def test_load_config_missing_required():
-    for missing in ("LTMS_SERVER", "LTMS_KEY_PATH"):
+    for missing in ("LTMS_SERVER", "LTMS_KEY_PATH", "SWARM"):
         env = base_env()
         del env[missing]
         with pytest.raises(ValueError) as exc:

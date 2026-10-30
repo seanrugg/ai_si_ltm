@@ -13,13 +13,13 @@ import threading
 import httpx
 
 from cli_agent.client import LTMSError
-from cli_agent.mqtt_messages import DEFAULT_SWARM, acks_topic, agent_from_topic, decode_record, encode_ack
+from cli_agent.mqtt_messages import acks_topic, agent_from_topic, decode_record, encode_ack
 from cli_agent.outbox import Outbox
 from cli_agent.replicator import replicate_once
 
 
 class Hub:
-    def __init__(self, client, outbox: Outbox, publish, swarm: str = DEFAULT_SWARM) -> None:
+    def __init__(self, client, outbox: Outbox, publish, swarm: str) -> None:
         self.client = client
         self.outbox = outbox
         self.publish = publish

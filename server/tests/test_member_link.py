@@ -6,7 +6,7 @@ import json
 from ltms_contract import GENESIS_HASH, generate_key, verify_record
 
 from cli_agent.member_link import MemberLink
-from cli_agent.mqtt_messages import DEFAULT_SWARM, encode_ack, encode_record, records_topic
+from cli_agent.mqtt_messages import encode_ack, encode_record, records_topic
 from cli_agent.outbox import Outbox
 
 
@@ -18,7 +18,7 @@ def _make_link(tmp_path, name="z3-r0"):
         sent.append((topic, payload, retain))
 
     outbox = Outbox(tmp_path / "out.db")
-    link = MemberLink(name, key, outbox, tmp_path / "head.json", publish)
+    link = MemberLink(name, key, outbox, tmp_path / "head.json", publish, "echo-base")
     return key, link, sent, outbox
 
 
@@ -35,9 +35,9 @@ def test_append_signs_chain_and_publishes(tmp_path):
     assert rec3["prev_hash"] == rec2["hash"]
 
     assert [topic for topic, _, _ in sent] == [
-        records_topic("z3-r0"),
-        records_topic("z3-r0"),
-        records_topic("z3-r0"),
+        records_topic("z3-r0", "echo-base"),
+        records_topic("z3-r0", "echo-base"),
+        records_topic("z3-r0", "echo-base"),
     ]
     for _, payload, retain in sent:
         assert retain is False
@@ -54,13 +54,13 @@ def test_restart_continues_chain(tmp_path):
     key = generate_key()
     sent, publish = [], lambda topic, payload, retain=False: sent.append((topic, payload, retain))
     outbox = Outbox(tmp_path / "out.db")
-    link = MemberLink("z3-r0", key, outbox, tmp_path / "head.json", publish)
+    link = MemberLink("z3-r0", key, outbox, tmp_path / "head.json", publish, "echo-base")
     rec1 = link.append("thought")
     rec2 = link.append("thought")
     rec3 = link.append("thought")
 
     # Restart: a new Outbox and MemberLink on the same files.
-    link2 = MemberLink("z3-r0", key, Outbox(tmp_path / "out.db"), tmp_path / "head.json", publish)
+    link2 = MemberLink("z3-r0", key, Outbox(tmp_path / "out.db"), tmp_path / "head.json", publish, "echo-base")
     rec4 = link2.append("thought")
 
     assert rec4["seq"] == 4
@@ -90,7 +90,7 @@ def test_ack_all_then_restart_continues(tmp_path):
     assert outbox.pending("z3-r0") == []
 
     # Restart: with no outbox records, the head comes from the state file.
-    link2 = MemberLink("z3-r0", key, Outbox(tmp_path / "out.db"), tmp_path / "head.json", lambda t, p, r=False: None)
+    link2 = MemberLink("z3-r0", key, Outbox(tmp_path / "out.db"), tmp_path / "head.json", lambda t, p, r=False: None, "echo-base")
     rec4 = link2.append("thought")
 
     assert rec4["seq"] == 4
@@ -109,7 +109,7 @@ def test_append_survives_publish_failure_and_resend(tmp_path):
         sent.append((topic, payload, retain))
 
     # Rebuild the link with a failing publisher.
-    link = MemberLink("z3-r0", key, outbox, tmp_path / "head.json", publish)
+    link = MemberLink("z3-r0", key, outbox, tmp_path / "head.json", publish, "echo-base")
 
     # Publish raises: append still returns the record and keeps it in the outbox.
     rec = link.append("thought", payload={"x": 1})
@@ -121,7 +121,7 @@ def test_append_survives_publish_failure_and_resend(tmp_path):
     broken["value"] = False
     assert link.resend_pending() == 1
     assert len(sent) == 1
-    assert sent[0][0] == records_topic("z3-r0", DEFAULT_SWARM)
+    assert sent[0][0] == records_topic("z3-r0", "echo-base")
     assert json.loads(sent[0][1]) == rec
 
 
@@ -136,7 +136,7 @@ def test_resend_stops_at_first_failure(tmp_path):
         sent.append((topic, payload, retain))
 
     outbox = Outbox(tmp_path / "out.db")
-    link = MemberLink("z3-r0", key, outbox, tmp_path / "head.json", publish)
+    link = MemberLink("z3-r0", key, outbox, tmp_path / "head.json", publish, "echo-base")
 
     # Both appends fail to publish; both records sit in the outbox.
     link.append("thought")
@@ -151,6 +151,6 @@ def test_resend_stops_at_first_failure(tmp_path):
     will_fail["value"] = False
     assert link.resend_pending() == 2
     assert [topic for topic, _, _ in sent] == [
-        records_topic("z3-r0"),
-        records_topic("z3-r0"),
+        records_topic("z3-r0", "echo-base"),
+        records_topic("z3-r0", "echo-base"),
     ]

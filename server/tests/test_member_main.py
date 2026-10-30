@@ -24,7 +24,7 @@ from cli_agent.outbox import Outbox
 
 
 def base_env() -> dict[str, str]:
-    return {"LTMS_KEY_PATH": "keys/jetson-hub.json"}
+    return {"LTMS_KEY_PATH": "keys/jetson-hub.json", "SWARM": "echo-base"}
 
 
 def _make_link(tmp_path, name="z3-r0"):
@@ -35,7 +35,7 @@ def _make_link(tmp_path, name="z3-r0"):
         sent.append((topic, payload, retain))
 
     outbox = Outbox(tmp_path / "out.db")
-    link = MemberLink(name, key, outbox, tmp_path / "head.json", publish)
+    link = MemberLink(name, key, outbox, tmp_path / "head.json", publish, "echo-base")
     return key, link, sent, outbox
 
 
@@ -86,6 +86,14 @@ def test_load_config_missing_key_path():
     assert "LTMS_KEY_PATH" in str(exc.value)
 
 
+def test_load_config_missing_swarm():
+    env = dict(base_env())
+    del env["SWARM"]
+    with pytest.raises(ValueError) as exc:
+        load_config(env)
+    assert "SWARM" in str(exc.value)
+
+
 def test_load_config_bad_heartbeat():
     with pytest.raises(ValueError):
         load_config(dict(base_env(), HEARTBEAT_SECONDS="-1"))
@@ -109,7 +117,7 @@ def test_heartbeat_appends_and_publishes(tmp_path):
     assert rec["summary"] == "heartbeat"
     assert rec["tags"] == ["telemetry", "internal"]
     assert rec["payload"] == {"uptime_s": 10.5}
-    assert [topic for topic, _, _ in sent] == [records_topic("z3-r0")]
+    assert [topic for topic, _, _ in sent] == [records_topic("z3-r0", "echo-base")]
     assert sent[0][2] is False  # not retained
 
 
@@ -121,7 +129,7 @@ def test_make_on_message_only_enqueues(tmp_path):
     on_message(
         None,
         None,
-        types.SimpleNamespace(topic=acks_topic("z3-r0"), payload=payload),
+        types.SimpleNamespace(topic=acks_topic("z3-r0", "echo-base"), payload=payload),
     )
     assert acks.get_nowait() == payload
     # The link's outbox is main-thread only; on_message never touched it.
