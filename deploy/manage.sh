@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run an admin command on the server with the right user and settings. As root:
-#   bash /var/www/vhosts/cucorn.com/ltms-app/deploy/manage.sh set-admin-password
+#   bash <app-dir>/deploy/manage.sh set-admin-password
 #   bash .../deploy/manage.sh list-members
 #   bash .../deploy/manage.sh integrity
 set -euo pipefail

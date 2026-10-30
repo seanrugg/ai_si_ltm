@@ -4,6 +4,12 @@
 Version 1.1 · 15 Oct 2026 · Owner: Sean
 Reference: `Robot-Mesh-and-Long-Term-Memory-Plan.md` (primary design doc) · `CONTRACT.md` (record contract, frozen)
 
+## Placeholders used in this plan
+
+| Placeholder | Means |
+|---|---|
+| `ltms.example.org` | Your LTMS hostname |
+
 **Changes from 1.0:** header/payload split so retention never breaks the chain;
 RFC 8785 canonical JSON with stored canonical bytes; domain-separated signatures;
 challenge endpoint; admin sessions in their own table; valid-prefix batch policy
@@ -20,7 +26,7 @@ member of the mesh, plus the admin dashboard. Z3-R0 is the first enrolled member
 serves as the reference example. Other members (Jetson Orin, Anki Vector, future
 UNO Q robots, cloud LLM agents) use the same API.
 
-Deploying to: Plesk VPS (`[ltms-host].cucorn.com`), PostgreSQL on localhost,
+Deploying to: Plesk VPS (`ltms.example.org`), PostgreSQL on localhost,
 uvicorn (**one worker**) as a systemd service; the built dashboard is served by the same process. Code arrives via Plesk Git; see `PLESK_DEPLOYMENT_PLAN.md`.
 
 ---

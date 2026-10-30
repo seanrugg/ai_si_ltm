@@ -1,7 +1,7 @@
 """Read-only smoke test for a deployed LTMS. Safe to run against production:
 it creates no members and writes no records.
 
-    python -m scripts.smoke_test https://ltms.cucorn.com --admin-user admin
+    python -m scripts.smoke_test https://ltms.example.org --admin-user admin
     (prompts for the admin password; or set LTMS_SMOKE_PASSWORD)
 
 Exit code 0 = everything passed, 1 = at least one check failed.
@@ -31,7 +31,7 @@ def warn(label: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("url", help="base URL, e.g. https://ltms.cucorn.com")
+    ap.add_argument("url", help="base URL, e.g. https://ltms.example.org")
     ap.add_argument("--admin-user", default="admin")
     ap.add_argument("--no-admin", action="store_true", help="skip the admin login checks")
     args = ap.parse_args(argv)
