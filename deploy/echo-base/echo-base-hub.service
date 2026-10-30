@@ -1,0 +1,15 @@
+[Unit]
+Description=echo-base hub (jetson-hub): MQTT records -> LTMS
+After=network-online.target mosquitto.service
+Wants=network-online.target
+
+[Service]
+User=echobase
+WorkingDirectory=/var/lib/echo-base
+EnvironmentFile=/etc/echo-base/hub.env
+ExecStart=/opt/ai_si_ltm/.venv/bin/python -m cli_agent.hub_main
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

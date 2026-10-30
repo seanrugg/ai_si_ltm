@@ -1,0 +1,15 @@
+[Unit]
+Description=echo-base member heartbeat
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=echobase
+WorkingDirectory=/var/lib/echo-base
+EnvironmentFile=/etc/echo-base/member.env
+ExecStart=/opt/ai_si_ltm/.venv/bin/python -m cli_agent.member_main
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
