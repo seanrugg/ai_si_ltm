@@ -1,7 +1,7 @@
 """ltms_mcp: an MCP server so agent frameworks can join LTMS as members.
 
 The tool logic lives here as plain functions that take an ``LTMSClient`` and
-know nothing about MCP. ``ltms_mcp.server`` wraps them with FastMCP. Tests can
+know nothing about MCP. ``ltms_mcp.server`` wraps them with the MCP SDK (v2) ``MCPServer``. Tests can
 call these functions directly with no MCP transport installed.
 """
 from __future__ import annotations
