@@ -11,7 +11,7 @@ from sqlalchemy import func, or_, select
 
 from server.api.deps import ADMIN_COOKIE, AdminAuth, client_ip, current_admin, transaction
 from server.api.schemas import AdminLogin, ApproveRequest, PermissionsRequest, ReasonRequest
-from server.models import AuditLog, Member, Record, RecordPayload, RecordProvenance, Swarm
+from server.models import AuditLog, EnrollmentSwarmRequest, Member, Record, RecordPayload, RecordProvenance, Swarm
 from server.services import auth as auth_service
 from server.services import enrollment, integrity, recall, swarms
 from server.services.errors import ServiceError
@@ -83,8 +83,21 @@ async def pending_members(request: Request, admin: AdminAuth = ADMIN) -> dict:
 async def approve(member_id: str, body: ApproveRequest, request: Request, admin: AdminAuth = ADMIN) -> dict:
     async with transaction(request) as session:
         m = await enrollment.approve(session, _uuid(member_id), admin=admin.username,
-                                     permissions=body.permissions, scope=body.scope)
+                                     permissions=body.permissions, scope=body.scope,
+                                     join_swarm=body.join_swarm)
         return enrollment.member_to_dict(m)
+
+
+@router.get("/admin/members/{member_id}/swarm-request")
+async def swarm_request(member_id: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    """The swarm a pending member asked to join, or null (admin-only)."""
+    async with transaction(request) as session:
+        await enrollment.get_member(session, _uuid(member_id))  # 404 if no such member
+        req = await session.get(EnrollmentSwarmRequest, _uuid(member_id))
+        if req is None:
+            return {"swarm": None}
+        swarm = await session.get(Swarm, req.swarm_id)
+        return {"swarm": swarm.name if swarm is not None else None}
 
 
 @router.post("/admin/members/{member_id}/reject")
