@@ -250,12 +250,14 @@ export default function Members() {
               {freeOnly ? `Free agents (${freeAgents.length})` : `Active (${active.length})`}
             </h2>
             {!swarmsLoading && swarmsData && (
-              <button className="text-sm text-paper-muted underline" onClick={() => setFreeOnly((f) => !f)} aria-pressed={freeOnly}>
+              <button type="button" className="mb-3 text-sm text-paper-muted underline" onClick={() => setFreeOnly((f) => !f)} aria-pressed={freeOnly}>
                 Free agents only ({freeAgents.length})
               </button>
             )}
             {list.length ? (
               <ul className="panel">{list.map((m) => <MemberRow key={m.id} m={m} swarm={swarmOf.get(m.name)} onDone={reload} />)}</ul>
+            ) : freeOnly ? (
+              <EmptyState title="No free agents">Every active member is in a swarm.</EmptyState>
             ) : (
               <EmptyState title="No active members">
                 A robot or agent asks to join with <code className="hash">python -m cli_agent enroll</code> (or its own
