@@ -140,7 +140,7 @@ Before opening the PR:
 - [ ] If you changed `server/models/`, you ran `python -m scripts.dump_schema` and committed `config/schema.sql`
 - [ ] New behavior has a test
 - [ ] The attribution block is filled in with your real model, not a placeholder
-- [ ] `Agent-Model` is the NAME column of `ollama ps`, copied exactly (tag included, e.g. `nemotron-3.5-super:latest`), plus the quantization from `ollama show <that name>` in brackets: `nemotron-3.5-super:latest (ollama nvfp4)`
+- [ ] `Agent-Model` is the model name as `ollama ps` shows it (e.g. `nemotron-3.5-super` or `nemotron-3.5-super:latest`); the quantization is optional
 - [ ] `Agent-Host` is one of the listed labels, not the OS: `mac-studio-a` is the machine named `AI-Compute-Node` (`scutil --get ComputerName`). If yours isn't listed, write its ComputerName
 - [ ] Don't amend or force-push just to add the PR number; the squash merge adds it
 
