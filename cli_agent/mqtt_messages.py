@@ -9,23 +9,21 @@ from __future__ import annotations
 import json
 from typing import Any
 
-DEFAULT_SWARM = "echo-base"
-
 _RECORDS_SUFFIX = "records"
 _ACKS_SUFFIX = "acks"
 
 
-def records_topic(agent: str, swarm: str = DEFAULT_SWARM) -> str:
+def records_topic(agent: str, swarm: str) -> str:
     """robot -> hub: one signed record per message."""
     return f"{swarm}/{agent}/records"
 
 
-def acks_topic(agent: str, swarm: str = DEFAULT_SWARM) -> str:
+def acks_topic(agent: str, swarm: str) -> str:
     """hub -> robot: LTMS's acknowledged head for that agent."""
     return f"{swarm}/{agent}/acks"
 
 
-def agent_from_topic(topic: str, swarm: str = DEFAULT_SWARM) -> str:
+def agent_from_topic(topic: str, swarm: str) -> str:
     """Extract the agent from a ``<swarm>/<agent>/records`` topic.
 
     The broker's ACL lets an agent publish only under its own topic, so the

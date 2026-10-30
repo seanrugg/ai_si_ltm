@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from cli_agent.hub import Hub
-from cli_agent.mqtt_messages import DEFAULT_SWARM, decode_ack, encode_record
+from cli_agent.mqtt_messages import decode_ack, encode_record
 from cli_agent.outbox import Outbox
 
 from server.tests.test_swarms import Home, sign
@@ -34,21 +34,21 @@ def test_on_record_accepts_and_rejects(mesh, home, outbox):
     hub_client, z3 = _setup(mesh, home)
     sent = []
     publish = lambda t, p, retain=False: sent.append((t, p, retain))
-    hub = Hub(hub_client, outbox, publish)
+    hub = Hub(hub_client, outbox, publish, "echo-base")
 
     recs = sign(z3, 3)
     rec = recs[0]
 
-    assert hub.on_record(f"{DEFAULT_SWARM}/z3-r0/records", encode_record(rec)) is True
+    assert hub.on_record("echo-base/z3-r0/records", encode_record(rec)) is True
 
     # wrong swarm topic
     assert hub.on_record("rogue-squadron/z3-r0/records", encode_record(rec)) is False
     # mismatched agent: payload says "stranger", topic says z3-r0
     bad_agent = dict(rec)
     bad_agent["agent"] = "stranger"
-    assert hub.on_record(f"{DEFAULT_SWARM}/z3-r0/records", encode_record(bad_agent)) is False
+    assert hub.on_record("echo-base/z3-r0/records", encode_record(bad_agent)) is False
     # non-JSON payload
-    assert hub.on_record(f"{DEFAULT_SWARM}/z3-r0/records", b"not json") is False
+    assert hub.on_record("echo-base/z3-r0/records", b"not json") is False
 
     assert hub.dropped == 3
 
@@ -56,13 +56,13 @@ def test_on_record_accepts_and_rejects(mesh, home, outbox):
 def test_on_record_from_a_thread(mesh, home, outbox):
     hub_client, z3 = _setup(mesh, home)
     publish = lambda t, p, retain=False: None
-    hub = Hub(hub_client, outbox, publish)
+    hub = Hub(hub_client, outbox, publish, "echo-base")
 
     recs = sign(z3, 3)
     results = []
 
     def worker(rec):
-        results.append(hub.on_record(f"{DEFAULT_SWARM}/z3-r0/records", encode_record(rec)))
+        results.append(hub.on_record("echo-base/z3-r0/records", encode_record(rec)))
 
     threads = [threading.Thread(target=worker, args=(r,)) for r in recs]
     for t in threads:
@@ -78,11 +78,11 @@ def test_tick_relays_and_publishes_ack(mesh, home, outbox):
     hub_client, z3 = _setup(mesh, home)
     sent = []
     publish = lambda t, p, retain=False: sent.append((t, p, retain))
-    hub = Hub(hub_client, outbox, publish)
+    hub = Hub(hub_client, outbox, publish, "echo-base")
 
     recs = sign(z3, 3)
     for r in recs:
-        assert hub.on_record(f"{DEFAULT_SWARM}/z3-r0/records", encode_record(r))
+        assert hub.on_record("echo-base/z3-r0/records", encode_record(r))
 
     result = hub.tick()
 
@@ -92,7 +92,7 @@ def test_tick_relays_and_publishes_ack(mesh, home, outbox):
 
     assert len(sent) == 1
     topic, payload, retain = sent[0]
-    assert topic == f"{DEFAULT_SWARM}/z3-r0/acks"
+    assert topic == "echo-base/z3-r0/acks"
     assert retain is True
     assert decode_ack(payload)["last_ack_seq"] == 3
 
@@ -100,12 +100,12 @@ def test_tick_relays_and_publishes_ack(mesh, home, outbox):
 def test_tick_tampered_record_stuck(mesh, home, outbox):
     hub_client, z3 = _setup(mesh, home)
     publish = lambda t, p, retain=False: None
-    hub = Hub(hub_client, outbox, publish)
+    hub = Hub(hub_client, outbox, publish, "echo-base")
 
     recs = sign(z3, 3)
     recs[1]["summary"] = "changed"  # tampered after signing, not re-signed
     for r in recs:
-        hub.on_record(f"{DEFAULT_SWARM}/z3-r0/records", encode_record(r))
+        hub.on_record("echo-base/z3-r0/records", encode_record(r))
 
     result = hub.tick()
 
@@ -123,11 +123,11 @@ def test_tick_client_down_publishes_nothing(mesh, home, outbox):
     hub_client, z3 = _setup(mesh, home)
     sent = []
     publish = lambda t, p, retain=False: sent.append((t, p, retain))
-    hub = Hub(DownClient(), outbox, publish)
+    hub = Hub(DownClient(), outbox, publish, "echo-base")
 
     recs = sign(z3, 1)
     for r in recs:
-        hub.on_record(f"{DEFAULT_SWARM}/z3-r0/records", encode_record(r))
+        hub.on_record("echo-base/z3-r0/records", encode_record(r))
 
     before = [r["seq"] for r in outbox.pending("z3-r0")]
     assert hub.tick() is None

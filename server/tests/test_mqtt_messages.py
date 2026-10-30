@@ -4,7 +4,6 @@ import json
 import pytest
 
 from cli_agent.mqtt_messages import (
-    DEFAULT_SWARM,
     acks_topic,
     agent_from_topic,
     decode_ack,
@@ -17,22 +16,21 @@ from ltms_contract import GENESIS_HASH, build_record, generate_key
 
 
 def test_topic_builders():
-    assert records_topic("z3-r0") == "echo-base/z3-r0/records"
+    assert records_topic("z3-r0", "echo-base") == "echo-base/z3-r0/records"
     assert records_topic("z3-r0", "swarm-2") == "swarm-2/z3-r0/records"
-    assert acks_topic("z3-r0") == "echo-base/z3-r0/acks"
+    assert acks_topic("z3-r0", "echo-base") == "echo-base/z3-r0/acks"
     assert acks_topic("z3-r0", "swarm-2") == "swarm-2/z3-r0/acks"
-    assert DEFAULT_SWARM == "echo-base"
 
 
 def test_agent_from_topic():
-    assert agent_from_topic("echo-base/z3-r0/records") == "z3-r0"
     assert agent_from_topic("echo-base/z3-r0/records", "echo-base") == "z3-r0"
+    assert agent_from_topic("swarm-2/z3-r0/records", "swarm-2") == "z3-r0"
     with pytest.raises(ValueError):
-        agent_from_topic("other-swarm/z3-r0/records")  # wrong swarm
+        agent_from_topic("other-swarm/z3-r0/records", "echo-base")  # wrong swarm
     with pytest.raises(ValueError):
-        agent_from_topic("echo-base/z3-r0")  # two parts
+        agent_from_topic("echo-base/z3-r0", "echo-base")  # two parts
     with pytest.raises(ValueError):
-        agent_from_topic("echo-base/z3-r0/acks")  # acks topic
+        agent_from_topic("echo-base/z3-r0/acks", "echo-base")  # acks topic
 
 
 def test_record_round_trip():
