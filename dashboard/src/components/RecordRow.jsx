@@ -33,9 +33,18 @@ function Value({ name, value }) {
   return String(value);
 }
 
+// "echo-base via jetson-hub", "echo-base, sent directly" or "free agent"
+export function provenanceText(p) {
+  if (!p || !p.swarm) return "free agent";
+  return p.relay ? `${p.swarm} via ${p.relay}` : `${p.swarm}, sent directly`;
+}
+
 export function RecordDetail({ record }) {
   return (
     <div className="grid gap-4 md:grid-cols-2">
+      {record.provenance && (
+        <p className="mb-2 text-xs text-paper-muted">Came from: {provenanceText(record.provenance)}</p>
+      )}
       <section className="min-w-0">
         <h3 className="mb-2 text-sm font-bold text-paper-muted">Signed header</h3>
         <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1 text-sm">
