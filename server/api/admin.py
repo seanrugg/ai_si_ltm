@@ -7,7 +7,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query, Request, Response
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, Integer, literal, or_, select
 
 from server.api.deps import ADMIN_COOKIE, AdminAuth, client_ip, current_admin, transaction
 from server.api.schemas import AdminLogin, ApproveRequest, PermissionsRequest, ReasonRequest
@@ -187,6 +187,125 @@ async def volume(
                 {"day": r.day, "agent": r.agent, "type": r.type, "records": r.records, "payload_bytes": r.payload_bytes}
                 for r in rows
             ],
+        }
+
+
+@router.get("/admin/activity")
+async def activity(
+    request: Request,
+    hours: int = Query(24, ge=1, le=720),
+    group: str = Query("swarm", pattern="^(swarm|member)$"),
+    swarm: str | None = None,
+    admin: AdminAuth = ADMIN,
+) -> dict:
+    """Aggregate record counts over a window, grouped by swarm or member.
+
+    The window (``hours``, ending now) is split into 24 equal buckets. A
+    record's swarm is its provenance swarm at write time; ``swarm_id`` NULL
+    or no provenance row means a free agent, reported as ``key`` null.
+    """
+    async with transaction(request) as session:
+        now = datetime.now(timezone.utc)
+        since = now - timedelta(hours=hours)
+        since_epoch = since.timestamp()
+        bucket_seconds = hours * 3600 // 24
+
+        if session.bind.dialect.name == "postgresql":
+            bucket = func.cast(
+                func.floor((func.extract("epoch", Record.ts) - literal(since_epoch)) / bucket_seconds),
+                Integer,
+            )
+        else:
+            bucket = func.cast(
+                (func.strftime("%s", Record.ts) - literal(since_epoch)) / bucket_seconds,
+                Integer,
+            )
+
+        if group == "swarm":
+            key_expr = Swarm.name
+        else:
+            key_expr = Record.agent
+
+        key_col = key_expr.label("key")
+        type_col = Record.type.label("type")
+        bucket_col = bucket.label("bucket")
+        tele_col = func.coalesce(
+            recall._json_list_contains(session, Record.tags, "telemetry"),
+            literal(False),
+        ).label("is_telemetry")
+        count_col = func.count(Record.id).label("count")
+
+        def apply_swarm_filter(stmt: Select) -> Select:
+            if group == "member" and swarm is not None:
+                if swarm == "none":
+                    return stmt.where(RecordProvenance.swarm_id.is_(None))
+                return stmt.where(Swarm.name == swarm)
+            return stmt
+
+        stmt = (
+            select(key_col, type_col, bucket_col, tele_col, count_col)
+            .outerjoin(RecordProvenance, RecordProvenance.record_id == Record.id)
+            .outerjoin(Swarm, Swarm.id == RecordProvenance.swarm_id)
+            .where(Record.ts >= since)
+            .where(Record.ts < now)
+        )
+        stmt = apply_swarm_filter(stmt).group_by(key_col, type_col, bucket_col, tele_col)
+        rows = (await session.execute(stmt)).all()
+
+        groups: dict = {}
+        for key, rtype, bucket_idx, is_tele, count in rows:
+            g = groups.setdefault(
+                key,
+                {"total": 0, "telemetry": 0, "by_type": {}, "series": [0] * 24, "series_by_type": {}},
+            )
+            g["total"] += count
+            b = min(max(int(bucket_idx), 0), 23)
+            g["series"][b] += count
+            g["by_type"][rtype] = g["by_type"].get(rtype, 0) + count
+            g["series_by_type"].setdefault(rtype, [0] * 24)[b] += count
+            if is_tele:
+                g["telemetry"] += count
+
+        # previous_total: equal window just before, grouped by key only
+        prev_since = since - timedelta(hours=hours)
+        prev_stmt = (
+            select(key_col, func.count(Record.id).label("count"))
+            .outerjoin(RecordProvenance, RecordProvenance.record_id == Record.id)
+            .outerjoin(Swarm, Swarm.id == RecordProvenance.swarm_id)
+            .where(Record.ts >= prev_since)
+            .where(Record.ts < since)
+        )
+        prev_stmt = apply_swarm_filter(prev_stmt).group_by(key_col)
+        previous_by_key = {r.key: r.count for r in (await session.execute(prev_stmt)).all()}
+
+        # Include keys that only appear in the previous window.
+        for key in previous_by_key:
+            groups.setdefault(
+                key,
+                {"total": 0, "telemetry": 0, "by_type": {}, "series": [0] * 24, "series_by_type": {}},
+            )
+
+        result = []
+        for key, g in groups.items():
+            result.append(
+                {
+                    "key": key,
+                    "total": g["total"],
+                    "previous_total": previous_by_key.get(key, 0),
+                    "telemetry": g["telemetry"],
+                    "by_type": g["by_type"],
+                    "series": g["series"],
+                    "series_by_type": g["series_by_type"],
+                }
+            )
+        result.sort(key=lambda g: (-g["total"], g["key"] is None, g["key"] or ""))
+
+        return {
+            "hours": hours,
+            "bucket_seconds": bucket_seconds,
+            "since": since.isoformat(),
+            "group": group,
+            "groups": result,
         }
 
 
