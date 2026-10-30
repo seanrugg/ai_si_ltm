@@ -2,7 +2,6 @@
 // Zero runtime dependencies: inline SVG only.
 import { stack, typeColor, TYPE_GROUPS } from "../lib/activity.js";
 
-const BAR_WIDTH = 180;
 const BAR_HEIGHT = 28;
 
 // Touch target: the bar is the visible part of a >= 44 px tall hit area.
@@ -29,60 +28,63 @@ export function Sparkline({ series, label }) {
   );
 }
 
-export function StackedBar({ byType, total, onSegment, label }) {
+export function StackedBar({ byType, onSegment, label, active = null }) {
+  // Segments share the width in proportion to their counts (responsive, no fixed
+  // pixel width). Each segment is a full-height button, so the whole >= 44 px
+  // area is clickable; the colored bar inside it is the visible part.
   const segments = stack(byType);
-  const barTotal = total || segments.reduce((sum, s) => sum + s.count, 0);
   return (
-    <div className="relative" style={{ minHeight: TOUCH_HEIGHT }} aria-label={label}>
-      <div className="flex" style={{ height: BAR_HEIGHT }}>
-        {segments.map((s) => {
-          const width = barTotal ? Math.max(4, (s.count / barTotal) * BAR_WIDTH) : 4;
-          return (
-            <button
-              key={s.type}
-              onClick={() => onSegment && onSegment(s.type)}
-              aria-label={`${s.type}: ${s.count} records`}
-              title={`${s.type}: ${s.count} records`}
-              className="flex-none rounded-sm"
-              style={{ backgroundColor: s.color, minWidth: 4, width }}
-            />
-          );
-        })}
-      </div>
+    <div role="group" aria-label={label} className="flex w-full" style={{ height: TOUCH_HEIGHT }}>
+      {segments.map((s) => (
+        <button
+          type="button"
+          key={s.type}
+          onClick={() => onSegment && onSegment(s.type)}
+          aria-label={`${s.type}: ${s.count} records`}
+          aria-pressed={onSegment ? active === s.type : undefined}
+          title={`${s.type}: ${s.count} records`}
+          className="flex items-center px-px focus-visible:outline focus-visible:outline-2 focus-visible:outline-led"
+          style={{ flex: `${s.count} 1 0`, minWidth: 4 }}
+        >
+          <span
+            aria-hidden="true"
+            className="block w-full rounded-sm"
+            style={{
+              height: BAR_HEIGHT,
+              backgroundColor: s.color,
+              opacity: active && active !== s.type ? 0.4 : 1,
+            }}
+          />
+        </button>
+      ))}
     </div>
   );
 }
 
-export function TypeLegend({ counts, onType }) {
+export function TypeLegend({ counts, onType, active = null }) {
+  // Neutral button with a colored swatch: the type name and count are text in the
+  // normal paper color (4.5:1), so color is never the only cue.
   return (
-    <div className="flex flex-wrap gap-3 text-xs leading-6">
+    <div className="flex flex-wrap gap-3 text-sm">
       {TYPE_GROUPS.map((g) => (
         <div key={g.group} className="flex flex-col gap-1">
-          <span className="text-paper-faint">{g.group}</span>
+          <span className="text-xs text-paper-faint">{g.group}</span>
           <div className="flex flex-wrap gap-2">
-            {g.types.map((type) => {
-              const count = counts[type] ?? 0;
-              return (
-                <button
-                  key={type}
-                  onClick={() => onType && onType(type)}
-                  className="flex items-center gap-1.5 rounded border border-ink-line px-2 py-0.5"
-                  style={{ backgroundColor: typeColor(type), color: "#0F1828" }}
-                >
-                  <span
-                    aria-hidden="true"
-                    style={{
-                      width: 8,
-                      height: 8,
-          borderRadius: 2,
-          backgroundColor: typeColor(type),
-          display: "inline-block",
-                    }}
-                  />
-                  {type} {count}
-                </button>
-              );
-            })}
+            {g.types.map((type) => (
+              <button
+                type="button"
+                key={type}
+                onClick={() => onType && onType(type)}
+                aria-pressed={onType ? active === type : undefined}
+                className={`flex min-h-[44px] items-center gap-2 rounded border px-3 ${
+                  active === type ? "border-led bg-ink-hover" : "border-ink-line bg-ink-raised"
+                }`}
+              >
+                <span aria-hidden="true" className="inline-block h-3 w-3 rounded-sm" style={{ backgroundColor: typeColor(type) }} />
+                <span>{type}</span>
+                <span className="font-mono text-paper-muted">{counts[type] ?? 0}</span>
+              </button>
+            ))}
           </div>
         </div>
       ))}
