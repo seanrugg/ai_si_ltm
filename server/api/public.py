@@ -38,6 +38,7 @@ async def enroll(body: EnrollRequest, request: Request) -> dict:
             note=body.note,
             remote_ip=client_ip(request),
             max_pending=cfg.max_pending_enrollments,
+            swarm=body.swarm,
         )
         return {"id": str(member.id), "name": member.name, "status": member.status}
 

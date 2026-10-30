@@ -12,6 +12,7 @@ class EnrollRequest(BaseModel):
     permissions: list[str] = Field(default_factory=lambda: ["contribute", "recall"])
     operator: str | None = Field(None, max_length=128)
     note: str | None = Field(None, max_length=1000)
+    swarm: str | None = Field(None, max_length=64)
 
 
 class ChallengeRequest(BaseModel):
@@ -36,6 +37,7 @@ class AdminLogin(BaseModel):
 class ApproveRequest(BaseModel):
     permissions: list[str] | None = None  # default: what the member requested
     scope: dict | None = None
+    join_swarm: bool = True
 
 
 class ReasonRequest(BaseModel):
