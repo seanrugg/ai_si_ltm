@@ -1,0 +1,9 @@
+# The hub reads every member's records and writes every member's acks.
+user jetson-hub
+topic read echo-base/+/records
+topic write echo-base/+/acks
+
+# Every member (MQTT username == LTMS member name) may only write its own
+# records and read its own acks.
+pattern write echo-base/%u/records
+pattern read echo-base/%u/acks
