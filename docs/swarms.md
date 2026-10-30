@@ -42,7 +42,7 @@ python -m scripts.swarm_key create echo-base --out /Volumes/KEY/echo-base.swarm.
 # prints the public key, the swarm ID, and the command for the server
 ```
 
-On the **server**, as root (`manage.sh` = `bash /var/www/vhosts/cucorn.com/ltms-app/deploy/manage.sh`):
+On the **server**, as root (`manage.sh` = `bash <app-dir>/deploy/manage.sh`):
 
 ```bash
 manage.sh swarm-create echo-base --public-key <hex from above> --home
