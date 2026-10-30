@@ -11,7 +11,7 @@ from sqlalchemy import func, or_, select
 
 from server.api.deps import ADMIN_COOKIE, AdminAuth, client_ip, current_admin, transaction
 from server.api.schemas import AdminLogin, ApproveRequest, PermissionsRequest, ReasonRequest
-from server.models import AuditLog, EnrollmentSwarmRequest, Member, Record, RecordPayload, RecordProvenance, Swarm
+from server.models import AuditLog, EnrollmentSwarmRequest, Member, Record, RecordPayload, RecordProvenance, Swarm, SwarmMember
 from server.services import auth as auth_service
 from server.services import enrollment, integrity, recall, swarms
 from server.services.errors import ServiceError
@@ -65,11 +65,14 @@ async def me(admin: AdminAuth = ADMIN) -> dict:
 # Members
 # --------------------------------------------------------------------------- #
 @router.get("/admin/members")
-async def list_members(request: Request, status: str | None = None, admin: AdminAuth = ADMIN) -> dict:
+async def list_members(request: Request, status: str | None = None, free_agent: bool = False, admin: AdminAuth = ADMIN) -> dict:
     async with transaction(request) as session:
         stmt = select(Member).order_by(Member.created_at.desc())
         if status:
             stmt = stmt.where(Member.status == status)
+        if free_agent:
+            stmt = stmt.where(Member.id.not_in(
+                select(SwarmMember.member_id).where(SwarmMember.left_at.is_(None))))
         members = [enrollment.member_to_dict(m) for m in await session.scalars(stmt)]
         return {"members": members}
 
