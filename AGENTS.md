@@ -44,6 +44,12 @@ else disagree, this file wins (except for direct instructions from Sean).
    with `ollama ps` or your tool's settings; **never guess**. If you can't tell,
    write `unknown` and say why. If the model changed partway through, add one
    `Agent-Model` line per model.
+10. **No site-specific values in code or public docs.** This repo is a generic
+   product; Sean's setup is one reference deployment under `examples/`. Never
+   hard-code or default to a real hostname, domain, IP, server path, username,
+   swarm name or device name. Make it configuration, and use neutral
+   placeholders in examples and docs (`hub.local`, `ltms.example.org`,
+   `<your-swarm>`, `/opt/ltms`). Device-specific code goes behind an adapter.
 
 ## 2. Do-not-touch list
 
