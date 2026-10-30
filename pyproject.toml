@@ -23,6 +23,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "aiosqlite>=0.20"]
+hub = ["paho-mqtt>=2,<3"]  # Jetson hub entrypoint: cli_agent.hub_main
 mcp = ["mcp>=2,<3"]  # ltms_mcp uses MCPServer, added in mcp 2.0
 
 [tool.setuptools.packages.find]
