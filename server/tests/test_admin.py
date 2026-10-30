@@ -4,6 +4,10 @@ from sqlalchemy import delete, select
 
 from cli_agent.client import LTMSError
 from server.models import RecordPayload
+
+
+from ltms_contract import generate_key, public_key_hex
+from scripts.swarm_key import appointment, swarm_id
 from server.tests.conftest import ADMIN_PASS, ADMIN_USER
 
 
@@ -150,3 +154,64 @@ def test_volume_days_out_of_range(admin):
     assert admin.get("/api/admin/volume", params={"days": 0}).status_code == 422
     assert admin.get("/api/admin/volume", params={"days": 91}).status_code == 422
     assert admin.get("/api/admin/volume").status_code == 200
+
+
+def test_swarm_endpoints(mesh, admin):
+    root = generate_key()
+    pub = public_key_hex(root)
+    sid = swarm_id(pub)
+    hub = mesh.member("jetson-hub", kind="relay")
+    z3 = mesh.member("z3-r0")
+
+    r = admin.post("/api/admin/swarms",
+                   json={"name": "echo-base", "public_key": pub, "home": True, "description": "the robot mesh"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["id"] == sid and body["home"] is True and body["members"] == []
+
+    listing = admin.get("/api/admin/swarms").json()
+    assert [s["name"] for s in listing] == ["echo-base"]
+    assert listing[0]["status"] == "active"
+
+    # unknown swarm -> 404
+    assert admin.post("/api/admin/swarms/nosuch/members", json={"member": "z3-r0", "role": "member"}).status_code == 404
+    assert admin.post("/api/admin/swarms/nosuch/hub", json={}).status_code == 404
+    assert admin.post("/api/admin/swarms/nosuch/revoke").status_code == 404
+
+    r = admin.post("/api/admin/swarms/echo-base/members", json={"member": "z3-r0", "role": "member"})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"swarm": "echo-base", "member": "z3-r0", "role": "member"}
+    # bad role -> 422
+    assert admin.post("/api/admin/swarms/echo-base/members", json={"member": "z3-r0", "role": "owner"}).status_code == 422
+
+    appt = appointment(root, sid, "jetson-hub", public_key_hex(hub.key))
+    r = admin.post("/api/admin/swarms/echo-base/hub", json=appt)
+    assert r.status_code == 200, r.text
+    assert r.json()["hub"] == "jetson-hub"
+    # bad appointment signature -> 422
+    bad = appointment(generate_key(), sid, "jetson-hub", public_key_hex(hub.key))
+    assert admin.post("/api/admin/swarms/echo-base/hub", json=bad).status_code == 422
+
+    # a relayed record's detail shows its swarm and relay
+    rec = z3.append("event", summary="via the hub")
+    z3.outbox.clear()
+    z3.seq, z3.last_hash = rec["seq"], rec["hash"]
+    assert hub.relay([rec])["ok"]
+    prov = admin.get("/api/admin/records/z3-r0/1").json()["provenance"]
+    assert prov["swarm"] == "echo-base" and prov["relay"] == "jetson-hub"
+    assert prov["received_at"]
+
+    # a direct write shows the swarm with no relay
+    z3.sync_head()
+    rec = z3.append("event", summary="direct")
+    z3.flush()
+    prov = admin.get("/api/admin/records/z3-r0/2").json()["provenance"]
+    assert prov["swarm"] == "echo-base" and prov["relay"] is None
+
+    # remove the member, then revoke the swarm
+    r = admin.request("DELETE", "/api/admin/swarms/members/z3-r0")
+    assert r.status_code == 200 and r.json()["removed"] is True
+    r = admin.post("/api/admin/swarms/echo-base/revoke")
+    assert r.status_code == 200 and r.json()["revoked"] is True
+    listing = admin.get("/api/admin/swarms").json()
+    assert listing[0]["status"] == "revoked"

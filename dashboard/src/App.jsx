@@ -8,6 +8,7 @@ import DecisionTrace from "./pages/DecisionTrace.jsx";
 import Integrity from "./pages/Integrity.jsx";
 import Lessons from "./pages/Lessons.jsx";
 import Volume from "./pages/Volume.jsx";
+import Swarms from "./pages/Swarms.jsx";
 import Login from "./pages/Login.jsx";
 import Members from "./pages/Members.jsx";
 import Outcomes from "./pages/Outcomes.jsx";
@@ -67,6 +68,7 @@ const router = createHashRouter([
       { path: "/members", element: <Members /> },
       { path: "/integrity", element: <Integrity /> },
       { path: "/volume", element: <Volume /> },
+      { path: "/swarms", element: <Swarms /> },
       { path: "/record/:agent/:seq", element: <RecordPage /> },
       { path: "/conversation", element: <Conversation /> },
       { path: "/decision-trace/:agent/:seq", element: <DecisionTrace /> },

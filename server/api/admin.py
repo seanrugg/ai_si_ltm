@@ -11,9 +11,9 @@ from sqlalchemy import func, or_, select
 
 from server.api.deps import ADMIN_COOKIE, AdminAuth, client_ip, current_admin, transaction
 from server.api.schemas import AdminLogin, ApproveRequest, PermissionsRequest, ReasonRequest
-from server.models import AuditLog, Member, Record, RecordPayload
+from server.models import AuditLog, Member, Record, RecordPayload, RecordProvenance, Swarm
 from server.services import auth as auth_service
-from server.services import enrollment, integrity, recall
+from server.services import enrollment, integrity, recall, swarms
 from server.services.errors import ServiceError
 
 router = APIRouter(prefix="/api", tags=["admin"])
@@ -181,7 +181,86 @@ async def record_detail(agent: str, seq: int, request: Request, admin: AdminAuth
         if rec is None:
             raise ServiceError(404, "not_found", "record not found")
         payloads = await recall.fetch_payloads(session, [rec])
-        return recall.to_wire(rec, payloads.get(rec.id))
+        out = recall.to_wire(rec, payloads.get(rec.id))
+        prov = await session.scalar(select(RecordProvenance).where(RecordProvenance.record_id == rec.id))
+        if prov is not None:
+            swarm_name = None
+            if prov.swarm_id is not None:
+                swarm_name = await session.scalar(select(Swarm.name).where(Swarm.id == prov.swarm_id))
+            relay_name = None
+            if prov.relay_member_id is not None:
+                relay_name = await session.scalar(select(Member.name).where(Member.id == prov.relay_member_id))
+            out["provenance"] = {
+                "swarm": swarm_name,
+                "relay": relay_name,
+                "received_at": prov.received_at.isoformat(),
+            }
+        else:
+            out["provenance"] = {"swarm": None, "relay": None, "received_at": None}
+        return out
+
+
+# --------------------------------------------------------------------------- #
+# Swarms
+# --------------------------------------------------------------------------- #
+@router.get("/admin/swarms")
+async def list_swarms(request: Request, admin: AdminAuth = ADMIN) -> list[dict]:
+    async with transaction(request) as session:
+        return await swarms.describe(session)
+
+
+@router.post("/admin/swarms")
+async def create_swarm_endpoint(request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        swarm = await swarms.create_swarm(
+            session,
+            name=body.get("name"),
+            public_key_hex=body.get("public_key"),
+            description=body.get("description"),
+            is_home=bool(body.get("home")),
+            actor=f"admin:{admin.username}",
+        )
+        return {"id": swarm.id, "name": swarm.name, "status": swarm.status, "home": swarm.is_home,
+                "description": swarm.description, "members": []}
+
+
+@router.post("/admin/swarms/{name}/members")
+async def add_swarm_member(name: str, request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        swarm = await swarms.get_swarm(session, name)
+        member = await session.scalar(select(Member).where(Member.name == body.get("member")))
+        if member is None:
+            raise ServiceError(404, "no_member", f"no member named {body.get('member')!r}")
+        row = await swarms.set_member(session, member, swarm, body.get("role"),
+                                      actor=f"admin:{admin.username}")
+        return {"swarm": swarm.name, "member": member.name, "role": row.role}
+
+
+@router.delete("/admin/swarms/members/{member}")
+async def remove_swarm_member(member: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        m = await session.scalar(select(Member).where(Member.name == member))
+        if m is None:
+            raise ServiceError(404, "no_member", f"no member named {member!r}")
+        removed = await swarms.remove_member(session, m, actor=f"admin:{admin.username}")
+        return {"member": m.name, "removed": removed}
+
+
+@router.post("/admin/swarms/{name}/hub")
+async def appoint_swarm_hub(name: str, request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        swarm = await swarms.get_swarm(session, name)
+        row = await swarms.appoint_hub(session, swarm, body, actor=f"admin:{admin.username}")
+        member = await session.get(Member, row.member_id)
+        return {"swarm": swarm.name, "hub": member.name}
+
+
+@router.post("/admin/swarms/{name}/revoke")
+async def revoke_swarm_endpoint(name: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        swarm = await swarms.get_swarm(session, name)
+        released = await swarms.revoke_swarm(session, swarm, actor=f"admin:{admin.username}")
+        return {"swarm": swarm.name, "revoked": True, "members_released": released}
 
 
 @router.get("/admin/conversation")
