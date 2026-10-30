@@ -14,7 +14,7 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ltms_contract.record import NAME_RE
-from server.models import AuditLog, Member, Token
+from server.models import AuditLog, EnrollmentSwarmRequest, Member, Swarm, Token
 from server.models.member import MEMBER_KINDS, PERMISSIONS
 from server.services import swarms
 from server.services.errors import ServiceError
@@ -51,6 +51,7 @@ async def request_enrollment(
     note: str | None,
     remote_ip: str | None,
     max_pending: int,
+    swarm: str | None = None,
 ) -> Member:
     if not NAME_RE.match(name or ""):
         raise ServiceError(422, "bad_name", "name must match ^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -72,6 +73,13 @@ async def request_enrollment(
     if pending >= max_pending:
         raise ServiceError(429, "too_many_pending", "too many pending enrollment requests; try later")
 
+    swarm_row = None
+    if swarm is not None:
+        # Resolve before creating the member; let get_swarm's 404 no_swarm propagate.
+        swarm_row = await swarms.get_swarm(session, swarm)
+        if swarm_row.status != "active":
+            raise ServiceError(422, "bad_swarm", "swarm is not active")
+
     member = Member(
         name=name,
         kind=kind,
@@ -85,6 +93,8 @@ async def request_enrollment(
     )
     session.add(member)
     await session.flush()
+    if swarm_row is not None:
+        session.add(EnrollmentSwarmRequest(member_id=member.id, swarm_id=swarm_row.id))
     session.add(AuditLog(member_id=member.id, actor=name, action="enroll_request",
                          detail={"kind": kind, "requested": requested, "ip": remote_ip}))
     return member
@@ -98,7 +108,8 @@ async def get_member(session: AsyncSession, member_id: uuid.UUID) -> Member:
 
 
 async def approve(session: AsyncSession, member_id, *, admin: str,
-                  permissions: list[str] | None = None, scope: dict | None = None) -> Member:
+                  permissions: list[str] | None = None, scope: dict | None = None,
+                  join_swarm: bool = True) -> Member:
     member = await get_member(session, member_id)
     if member.status != "pending":
         raise ServiceError(409, "bad_state", f"member is {member.status}, not pending")
@@ -108,8 +119,20 @@ async def approve(session: AsyncSession, member_id, *, admin: str,
     member.scope = scope
     member.status = "active"
     member.enrolled_at = datetime.now(timezone.utc)
+
+    swarm_name = None
+    joined = False
+    req = await session.get(EnrollmentSwarmRequest, member.id)
+    if req is not None:
+        swarm = await session.get(Swarm, req.swarm_id)
+        swarm_name = swarm.name if swarm is not None else None
+        if join_swarm and swarm is not None and swarm.status == "active":
+            await swarms.set_member(session, member, swarm, "member", actor=f"admin:{admin}")
+            joined = True
+        await session.delete(req)
     session.add(AuditLog(member_id=member.id, actor=f"admin:{admin}", action="enroll_approve",
-                         detail={"permissions": granted, "scope": member.scope}))
+                         detail={"permissions": granted, "scope": member.scope,
+                                 "swarm": swarm_name, "joined": joined}))
     return member
 
 
@@ -118,6 +141,9 @@ async def reject(session: AsyncSession, member_id, *, admin: str, reason: str | 
     if member.status != "pending":
         raise ServiceError(409, "bad_state", f"member is {member.status}, not pending")
     member.status = "rejected"
+    req = await session.get(EnrollmentSwarmRequest, member.id)
+    if req is not None:
+        await session.delete(req)
     session.add(AuditLog(member_id=member.id, actor=f"admin:{admin}", action="enroll_reject",
                          detail={"reason": reason}))
     return member

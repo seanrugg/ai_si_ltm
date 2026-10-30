@@ -97,6 +97,15 @@ CREATE TABLE auth_challenges (
 	FOREIGN KEY(member_id) REFERENCES members (id)
 );
 
+CREATE TABLE enrollment_swarm_requests (
+	member_id UUID NOT NULL, 
+	swarm_id VARCHAR(64) NOT NULL, 
+	requested_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	PRIMARY KEY (member_id), 
+	FOREIGN KEY(member_id) REFERENCES members (id), 
+	FOREIGN KEY(swarm_id) REFERENCES swarms (id)
+);
+
 CREATE TABLE records (
 	id BIGSERIAL NOT NULL, 
 	member_id UUID NOT NULL, 
