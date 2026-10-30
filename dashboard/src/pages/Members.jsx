@@ -216,8 +216,9 @@ function MemberRow({ m, swarm, onDone }) {
 
 export default function Members() {
   const { data, error, loading, reload } = useApi("/admin/members");
-  const { data: swarmsData } = useApi("/admin/swarms");
+  const { data: swarmsData, loading: swarmsLoading } = useApi("/admin/swarms");
   const [showPast, setShowPast] = useState(false);
+  const [freeOnly, setFreeOnly] = useState(false);
   const members = data?.members || [];
   const swarmOf = new Map();
   for (const s of (swarmsData || [])) {
@@ -226,6 +227,8 @@ export default function Members() {
   const pending = members.filter((m) => m.status === "pending");
   const active = members.filter((m) => m.status === "active");
   const past = members.filter((m) => m.status === "revoked" || m.status === "rejected");
+  const freeAgents = active.filter((m) => !swarmOf.has(m.name));
+  const list = freeOnly ? freeAgents : active;
 
   return (
     <>
@@ -243,9 +246,16 @@ export default function Members() {
             </section>
           )}
           <section aria-labelledby="active-h">
-            <h2 id="active-h" className="mb-3 text-lg font-bold">Active ({active.length})</h2>
-            {active.length ? (
-              <ul className="panel">{active.map((m) => <MemberRow key={m.id} m={m} swarm={swarmOf.get(m.name)} onDone={reload} />)}</ul>
+            <h2 id="active-h" className="mb-3 text-lg font-bold">
+              {freeOnly ? `Free agents (${freeAgents.length})` : `Active (${active.length})`}
+            </h2>
+            {!swarmsLoading && swarmsData && (
+              <button className="text-sm text-paper-muted underline" onClick={() => setFreeOnly((f) => !f)} aria-pressed={freeOnly}>
+                Free agents only ({freeAgents.length})
+              </button>
+            )}
+            {list.length ? (
+              <ul className="panel">{list.map((m) => <MemberRow key={m.id} m={m} swarm={swarmOf.get(m.name)} onDone={reload} />)}</ul>
             ) : (
               <EmptyState title="No active members">
                 A robot or agent asks to join with <code className="hash">python -m cli_agent enroll</code> (or its own
