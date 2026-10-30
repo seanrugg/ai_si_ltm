@@ -15,15 +15,18 @@ sign and send. The connected model never sees the key.
 """
 from __future__ import annotations
 
+import logging
 import os
 
 import anyio
 
 from cli_agent.client import LTMSClient, load_key
+from cli_agent.outbox import Outbox
 from mcp.server.mcpserver.server import MCPServer
 
 from ltms_mcp import remember as _remember
 from ltms_mcp import recall_context as _recall_context
+from ltms_mcp import restore as _restore
 from ltms_mcp import search_records as _search_records
 
 mcp = MCPServer(
@@ -32,15 +35,26 @@ mcp = MCPServer(
 )
 
 _CLIENT: LTMSClient | None = None
+_OUTBOX: Outbox | None = None
 
 
 def _client() -> LTMSClient:
-    """Build the client once and sync the member's chain head at startup."""
-    global _CLIENT
+    """Build the client once, sync the head, and restore pending records.
+
+    When ``LTMS_OUTBOX_PATH`` is set, records persisted to the outbox are
+    reloaded into the client at startup so nothing is lost on restart.
+    """
+    global _CLIENT, _OUTBOX
     if _CLIENT is None:
         name, key = load_key(os.environ["LTMS_KEY_PATH"])
         client = LTMSClient(os.environ["LTMS_SERVER"], signing_key=key, name=name)
-        client.sync_head()
+        outbox_path = os.environ.get("LTMS_OUTBOX_PATH")
+        _OUTBOX = Outbox(outbox_path) if outbox_path else None
+        if _OUTBOX is not None:
+            restored = _restore(client, _OUTBOX)  # restore() syncs the head
+            logging.info("MCP: restored %d pending records from %s", restored, outbox_path)
+        else:
+            client.sync_head()
         _CLIENT = client
     return _CLIENT
 
@@ -61,7 +75,7 @@ def remember(
     16 KB serialized. Returns {"seq", "hash"}.
     """
     return _remember(_client(), type, summary=summary, payload=payload, place=place,
-                     peers=peers, tags=tags)
+                     peers=peers, tags=tags, outbox=_OUTBOX)
 
 
 @mcp.tool()

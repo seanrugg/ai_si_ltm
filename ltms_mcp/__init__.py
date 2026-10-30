@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 
 from cli_agent.client import LTMSClient, LTMSError
+from cli_agent.outbox import Outbox
 from ltms_contract import RECORD_TYPES
 
 # Types a model may write through the MCP server. ``policy`` comes from an
@@ -55,6 +56,12 @@ def _payload_bytes(payload: dict | None) -> bytes:
     return json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
+def _prune_outbox_from(outbox: Outbox, agent: str, seq: int) -> None:
+    """Drop queued records from ``seq`` onward. Plain SQL on the outbox DB."""
+    outbox.conn.execute("DELETE FROM outbox WHERE agent = ? AND seq >= ?", (agent, seq))
+    outbox.conn.commit()
+
+
 def remember(
     client: LTMSClient,
     type: str,
@@ -63,11 +70,14 @@ def remember(
     place: str | None = None,
     peers: list[str] | None = None,
     tags: list[str] | None = None,
+    outbox: Outbox | None = None,
 ) -> dict[str, Any]:
     """Sign one record and send it (append then flush); returns {"seq", "hash"}.
 
     The model never sees the member's key. If LTMS cannot be reached the signed
-    record stays in the client's outbox and is retried on the next call.
+    record stays in the client's outbox and is retried on the next call. When an
+    outbox is given, each appended record is also persisted there and pruned
+    once the server acknowledges it.
     """
     if type not in ALLOWED_TYPES:
         raise ToolError("type_forbidden", f"type {type!r} is not allowed through the MCP server")
@@ -85,16 +95,49 @@ def remember(
         header["tags"] = tags
 
     rec = client.append(type, payload=payload, summary=summary, **header)
+    if outbox is not None:
+        outbox.add(rec)
     try:
         client.flush()
     except LTMSError as exc:
-        # A rejection: turn it into a tool error with its code and message.
-        raise ToolError(exc.code, exc.message) from None
+        # A rejection: the server refused the record at the front of the queue
+        # and nothing at or after it was accepted. Drop it and everything
+        # queued after it, in memory and in the persistent outbox, then re-sync
+        # so the next record re-signs from the server's head.
+        rejected = min(r["seq"] for r in client.outbox)
+        client.outbox = [r for r in client.outbox if r["seq"] < rejected]
+        if outbox is not None:
+            _prune_outbox_from(outbox, client.name, rejected)
+        client.sync_head()
+        raise ToolError(exc.code, f"record not stored: {exc.message}") from None
     except httpx.HTTPError:
         # Transport failure: the record stays queued in the client's outbox and
         # is retried with the next call. Never expose the key.
         raise ToolError("queued", "record is queued and will be sent with the next call") from None
+    if outbox is not None:
+        outbox.prune(client.name, client.seq)
     return {"seq": rec["seq"], "hash": rec["hash"]}
+
+
+def restore(client: LTMSClient, outbox: Outbox) -> int:
+    """Put the persistent outbox's pending records back into the client.
+
+    Called once at startup after ``sync_head``; records the server has already
+    acknowledged (``seq <= client.seq``) are skipped and pruned. Returns how
+    many records were restored to the client's outbox.
+    """
+    client.sync_head()
+    restored = 0
+    for rec in outbox.pending(client.name, 1000):
+        if rec["seq"] <= client.seq:
+            continue
+        client.outbox.append(rec)
+        restored += 1
+    outbox.conn.execute(
+        "DELETE FROM outbox WHERE agent = ? AND seq <= ?", (client.name, client.seq)
+    )
+    outbox.conn.commit()
+    return restored
 
 
 def recall_context(

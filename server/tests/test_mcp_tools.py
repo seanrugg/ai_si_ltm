@@ -9,9 +9,19 @@ import json
 import httpx
 import pytest
 
+from cli_agent.client import LTMSClient, LTMSError
+from cli_agent.outbox import Outbox
+
 from ltms_contract import verify_record
 
-from ltms_mcp import MAX_PAYLOAD_BYTES, ToolError, remember, recall_context, search_records
+from ltms_mcp import (
+    MAX_PAYLOAD_BYTES,
+    ToolError,
+    remember,
+    recall_context,
+    restore,
+    search_records,
+)
 
 
 @pytest.fixture
@@ -115,3 +125,76 @@ def test_server_module_importable():
     import ltms_mcp.server
 
     assert ltms_mcp.server.mcp is not None
+
+
+def test_remember_restart_restores_pending_records(agent, tmp_path, monkeypatch):
+    outbox = Outbox(tmp_path / "out.db")
+    real_flush = agent.flush
+
+    def down(*args, **kwargs):
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(agent, "flush", down)
+
+    # Two records queued while the server is unreachable.
+    with pytest.raises(ToolError) as exc:
+        remember(agent, "thought", summary="first", outbox=outbox)
+    assert exc.value.code == "queued"
+    with pytest.raises(ToolError) as exc:
+        remember(agent, "thought", summary="second", outbox=outbox)
+    assert exc.value.code == "queued"
+    assert [r["seq"] for r in agent.outbox] == [1, 2]
+    assert [r["seq"] for r in outbox.pending(agent.name)] == [1, 2]
+
+    # Restart: a new client over the same server and outbox file.
+    client2 = LTMSClient(
+        str(agent.http.base_url), signing_key=agent.key, name=agent.name, http=agent.http
+    )
+    assert restore(client2, outbox) == 2
+    assert [r["seq"] for r in client2.outbox] == [1, 2]
+
+    # A working remember sends everything and the chain verifies.
+    r3 = remember(client2, "thought", summary="third", outbox=outbox)
+    assert r3["seq"] == 3
+
+    recs = {r["seq"]: r for r in agent.records(limit=20)}
+    assert set(recs) == {1, 2, 3}
+    assert recs[2]["prev_hash"] == recs[1]["hash"]
+    assert recs[3]["prev_hash"] == recs[2]["hash"]
+    for rec in recs.values():
+        verify_record(rec, bytes(agent.key.verify_key))
+
+
+def test_remember_rejection_drops_and_chain_continues(agent, tmp_path, monkeypatch):
+    outbox = Outbox(tmp_path / "out.db")
+    real_flush = agent.flush
+    state = {"calls": 0}
+
+    def flaky(*args, **kwargs):
+        state["calls"] += 1
+        if state["calls"] == 2:
+            raise LTMSError(422, "sig", "bad signature")
+        return real_flush(*args, **kwargs)
+
+    monkeypatch.setattr(agent, "flush", flaky)
+
+    r1 = remember(agent, "thought", summary="first", outbox=outbox)
+    assert r1["seq"] == 1
+
+    with pytest.raises(ToolError) as exc:
+        remember(agent, "thought", summary="rejected", outbox=outbox)
+    assert exc.value.code == "sig"
+    assert "not stored" in exc.value.message
+
+    # The rejected record is gone from the persistent outbox.
+    assert outbox.pending(agent.name) == []
+
+    # A normal remember continues the server's chain.
+    r2 = remember(agent, "thought", summary="after", outbox=outbox)
+    assert r2["seq"] == 2
+
+    recs = {r["seq"]: r for r in agent.records(limit=20)}
+    assert set(recs) == {1, 2}
+    assert recs[2]["prev_hash"] == recs[1]["hash"]
+    for rec in recs.values():
+        verify_record(rec, bytes(agent.key.verify_key))
