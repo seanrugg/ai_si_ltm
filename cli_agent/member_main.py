@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from cli_agent.member_link import MemberLink
-from cli_agent.mqtt_messages import DEFAULT_SWARM, acks_topic
+from cli_agent.mqtt_messages import acks_topic
 from cli_agent.outbox import Outbox
 from ltms_contract import load_key
 
@@ -34,7 +34,7 @@ class MemberConfig:
     mqtt_port: int             # MQTT_PORT            (default 1883)
     mqtt_username: str | None  # MQTT_USERNAME
     mqtt_password: str | None  # MQTT_PASSWORD
-    swarm: str                 # SWARM                (default "echo-base")
+    swarm: str                 # SWARM                (required)
     heartbeat_seconds: float   # HEARTBEAT_SECONDS    (default 60.0; must be > 0)
 
 
@@ -58,7 +58,10 @@ def load_config(env: Mapping[str, str]) -> MemberConfig:
     mqtt_username = env.get("MQTT_USERNAME")
     mqtt_password = env.get("MQTT_PASSWORD")  # never logged or put in an error
 
-    swarm = env.get("SWARM", DEFAULT_SWARM)
+    try:
+        swarm = env["SWARM"]
+    except KeyError:
+        raise ValueError("missing SWARM") from None
 
     try:
         heartbeat_seconds = float(env.get("HEARTBEAT_SECONDS", "60.0"))

@@ -16,8 +16,8 @@ from typing import Mapping
 
 from cli_agent.client import LTMSClient
 from cli_agent.hub import Hub
-from cli_agent.mqtt_messages import DEFAULT_SWARM
 from cli_agent.outbox import Outbox
+from ltms_contract import load_key
 
 
 @dataclass(frozen=True)
@@ -29,7 +29,7 @@ class HubConfig:
     mqtt_port: int             # MQTT_PORT            (default 1883)
     mqtt_username: str | None  # MQTT_USERNAME        (default None)
     mqtt_password: str | None  # MQTT_PASSWORD        (default None)
-    swarm: str                 # SWARM                (default "echo-base")
+    swarm: str                 # SWARM                (required)
     tick_seconds: float        # TICK_SECONDS         (default 10.0; must be > 0)
 
 
@@ -56,7 +56,10 @@ def load_config(env: Mapping[str, str]) -> HubConfig:
     mqtt_username = env.get("MQTT_USERNAME")
     mqtt_password = env.get("MQTT_PASSWORD")  # never logged or put in an error
 
-    swarm = env.get("SWARM", DEFAULT_SWARM)
+    try:
+        swarm = env["SWARM"]
+    except KeyError:
+        raise ValueError("missing SWARM") from None
 
     try:
         tick_seconds = float(env.get("TICK_SECONDS", "10.0"))
@@ -121,11 +124,12 @@ def main() -> None:
     cfg = load_config(os.environ)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
+    name, _ = load_key(cfg.key_path)
     ltms_client = LTMSClient(cfg.ltms_server, key_path=cfg.key_path)
     outbox = Outbox(cfg.outbox_path)
 
     # clean_session=False: the broker queues QoS 1 records for the hub while it is down.
-    mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="jetson-hub", clean_session=False)
+    mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=name, clean_session=False)
     publish = make_publish(mqtt_client)
     hub = Hub(ltms_client, outbox, publish, cfg.swarm)
     mqtt_client.on_connect = make_on_connect(cfg.swarm)

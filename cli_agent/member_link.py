@@ -12,7 +12,7 @@ import logging
 import os
 from pathlib import Path
 
-from cli_agent.mqtt_messages import DEFAULT_SWARM, decode_ack, encode_record, records_topic
+from cli_agent.mqtt_messages import decode_ack, encode_record, records_topic
 from cli_agent.outbox import Outbox
 from ltms_contract import GENESIS_HASH, build_record
 
@@ -27,7 +27,7 @@ class MemberLink:
         outbox: Outbox,
         state_path,
         publish,
-        swarm: str = DEFAULT_SWARM,
+        swarm: str,
     ) -> None:
         self._name = name
         self._signing_key = signing_key
