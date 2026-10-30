@@ -35,7 +35,12 @@ def _validate_scope(scope: dict | None) -> dict | None:
     if not isinstance(scope, dict) or set(scope) - {"types", "agents", "places", "swarms"}:
         raise ServiceError(422, "bad_scope", "scope may only contain types, agents, places, swarms")
     for key, val in scope.items():
-        if not isinstance(val, list) or not all(isinstance(v, str) for v in val):
+        if not isinstance(val, list):
+            raise ServiceError(422, "bad_scope", f"scope.{key} must be a list of strings")
+        if key == "swarms":
+            if not all(v is None or isinstance(v, str) for v in val):
+                raise ServiceError(422, "bad_scope", f"scope.{key} must be a list of strings")
+        elif not all(isinstance(v, str) for v in val):
             raise ServiceError(422, "bad_scope", f"scope.{key} must be a list of strings")
     return scope
 

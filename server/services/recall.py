@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from ltms_contract import RECORD_TYPES
-from sqlalchemy import cast, exists, func, literal, or_, select
+from sqlalchemy import cast, exists, false, func, literal, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
@@ -64,10 +64,19 @@ def apply_scope(stmt: Select, scope: Scope) -> Select:
     if scope.places is not None:
         stmt = stmt.where(Record.place.in_(scope.places))
     if scope.swarms is not None:
-        stmt = stmt.where(Record.id.in_(
-            select(RecordProvenance.record_id)
-            .join(Swarm, Swarm.id == RecordProvenance.swarm_id)
-            .where(Swarm.name.in_(scope.swarms))))
+        names = [s for s in scope.swarms if s is not None]
+        want_free = None in scope.swarms
+        conds = []
+        if names:
+            conds.append(Record.id.in_(
+                select(RecordProvenance.record_id)
+                .join(Swarm, Swarm.id == RecordProvenance.swarm_id)
+                .where(Swarm.name.in_(names))))
+        if want_free:
+            # written with no swarm, or before provenance existed
+            conds.append(Record.id.not_in(
+                select(RecordProvenance.record_id).where(RecordProvenance.swarm_id.is_not(None))))
+        stmt = stmt.where(or_(*conds)) if conds else stmt.where(false())
     return stmt
 
 
