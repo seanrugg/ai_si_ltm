@@ -22,10 +22,14 @@ say "App folder: $APP_DIR   runs as: $RUN_USER:$RUN_GROUP"
 [ -x "$APP_DIR/.venv/bin/uvicorn" ] || {
   echo "No $APP_DIR/.venv yet. Run the Plesk Git deployment first (it builds the venv), then re-run this."; exit 1; }
 
+render() { sed -e "s#@APP_DIR@#$APP_DIR#g" -e "s#@RUN_USER@#$RUN_USER#g" -e "s#@RUN_GROUP@#$RUN_GROUP#g" "$1"; }
+
 say "Secrets file /etc/ltms/ltms.env"
 mkdir -p /etc/ltms
 if [ ! -f /etc/ltms/ltms.env ]; then
-  install -m 640 -o root -g "$RUN_GROUP" "$APP_DIR/deploy/ltms.env.example" /etc/ltms/ltms.env
+  # @APP_DIR@ in the template becomes this install's app folder.
+  ( umask 027; render "$APP_DIR/deploy/ltms.env.example" > /etc/ltms/ltms.env )
+  chown root:"$RUN_GROUP" /etc/ltms/ltms.env; chmod 640 /etc/ltms/ltms.env
   echo "Created. EDIT IT NOW: nano /etc/ltms/ltms.env  (database + first admin password)"
 else
   chgrp "$RUN_GROUP" /etc/ltms/ltms.env; chmod 640 /etc/ltms/ltms.env
@@ -33,7 +37,6 @@ else
 fi
 
 say "systemd units"
-render() { sed -e "s#@APP_DIR@#$APP_DIR#g" -e "s#@RUN_USER@#$RUN_USER#g" -e "s#@RUN_GROUP@#$RUN_GROUP#g" "$1"; }
 render "$APP_DIR/deploy/ltms.service.template" > /etc/systemd/system/ltms.service
 render "$APP_DIR/deploy/ltms-restart.path.template" > /etc/systemd/system/ltms-restart.path
 install -m 644 "$APP_DIR/deploy/ltms-restart.service" /etc/systemd/system/ltms-restart.service

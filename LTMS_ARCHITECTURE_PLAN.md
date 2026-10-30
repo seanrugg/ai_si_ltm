@@ -8,7 +8,7 @@ Reference: `Robot-Mesh-and-Long-Term-Memory-Plan.md` (primary design doc) · `CO
 
 | Placeholder | Means |
 |---|---|
-| `ltms.example.org` | Your LTMS hostname; say "your LTMS hostname" |
+| `ltms.example.org` | Your LTMS hostname |
 
 **Changes from 1.0:** header/payload split so retention never breaks the chain;
 RFC 8785 canonical JSON with stored canonical bytes; domain-separated signatures;

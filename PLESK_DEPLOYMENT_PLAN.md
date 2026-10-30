@@ -8,7 +8,7 @@ This plan uses **`ltms.example.org`** as the LTMS hostname; if you choose anothe
 | Placeholder | Means |
 |---|---|
 | `<your-domain>` | Your domain |
-| `ltms.example.org` | Your LTMS hostname; say "your LTMS hostname" |
+| `ltms.example.org` | Your LTMS hostname |
 | `<app-dir>` | The deployment path Plesk Git uses, e.g. `/var/www/vhosts/<your-domain>/ltms-app` |
 | `<admin-user>` | A non-root admin user with `sudo`; SSH root login disabled |
 | `<your-server>` | Your server |
@@ -50,12 +50,12 @@ PostgreSQL  (Plesk-managed database, localhost:5432)
 
 ## Before you start: three checks
 
-As root over SSH (your usual top-level login):
+Over SSH, as your admin user:
 
 ```bash
-sudo python3 --version                 # need 3.11 or newer
-sudo ls /opt/plesk/node/               # Plesk's Node.js versions; need 18+ for the dashboard build
-sudo psql --version                    # PostgreSQL client, used for backups
+python3 --version                      # need 3.11 or newer
+ls /opt/plesk/node/                    # Plesk's Node.js versions; need 18+ for the dashboard build
+psql --version                         # PostgreSQL client, used for backups
 ```
 
 * **Python older than 3.11** (Ubuntu 22.04 ships 3.10): `apt install python3.11 python3.11-venv`
@@ -118,7 +118,7 @@ sudo nano /etc/ltms/ltms.env
 
 * `LTMS_DB_NAME`, `LTMS_DB_USER`, `LTMS_DB_PASSWORD`: from Step 2
 * `LTMS_ADMIN_PASSWORD`: your dashboard password (16+ characters)
-* `LTMS_DASHBOARD_DIR`: already correct if your path matches `<app-dir>`
+* `LTMS_DASHBOARD_DIR`: already filled in with your app folder by `root-setup.sh`
 
 Start it and check:
 
