@@ -1,7 +1,9 @@
 """Admin session, CSRF guard, enrollment decisions, dashboard views."""
 import pytest
+from sqlalchemy import delete, select
 
 from cli_agent.client import LTMSError
+from server.models import RecordPayload
 from server.tests.conftest import ADMIN_PASS, ADMIN_USER
 
 
@@ -108,3 +110,43 @@ def test_views(mesh, admin):
     settings = admin.get("/api/admin/settings").json()
     assert "admin_password" not in settings and settings["max_batch"] == 100
     assert admin.get("/api/admin/timeline", params={"type": "lesson"}).json()["count"] == 1
+
+
+def test_volume_counts_and_bytes(mesh, admin, db_exec):
+    z3 = mesh.member("z3-r0")
+    vec = mesh.member("vector")
+    z3.append("perception", summary="one", ts="2026-10-20T08:00:00Z", payload={"n": 1})
+    z3.append("action", summary="two", ts="2026-10-20T09:00:00Z", payload={"n": 2, "x": "longer"})
+    vec.append("perception", summary="three", ts="2026-10-21T08:00:00Z", payload={"n": 3})
+    z3.flush()
+    vec.flush()
+
+    rows = admin.get("/api/admin/volume", params={"days": 14}).json()["rows"]
+    by_key = {(r["agent"], r["type"], r["day"]): r for r in rows}
+    assert by_key[("z3-r0", "perception", "2026-10-20")]["records"] == 1
+    assert by_key[("z3-r0", "action", "2026-10-20")]["records"] == 1
+    assert by_key[("vector", "perception", "2026-10-21")]["records"] == 1
+    assert all(r["day"] == r["day"][:10] for r in rows)  # YYYY-MM-DD
+
+    # payload bytes match what is still in the payload table
+    total = sum(r["payload_bytes"] for r in rows)
+    remaining = list(db_exec(select(RecordPayload)).scalars().all())
+    assert total == sum(p.size for p in remaining)
+
+
+def test_volume_purged_payload_counts_zero_bytes(mesh, admin, db_exec):
+    z3 = mesh.member("z3-r0")
+    z3.append("event", summary="to be purged", ts="2026-10-20T08:00:00Z", payload={"n": 1})
+    z3.flush()
+    (record_id,) = db_exec(select(RecordPayload.record_id).limit(1)).one()
+    db_exec(delete(RecordPayload).where(RecordPayload.record_id == record_id))
+
+    rows = admin.get("/api/admin/volume", params={"days": 14}).json()["rows"]
+    row = [r for r in rows if r["agent"] == "z3-r0" and r["type"] == "event"][0]
+    assert row["records"] == 1 and row["payload_bytes"] == 0
+
+
+def test_volume_days_out_of_range(admin):
+    assert admin.get("/api/admin/volume", params={"days": 0}).status_code == 422
+    assert admin.get("/api/admin/volume", params={"days": 91}).status_code == 422
+    assert admin.get("/api/admin/volume").status_code == 200

@@ -81,13 +81,15 @@ async def get_records(
     since: datetime | None = Query(None, alias="from"),
     until: datetime | None = Query(None, alias="to"),
     summary: str | None = None,
+    exclude_tag: str | None = None,
     include_payload: bool = True,
     limit: int = Query(25, ge=1),
     offset: int = Query(0, ge=0),
 ) -> dict:
     cfg = request.app.state.config
-    f = recall.RecordFilter(type=type, agent=agent, place=place, peer=peer, tag=tag, outcome=outcome,
-                            since=since, until=until, q=summary, limit=min(limit, cfg.max_recall), offset=offset)
+    f = recall.RecordFilter(type=type, agent=agent, place=place, peer=peer, tag=tag, exclude_tag=exclude_tag,
+                            outcome=outcome, since=since, until=until, q=summary,
+                            limit=min(limit, cfg.max_recall), offset=offset)
     async with transaction(request) as session:
         scope = await _member_scope(session, auth)
         records = await recall.query_records(session, f, scope, include_payload=include_payload)

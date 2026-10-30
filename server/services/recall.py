@@ -10,12 +10,14 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from ltms_contract import RECORD_TYPES
 from sqlalchemy import cast, exists, func, literal, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
 from server.models import Record, RecordPayload
+from server.services.errors import ServiceError
 
 
 class RecallDenied(Exception):
@@ -62,11 +64,12 @@ def apply_scope(stmt: Select, scope: Scope) -> Select:
 
 @dataclass
 class RecordFilter:
-    type: str | None = None
+    type: str | None = None          # comma-separated list, e.g. "thought,action"
     agent: str | None = None
     place: str | None = None
     peer: str | None = None
     tag: str | None = None
+    exclude_tag: str | None = None   # drop records carrying this tag
     outcome: str | None = None
     since: datetime | None = None
     until: datetime | None = None
@@ -74,11 +77,23 @@ class RecordFilter:
     limit: int = 25
     offset: int = 0
 
+    def types(self) -> list[str]:
+        """The comma-separated ``type`` as a list, blanks dropped."""
+        return [t.strip() for t in (self.type or "").split(",") if t.strip()]
+
 
 def build_query(session: AsyncSession, f: RecordFilter, scope: Scope) -> Select:
     stmt = select(Record)
     if f.type:
-        stmt = stmt.where(Record.type == f.type)
+        wanted = f.types()
+        if wanted:
+            unknown = [t for t in wanted if t not in RECORD_TYPES]
+            if unknown:
+                raise ServiceError(
+                    422, "bad_type",
+                    f"unknown type(s): {', '.join(unknown)}; must be one of {', '.join(RECORD_TYPES)}",
+                )
+            stmt = stmt.where(Record.type.in_(wanted))
     if f.agent:
         stmt = stmt.where(Record.agent == f.agent)
     if f.place:
@@ -93,6 +108,9 @@ def build_query(session: AsyncSession, f: RecordFilter, scope: Scope) -> Select:
         stmt = stmt.where(_json_list_contains(session, Record.peers, f.peer))
     if f.tag:
         stmt = stmt.where(_json_list_contains(session, Record.tags, f.tag))
+    if f.exclude_tag:
+        # tags may be SQL NULL; "NOT (NULL @> ...)" is NULL, so keep untagged rows
+        stmt = stmt.where(or_(Record.tags.is_(None), ~_json_list_contains(session, Record.tags, f.exclude_tag)))
     if f.q:
         stmt = stmt.where(func.lower(func.coalesce(Record.summary, "")).contains(f.q.lower()))
     return apply_scope(stmt, scope)

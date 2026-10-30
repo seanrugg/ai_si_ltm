@@ -7,6 +7,7 @@ const NAV = [
   { to: "/", label: "Timeline", end: true },
   { to: "/members", label: "Members", badge: "pending" },
   { to: "/integrity", label: "Integrity" },
+  { to: "/volume", label: "Volume" },
   { to: "/conversation", label: "Conversation" },
   { to: "/outcomes", label: "Outcomes" },
   { to: "/lessons", label: "Lessons" },
