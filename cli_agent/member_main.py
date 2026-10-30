@@ -173,6 +173,9 @@ def main() -> None:
                 link.resend_pending()
             now = time.monotonic()
             if now >= next_heartbeat:
+                # Also resend anything unacked: covers a hub restart while we stayed
+                # connected. Duplicates are harmless (hub and LTMS both dedupe).
+                link.resend_pending()
                 heartbeat(link, started_at, now)
                 next_heartbeat = now + cfg.heartbeat_seconds
             # Sleep up to 1 second, waking early if asked to stop.
