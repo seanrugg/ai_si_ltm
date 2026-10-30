@@ -2,7 +2,7 @@
 # ONE-TIME setup, run as root after the first Plesk Git deployment.
 # After this, every update is just "Pull now" in Plesk (no root needed).
 #
-#   bash /var/www/vhosts/cucorn.com/ltms-app/deploy/root-setup.sh
+#   bash <app-dir>/deploy/root-setup.sh
 #
 # It works out the app folder (where this script lives) and the Plesk system
 # user that owns it, then installs:
