@@ -15,7 +15,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
-from server.models import Record, RecordPayload
+from server.models import Record, RecordPayload, RecordProvenance, Swarm
 
 
 class RecallDenied(Exception):
@@ -29,6 +29,7 @@ class Scope:
     types: list[str] | None = None
     agents: list[str] | None = None
     places: list[str] | None = None
+    swarms: list[str] | None = None
 
 
 def effective_scope(permissions: list[str], scope: dict | None) -> Scope:
@@ -37,8 +38,15 @@ def effective_scope(permissions: list[str], scope: dict | None) -> Scope:
     if "recall" in permissions:
         return Scope()
     if "recall:scoped" in permissions:
-        s = scope or {}
-        return Scope(types=s.get("types", []), agents=s.get("agents"), places=s.get("places"))
+        if not scope:
+            # No scope granted at all: nothing is visible.
+            return Scope(types=[], agents=None, places=None, swarms=None)
+        s = scope
+        # A granted scope constrains only the fields it lists; an absent field is
+        # unrestricted (None). "types" used to default to [], which made a
+        # swarms-only (or agents-only) scope see nothing.
+        return Scope(types=s.get("types"), agents=s.get("agents"), places=s.get("places"),
+                     swarms=s.get("swarms"))
     raise RecallDenied("member lacks a recall permission")
 
 
@@ -57,6 +65,11 @@ def apply_scope(stmt: Select, scope: Scope) -> Select:
         stmt = stmt.where(Record.agent.in_(scope.agents))
     if scope.places is not None:
         stmt = stmt.where(Record.place.in_(scope.places))
+    if scope.swarms is not None:
+        stmt = stmt.where(Record.id.in_(
+            select(RecordProvenance.record_id)
+            .join(Swarm, Swarm.id == RecordProvenance.swarm_id)
+            .where(Swarm.name.in_(scope.swarms))))
     return stmt
 
 

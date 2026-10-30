@@ -32,8 +32,8 @@ def _validate_permissions(perms: list[str]) -> list[str]:
 def _validate_scope(scope: dict | None) -> dict | None:
     if scope is None:
         return None
-    if not isinstance(scope, dict) or set(scope) - {"types", "agents", "places"}:
-        raise ServiceError(422, "bad_scope", "scope may only contain types, agents, places")
+    if not isinstance(scope, dict) or set(scope) - {"types", "agents", "places", "swarms"}:
+        raise ServiceError(422, "bad_scope", "scope may only contain types, agents, places, swarms")
     for key, val in scope.items():
         if not isinstance(val, list) or not all(isinstance(v, str) for v in val):
             raise ServiceError(422, "bad_scope", f"scope.{key} must be a list of strings")
