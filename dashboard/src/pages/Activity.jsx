@@ -2,7 +2,7 @@
 // Data: GET /admin/activity?hours=<1|24|168|720>, grouped by swarm (busiest first),
 // the free-agent group reported as key null and titled "Free agents".
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui.jsx";
 import { Sparkline, StackedBar, TypeLegend } from "../components/charts.jsx";
@@ -301,10 +301,10 @@ function DrillPanel({ group, hours, since, bucketSeconds, activeType, includeTel
 
   // Dismiss on Escape.
   useEffect(() => {
-    const handler = (e) => e.key === "Escape" && onClose();
+    const handler = (e) => e.key === "Escape" && onClose(key);
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
+  }, [onClose, key]);
 
   if (loading && !data) return <Loading what="Loading members" />;
   if (error) return <ErrorNote error={error} onRetry={reload} />;
@@ -357,13 +357,9 @@ function DrillPanel({ group, hours, since, bucketSeconds, activeType, includeTel
               return (
                 <li key={m.key} className="flex flex-col md:flex-row md:items-center gap-3 p-2 rounded-lg border border-ink-line">
                   <div className="flex-1 min-w-0">
-                    <button
-                      type="button"
-                      onClick={() => navigate(timelineUrl({ agent: m.key, since }))}
-                      className="text-paper font-bold hover:underline"
-                    >
+                    <Link to={timelineUrl({ agent: m.key, since })} className="font-bold text-paper underline-offset-2 hover:underline">
                       {m.key}
-                    </button>
+                    </Link>
                     <p className="text-sm text-paper-muted">
                       {m.total.toLocaleString()} records · {t.label}
                     </p>

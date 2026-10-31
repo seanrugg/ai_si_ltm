@@ -137,7 +137,7 @@ export default function Timeline() {
             <button
               type="button"
               onClick={removeSince}
-              className="rounded border border-ink-line p-1 hover:bg-ink-hover"
+              className="min-h-[44px] min-w-[44px] rounded border border-ink-line hover:bg-ink-hover"
               aria-label="Remove since filter"
             >
               &times;
