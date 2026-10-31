@@ -89,6 +89,16 @@ class ServerConfig(BaseSettings):
     # can still be created, but none may store a secret.
     secret_key: str | None = None
 
+    # LRS bootstrap (issue #86): register an LRS endpoint from env on first
+    # start. Empty LTMS_LRS_BOOTSTRAP_URL disables bootstrapping entirely.
+    lrs_bootstrap_url: str = ""
+    lrs_bootstrap_name: str = "default-lrs"
+    lrs_bootstrap_username: str = ""
+    lrs_bootstrap_secret: str = ""
+    lrs_bootstrap_xapi_version: str = "2.0.0"
+    lrs_bootstrap_types: str = ""
+    lrs_bootstrap_enabled: bool = False
+
     @property
     def resolved_database_url(self) -> str:
         if self.database_url:

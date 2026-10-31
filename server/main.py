@@ -20,6 +20,7 @@ from server.api.errors import register_exception_handlers
 from server.config import ServerConfig, load_config
 from server.db import create_all, make_engine, make_sessionmaker
 from server.security.ratelimit import RateLimiter
+from server.services import lrs
 from server.services.auth import ensure_admin
 
 
@@ -35,6 +36,7 @@ def create_app(config: ServerConfig | None = None, *, create_tables: bool = True
             await create_all(engine)
         async with app.state.sessionmaker() as session:
             await ensure_admin(session, cfg.admin_username, cfg.admin_password)
+            await lrs.bootstrap_endpoint(session, cfg)
             await session.commit()
         scheduler = None
         if cfg.enable_scheduler:

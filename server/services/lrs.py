@@ -8,6 +8,7 @@ The secret is never returned by any API, logged, or written to the audit log.
 from __future__ import annotations
 
 import base64
+import logging
 import uuid
 from urllib.parse import urlparse
 
@@ -21,6 +22,8 @@ from server.config import ServerConfig
 from server.models import AuditLog, LrsEndpoint
 from server.services.enrollment import _validate_scope
 from server.services.errors import ServiceError
+
+log = logging.getLogger(__name__)
 
 XAPI_VERSIONS = ("2.0.0", "1.0.3")
 AUTH_TYPES = ("basic",)
@@ -152,6 +155,43 @@ async def create_endpoint(
         fields.append("secret")
     session.add(AuditLog(actor=actor, action="lrs_create",
                          detail={"endpoint_id": str(endpoint.id), "fields": fields}))
+    return endpoint
+
+
+async def bootstrap_endpoint(
+    session: AsyncSession,
+    cfg: ServerConfig,
+) -> LrsEndpoint | None:
+    """Register one LRS endpoint from env on first start (issue #86).
+
+    One-time only: returns None when the bootstrap URL is unset or an endpoint
+    already exists. On success creates and returns the endpoint with ``enabled``
+    set from config. If ``create_endpoint`` raises (e.g. no LTMS_SECRET_KEY),
+    logs one error line without the secret and returns None so LTMS still starts.
+    """
+    if not cfg.lrs_bootstrap_url:
+        return None
+    if await session.scalar(select(LrsEndpoint)) is not None:
+        return None
+    scope = {
+        "types": [t.strip() for t in (cfg.lrs_bootstrap_types or "").split(",") if t.strip()]
+    }
+    try:
+        endpoint = await create_endpoint(
+            session,
+            cfg,
+            name=cfg.lrs_bootstrap_name,
+            url=cfg.lrs_bootstrap_url,
+            username=cfg.lrs_bootstrap_username,
+            secret=cfg.lrs_bootstrap_secret or None,
+            xapi_version=cfg.lrs_bootstrap_xapi_version,
+            scope=scope,
+            actor="bootstrap",
+        )
+    except ServiceError as exc:
+        log.error("lrs bootstrap failed: code=%s message=%s", exc.code, exc.message)
+        return None
+    endpoint.enabled = cfg.lrs_bootstrap_enabled
     return endpoint
 
 
