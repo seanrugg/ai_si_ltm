@@ -1,13 +1,14 @@
 # LTMS — Long-Term Memory Server
 
-Append-only, signed, tamper-evident memory for an AI/robot mesh (Z3-R0, Vector,
-Jetson, cloud agents). Members sign every record with Ed25519 and chain it to
-their previous one; the server verifies, stores, and serves it back for recall.
+Append-only, signed, tamper-evident memory for a mesh of robots, AI agents and
+the hubs that relay for them. Members sign every record with Ed25519 and chain
+it to their previous one; the server verifies, stores, and serves it back for recall.
 
 * **Design:** `Robot-Mesh-and-Long-Term-Memory-Plan.md`
 * **Implementation plan & status:** `LTMS_ARCHITECTURE_PLAN.md`
 * **Record contract (frozen v1):** `CONTRACT.md`, vectors in `ltms_contract/vectors.json`
 * **Deploying to Plesk:** `PLESK_DEPLOYMENT_PLAN.md`
+* **Deployments and platforms:** `docs/platforms.md` and the `examples/echo-base` reference deployment
 * **Rules for coding agents:** `AGENTS.md`
 
 ## Quick start (local)
