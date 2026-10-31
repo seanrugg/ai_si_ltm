@@ -22,6 +22,9 @@ AUDIT_ACTIONS = (
     "token_denied",
     "ingest_reject",
     "retention_purge",
+    "lrs_create",
+    "lrs_update",
+    "lrs_delete",
 )
 
 

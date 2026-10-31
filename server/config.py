@@ -85,6 +85,10 @@ class ServerConfig(BaseSettings):
     # Production uses nginx for static files; this is for local/LAN use.
     dashboard_dir: str = ""
 
+    # Secret used to encrypt LRS credentials at rest. Without it, endpoints
+    # can still be created, but none may store a secret.
+    secret_key: str | None = None
+
     @property
     def resolved_database_url(self) -> str:
         if self.database_url:

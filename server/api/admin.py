@@ -6,6 +6,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
+import httpx
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy import func, Integer, literal, or_, select
 
@@ -13,7 +14,7 @@ from server.api.deps import ADMIN_COOKIE, AdminAuth, client_ip, current_admin, t
 from server.api.schemas import AdminLogin, ApproveRequest, PermissionsRequest, ReasonRequest
 from server.models import AuditLog, EnrollmentSwarmRequest, Member, Record, RecordPayload, RecordProvenance, Swarm, SwarmMember
 from server.services import auth as auth_service
-from server.services import enrollment, integrity, recall, swarms
+from server.services import enrollment, integrity, lrs as lrs_service, recall, swarms
 from server.services.errors import ServiceError
 
 router = APIRouter(prefix="/api", tags=["admin"])
@@ -551,3 +552,50 @@ async def settings(request: Request, admin: AdminAuth = ADMIN) -> dict:
     cfg = request.app.state.config
     hidden = {"db_password", "admin_password", "database_url"}
     return {k: v for k, v in json.loads(cfg.model_dump_json()).items() if k not in hidden}
+
+
+# --------------------------------------------------------------------------- #
+# LRS endpoints (issue #59)
+# --------------------------------------------------------------------------- #
+_CREATE_FIELDS = {"name", "url", "username", "secret", "xapi_version", "scope"}
+
+
+@router.get("/admin/lrs")
+async def list_lrs_endpoints(request: Request, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        return {"endpoints": [lrs_service.endpoint_to_dict(e) for e in await lrs_service.list_endpoints(session)]}
+
+
+@router.post("/admin/lrs")
+async def create_lrs_endpoint(request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    data = {k: v for k, v in body.items() if k in _CREATE_FIELDS}
+    async with transaction(request) as session:
+        endpoint = await lrs_service.create_endpoint(
+            session, request.app.state.config, actor=f"admin:{admin.username}", **data,
+        )
+        return lrs_service.endpoint_to_dict(endpoint)
+
+
+@router.patch("/admin/lrs/{endpoint_id}")
+async def update_lrs_endpoint(endpoint_id: str, request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        endpoint = await lrs_service.update_endpoint(
+            session, request.app.state.config, endpoint_id,
+            actor=f"admin:{admin.username}", **body,
+        )
+        return lrs_service.endpoint_to_dict(endpoint)
+
+
+@router.delete("/admin/lrs/{endpoint_id}")
+async def delete_lrs_endpoint(endpoint_id: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        await lrs_service.delete_endpoint(session, endpoint_id, actor=f"admin:{admin.username}")
+        return {"ok": True}
+
+
+@router.post("/admin/lrs/{endpoint_id}/test")
+async def test_lrs_endpoint(endpoint_id: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        endpoint = await lrs_service.get_endpoint(session, endpoint_id)
+    async with httpx.AsyncClient() as http:
+        return await lrs_service.test_connection(request.app.state.config, endpoint, http)
