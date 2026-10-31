@@ -55,6 +55,10 @@ def test_telemetry_counted(mesh, admin, db_exec, home):
     assert echo["total"] == 3
     assert echo["telemetry"] == 1
     assert echo["by_type"] == {"event": 3}
+    assert len(echo["telemetry_series"]) == 24
+    assert sum(echo["telemetry_series"]) == echo["telemetry"]
+    for i in range(24):
+        assert echo["telemetry_series"][i] <= echo["series"][i]
 
 
 def test_group_by_member_swarm_filter(mesh, admin, db_exec, home):
