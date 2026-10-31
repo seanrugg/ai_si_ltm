@@ -6,6 +6,8 @@ Everything needed to run echo-base for real: the Mosquitto broker with per-membe
 ACL, systemd units for the hub (Jetson) and a member (Pi Zero W / UNO Q), and the
 steps to stand them up. Config and docs only — no Python changes.
 
+Run the commands below from this folder (`examples/echo-base`); the `deploy/` paths are relative to it.
+
 ## 1. What runs where
 
 | Machine | Runs | Notes |
