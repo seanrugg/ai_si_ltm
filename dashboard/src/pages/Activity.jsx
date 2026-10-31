@@ -1,6 +1,8 @@
 // Activity page (issue #75): swarm activity overview for the research dashboard.
-// Data: GET /admin/activity?hours=<1|24|168|720>, grouped by swarm (busyest first),
+// Data: GET /admin/activity?hours=<1|24|168|720>, grouped by swarm (busiest first),
 // the free-agent group reported as key null and titled "Free agents".
+// Known limit: with telemetry hidden, totals and bars drop telemetry but the
+// sparkline still includes it (the API has no per-bucket telemetry series).
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useApi } from "../api/useApi.js";
@@ -55,10 +57,10 @@ export default function Activity() {
     includeTelemetry ? g : withoutTelemetry(g)
   );
 
-  // Summed counts across every group, shown in the type legend (raw counts,
-  // not the telemetry-adjusted card totals).
+  // Summed counts across every group for the type legend, with the same
+  // telemetry setting as the cards.
   const summed = {};
-  for (const g of data?.groups || []) {
+  for (const g of groups) {
     for (const [type, count] of Object.entries(g.by_type || {})) {
       summed[type] = (summed[type] || 0) + count;
     }
@@ -200,28 +202,23 @@ export default function Activity() {
                 highlighted.has(key) ? "ring-2 ring-led" : ""
               }`}
             >
-              <button
-                type="button"
-                aria-disabled="true"
-                className="flex flex-wrap justify-between items-baseline gap-2 px-3 py-2 text-sm rounded-md border border-transparent hover:bg-ink-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-led"
-                onClick={() => {}}
-              >
+              {/* Header: the title is a heading (not inside a button). Drill-down (#76)
+                  turns the title into <h3><button>…</button></h3>. */}
+              <div className="flex flex-wrap items-baseline justify-between gap-2 px-3 py-2">
                 <div>
                   <h3 className="text-base font-bold">{key}</h3>
-                  <p className="text-sm text-paper-muted">
-                    {g.total.toLocaleString()} records
-                  </p>
+                  <p className="text-sm text-paper-muted">{g.total.toLocaleString()} records</p>
                 </div>
-                <span className="text-sm font-mono">
-                  {trendArrow(t.direction)}{" "}
-                  {t.direction === "new" ? "new activity" : t.label}
-                </span>
+                <p className="font-mono text-sm">
+                  <span aria-hidden="true">{trendArrow(t.direction)} </span>
+                  {t.label}
+                </p>
                 {surge && (
                   <span className="rounded border border-warn bg-warn/20 px-2 py-0.5 text-xs font-bold text-warn">
                     Surge
                   </span>
                 )}
-              </button>
+              </div>
               <div className="mt-4 flex flex-col md:flex-row md:items-center gap-4">
                 <div className="flex-1">
                   <Sparkline series={g.series} label={`${key}: records per bucket`} />
