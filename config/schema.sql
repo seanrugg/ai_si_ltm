@@ -20,6 +20,25 @@ CREATE TABLE admin_users (
 	UNIQUE (username)
 );
 
+CREATE TABLE lrs_endpoints (
+	id UUID NOT NULL, 
+	name VARCHAR(64) NOT NULL, 
+	url TEXT NOT NULL, 
+	xapi_version VARCHAR(8) NOT NULL, 
+	auth_type VARCHAR(16) NOT NULL, 
+	username TEXT NOT NULL, 
+	secret_enc BYTEA, 
+	scope JSONB, 
+	enabled BOOLEAN NOT NULL, 
+	cursor BIGINT NOT NULL, 
+	last_success_at TIMESTAMP WITH TIME ZONE, 
+	last_error_at TIMESTAMP WITH TIME ZONE, 
+	last_error TEXT, 
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	PRIMARY KEY (id), 
+	UNIQUE (name)
+);
+
 CREATE TABLE members (
 	id UUID NOT NULL, 
 	public_key BYTEA NOT NULL, 
