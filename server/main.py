@@ -47,6 +47,9 @@ def create_app(config: ServerConfig | None = None, *, create_tables: bool = True
         finally:
             if scheduler is not None:
                 scheduler.shutdown(wait=False)
+            http = getattr(app.state, "lrs_forward_http", None)
+            if http is not None:
+                await http.aclose()
             await engine.dispose()
 
     app = FastAPI(title="LTMS — Long-Term Memory Server", version=__version__, lifespan=lifespan,

@@ -1,11 +1,12 @@
 """Scheduled maintenance (APScheduler, in-process)."""
 from __future__ import annotations
 
+import httpx
 import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from server.services import retention
+from server.services import lrs, retention
 
 log = logging.getLogger("ltms.tasks")
 
@@ -29,5 +30,11 @@ def start_scheduler(app) -> AsyncIOScheduler:
                   args=("purge_payloads", retention.purge_payloads, cfg.retention_payload_rules))
     sched.add_job(run, "cron", day_of_week="mon", hour=8, minute=0,
                   args=("prune_audit_log", retention.prune_audit_log, cfg.retention_audit_days))
+    if cfg.enable_scheduler:
+        # The forwarder's own HTTP client, with a timeout, one per scheduler.
+        http = httpx.AsyncClient(timeout=httpx.Timeout(10.0))
+        sched.add_job(run, "interval", seconds=cfg.lrs_forward_seconds,
+                      args=("lrs_forward", lrs.forward_once, cfg, http))
+        app.state.lrs_forward_http = http
     sched.start()
     return sched

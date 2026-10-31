@@ -99,6 +99,13 @@ class ServerConfig(BaseSettings):
     lrs_bootstrap_types: str = ""
     lrs_bootstrap_enabled: bool = False
 
+    # LRS forwarding (issue #61): how often the forwarder runs, how many records
+    # per endpoint per run, and the public base URL put in translated statements.
+    # Empty LTMS_PUBLIC_BASE_URL disables forwarding (one warning per run, nothing sent).
+    lrs_forward_seconds: int = 30
+    lrs_batch_size: int = 50
+    public_base_url: str = ""
+
     @property
     def resolved_database_url(self) -> str:
         if self.database_url:
