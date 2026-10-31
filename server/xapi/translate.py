@@ -7,15 +7,16 @@ calls it to turn one LTMS record into one xAPI statement.
 from __future__ import annotations
 
 import uuid
+from urllib.parse import quote
 
 from ltms_contract.canonical import canonicalize
 
 MAPPING_VERSION = "1"
-AI = "https://w3id.org/xapi/ai"
+AI = "https://w3id.org/xapi-ai"
 EXT = AI + "/extensions/"
 PROFILE_VERSION = AI + "/profile/0.10.0"
 # = uuid5(NAMESPACE_URL, PROFILE_VERSION + "/holocron-mapping/1")
-NAMESPACE = uuid.UUID("31bddff3-c274-5e19-ba21-56836b977ee6")
+NAMESPACE = uuid.UUID("19413c7a-d33c-5129-b99b-07d709cef285")
 TELEMETRY_MAX_BYTES = 16 * 1024
 
 VALID_XAPI_VERSIONS = ("2.0.0", "1.0.3")
@@ -102,7 +103,7 @@ def record_to_statement(
     place = rec.get("place")
     if place:
         grouping.append(
-            _activity(base, f"/places/{place}", AI + "/activity-type/place", place)
+            _activity(base, f"/places/{quote(place, safe='')}", AI + "/activity-type/place", place)  # place may contain spaces
         )
 
     context: dict = {"contextActivities": {"category": category}}

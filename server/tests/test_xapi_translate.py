@@ -97,3 +97,20 @@ def test_perception_without_telemetry_has_no_result():
         rec, payload={"kind": "pose", "samples": []}, base="https://ltms.example.org"
     )
     assert "result" not in stmt
+
+
+def test_namespace_matches_profile_iri():
+    import uuid
+    from server.xapi import translate
+    assert translate.NAMESPACE == uuid.uuid5(uuid.NAMESPACE_URL, translate.PROFILE_VERSION + "/holocron-mapping/1")
+
+
+def test_place_with_spaces_is_percent_encoded():
+    from server.xapi.translate import record_to_statement
+    rec = {"agent": "robot-1", "seq": 1, "ts": "2026-10-31T14:00:00Z", "type": "event", "hash": "1" * 64,
+           "prev_hash": "0" * 64, "payload_hash": "2" * 64, "sig": "3" * 128,
+           "received_at": "2026-10-31T14:00:01+00:00", "agent_kind": "robot", "place": "kitchen table"}
+    s = record_to_statement(rec, base="https://ltms.example.org")
+    place = s["context"]["contextActivities"]["grouping"][0]
+    assert place["id"] == "https://ltms.example.org/places/kitchen%20table"
+    assert place["definition"]["name"] == {"en": "kitchen table"}

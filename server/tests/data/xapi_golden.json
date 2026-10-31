@@ -28,7 +28,7 @@
   },
   "payload": null,
   "statement": {
-   "id": "cbea19cf-2d66-5493-9730-de36775eadc8",
+   "id": "ce905fe1-ae42-502a-946a-82ceec3cb3af",
    "actor": {
     "objectType": "Agent",
     "account": {
@@ -37,7 +37,7 @@
     }
    },
    "verb": {
-    "id": "https://w3id.org/xapi/ai/verbs/performed",
+    "id": "https://w3id.org/xapi-ai/verbs/performed",
     "display": {
      "en": "performed"
     }
@@ -46,7 +46,7 @@
     "objectType": "Activity",
     "id": "https://ltms.example.org/records/robot-1/42",
     "definition": {
-     "type": "https://w3id.org/xapi/ai/activity-type/record",
+     "type": "https://w3id.org/xapi-ai/activity-type/record",
      "name": {
       "en": "Drove forward 0.5 m"
      }
@@ -59,7 +59,7 @@
      "category": [
       {
        "objectType": "Activity",
-       "id": "https://w3id.org/xapi/ai/profile/0.10.0",
+       "id": "https://w3id.org/xapi-ai/profile/0.10.0",
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
@@ -70,7 +70,7 @@
        "objectType": "Activity",
        "id": "https://ltms.example.org/swarms/example-swarm",
        "definition": {
-        "type": "https://w3id.org/xapi/ai/activity-type/swarm",
+        "type": "https://w3id.org/xapi-ai/activity-type/swarm",
         "name": {
          "en": "example-swarm"
         }
@@ -80,7 +80,7 @@
        "objectType": "Activity",
        "id": "https://ltms.example.org/places/workbench",
        "definition": {
-        "type": "https://w3id.org/xapi/ai/activity-type/place",
+        "type": "https://w3id.org/xapi-ai/activity-type/place",
         "name": {
          "en": "workbench"
         }
@@ -89,19 +89,19 @@
      ]
     },
     "extensions": {
-     "https://w3id.org/xapi/ai/extensions/holocron/seq": 42,
-     "https://w3id.org/xapi/ai/extensions/holocron/hash": "1111111111111111111111111111111111111111111111111111111111111111",
-     "https://w3id.org/xapi/ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-     "https://w3id.org/xapi/ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-     "https://w3id.org/xapi/ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-     "https://w3id.org/xapi/ai/extensions/holocron/record-type": "action",
-     "https://w3id.org/xapi/ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
-     "https://w3id.org/xapi/ai/extensions/holocron/mapping-version": "1",
-     "https://w3id.org/xapi/ai/extensions/agent-kind": "robot",
-     "https://w3id.org/xapi/ai/extensions/holocron/refs": {
+     "https://w3id.org/xapi-ai/extensions/holocron/seq": 42,
+     "https://w3id.org/xapi-ai/extensions/holocron/hash": "1111111111111111111111111111111111111111111111111111111111111111",
+     "https://w3id.org/xapi-ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "https://w3id.org/xapi-ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "https://w3id.org/xapi-ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "https://w3id.org/xapi-ai/extensions/holocron/record-type": "action",
+     "https://w3id.org/xapi-ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
+     "https://w3id.org/xapi-ai/extensions/holocron/mapping-version": "1",
+     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot",
+     "https://w3id.org/xapi-ai/extensions/holocron/refs": {
       "because": "robot-1:41"
      },
-     "https://w3id.org/xapi/ai/extensions/software": "z3 0.4.1"
+     "https://w3id.org/xapi-ai/extensions/software": "z3 0.4.1"
     },
     "contextAgents": [
      {
@@ -114,7 +114,7 @@
        }
       },
       "relevantTypes": [
-       "https://w3id.org/xapi/ai/activity-type/relay-role"
+       "https://w3id.org/xapi-ai/activity-type/relay-role"
       ]
      }
     ]
@@ -122,7 +122,7 @@
    "result": {
     "success": true,
     "extensions": {
-     "https://w3id.org/xapi/ai/extensions/outcome": "success"
+     "https://w3id.org/xapi-ai/extensions/outcome": "success"
     }
    }
   }
@@ -148,7 +148,7 @@
   },
   "payload": null,
   "statement": {
-   "id": "ef4cc8ec-990c-567f-91f9-a9f2ef011b5c",
+   "id": "a5191c54-2abc-5cf9-b6f5-b9e88fc7a280",
    "actor": {
     "objectType": "Agent",
     "account": {
@@ -157,7 +157,7 @@
     }
    },
    "verb": {
-    "id": "https://w3id.org/xapi/ai/verbs/performed",
+    "id": "https://w3id.org/xapi-ai/verbs/performed",
     "display": {
      "en": "performed"
     }
@@ -166,7 +166,7 @@
     "objectType": "Activity",
     "id": "https://ltms.example.org/records/robot-1/43",
     "definition": {
-     "type": "https://w3id.org/xapi/ai/activity-type/record"
+     "type": "https://w3id.org/xapi-ai/activity-type/record"
     }
    },
    "timestamp": "2026-10-31T14:02:11Z",
@@ -176,7 +176,7 @@
      "category": [
       {
        "objectType": "Activity",
-       "id": "https://w3id.org/xapi/ai/profile/0.10.0",
+       "id": "https://w3id.org/xapi-ai/profile/0.10.0",
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
@@ -184,21 +184,21 @@
      ]
     },
     "extensions": {
-     "https://w3id.org/xapi/ai/extensions/holocron/seq": 43,
-     "https://w3id.org/xapi/ai/extensions/holocron/hash": "2222222222222222222222222222222222222222222222222222222222222222",
-     "https://w3id.org/xapi/ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-     "https://w3id.org/xapi/ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-     "https://w3id.org/xapi/ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-     "https://w3id.org/xapi/ai/extensions/holocron/record-type": "action",
-     "https://w3id.org/xapi/ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
-     "https://w3id.org/xapi/ai/extensions/holocron/mapping-version": "1",
-     "https://w3id.org/xapi/ai/extensions/agent-kind": "robot"
+     "https://w3id.org/xapi-ai/extensions/holocron/seq": 43,
+     "https://w3id.org/xapi-ai/extensions/holocron/hash": "2222222222222222222222222222222222222222222222222222222222222222",
+     "https://w3id.org/xapi-ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "https://w3id.org/xapi-ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "https://w3id.org/xapi-ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "https://w3id.org/xapi-ai/extensions/holocron/record-type": "action",
+     "https://w3id.org/xapi-ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
+     "https://w3id.org/xapi-ai/extensions/holocron/mapping-version": "1",
+     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot"
     }
    },
    "result": {
     "success": false,
     "extensions": {
-     "https://w3id.org/xapi/ai/extensions/outcome": "stuck"
+     "https://w3id.org/xapi-ai/extensions/outcome": "stuck"
     }
    }
   }
@@ -230,7 +230,7 @@
   },
   "payload": null,
   "statement": {
-   "id": "ff72da3a-2f6f-5808-afc3-0019c5a582ec",
+   "id": "7447168c-8d3b-5d7c-8e4e-08dbaf667d18",
    "actor": {
     "objectType": "Agent",
     "account": {
@@ -239,7 +239,7 @@
     }
    },
    "verb": {
-    "id": "https://w3id.org/xapi/ai/verbs/communicated",
+    "id": "https://w3id.org/xapi-ai/verbs/communicated",
     "display": {
      "en": "communicated"
     }
@@ -248,7 +248,7 @@
     "objectType": "Activity",
     "id": "https://ltms.example.org/records/robot-1/44",
     "definition": {
-     "type": "https://w3id.org/xapi/ai/activity-type/record",
+     "type": "https://w3id.org/xapi-ai/activity-type/record",
      "name": {
       "en": "Asked robot-2 for the dock position"
      }
@@ -261,7 +261,7 @@
      "category": [
       {
        "objectType": "Activity",
-       "id": "https://w3id.org/xapi/ai/profile/0.10.0",
+       "id": "https://w3id.org/xapi-ai/profile/0.10.0",
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
@@ -272,7 +272,7 @@
        "objectType": "Activity",
        "id": "https://ltms.example.org/swarms/example-swarm",
        "definition": {
-        "type": "https://w3id.org/xapi/ai/activity-type/swarm",
+        "type": "https://w3id.org/xapi-ai/activity-type/swarm",
         "name": {
          "en": "example-swarm"
         }
@@ -281,15 +281,15 @@
      ]
     },
     "extensions": {
-     "https://w3id.org/xapi/ai/extensions/holocron/seq": 44,
-     "https://w3id.org/xapi/ai/extensions/holocron/hash": "3333333333333333333333333333333333333333333333333333333333333333",
-     "https://w3id.org/xapi/ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-     "https://w3id.org/xapi/ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-     "https://w3id.org/xapi/ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-     "https://w3id.org/xapi/ai/extensions/holocron/record-type": "communication",
-     "https://w3id.org/xapi/ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
-     "https://w3id.org/xapi/ai/extensions/holocron/mapping-version": "1",
-     "https://w3id.org/xapi/ai/extensions/agent-kind": "robot"
+     "https://w3id.org/xapi-ai/extensions/holocron/seq": 44,
+     "https://w3id.org/xapi-ai/extensions/holocron/hash": "3333333333333333333333333333333333333333333333333333333333333333",
+     "https://w3id.org/xapi-ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "https://w3id.org/xapi-ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "https://w3id.org/xapi-ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "https://w3id.org/xapi-ai/extensions/holocron/record-type": "communication",
+     "https://w3id.org/xapi-ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
+     "https://w3id.org/xapi-ai/extensions/holocron/mapping-version": "1",
+     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot"
     },
     "contextAgents": [
      {
@@ -302,7 +302,7 @@
        }
       },
       "relevantTypes": [
-       "https://w3id.org/xapi/ai/activity-type/peer-role"
+       "https://w3id.org/xapi-ai/activity-type/peer-role"
       ]
      },
      {
@@ -315,7 +315,7 @@
        }
       },
       "relevantTypes": [
-       "https://w3id.org/xapi/ai/activity-type/peer-role"
+       "https://w3id.org/xapi-ai/activity-type/peer-role"
       ]
      },
      {
@@ -328,7 +328,7 @@
        }
       },
       "relevantTypes": [
-       "https://w3id.org/xapi/ai/activity-type/relay-role"
+       "https://w3id.org/xapi-ai/activity-type/relay-role"
       ]
      }
     ]
@@ -362,7 +362,7 @@
   },
   "payload": null,
   "statement": {
-   "id": "ff72da3a-2f6f-5808-afc3-0019c5a582ec",
+   "id": "7447168c-8d3b-5d7c-8e4e-08dbaf667d18",
    "actor": {
     "objectType": "Agent",
     "account": {
@@ -371,7 +371,7 @@
     }
    },
    "verb": {
-    "id": "https://w3id.org/xapi/ai/verbs/communicated",
+    "id": "https://w3id.org/xapi-ai/verbs/communicated",
     "display": {
      "en": "communicated"
     }
@@ -380,7 +380,7 @@
     "objectType": "Activity",
     "id": "https://ltms.example.org/records/robot-1/44",
     "definition": {
-     "type": "https://w3id.org/xapi/ai/activity-type/record",
+     "type": "https://w3id.org/xapi-ai/activity-type/record",
      "name": {
       "en": "Asked robot-2 for the dock position"
      }
@@ -393,7 +393,7 @@
      "category": [
       {
        "objectType": "Activity",
-       "id": "https://w3id.org/xapi/ai/profile/0.10.0",
+       "id": "https://w3id.org/xapi-ai/profile/0.10.0",
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
@@ -404,7 +404,7 @@
        "objectType": "Activity",
        "id": "https://ltms.example.org/swarms/example-swarm",
        "definition": {
-        "type": "https://w3id.org/xapi/ai/activity-type/swarm",
+        "type": "https://w3id.org/xapi-ai/activity-type/swarm",
         "name": {
          "en": "example-swarm"
         }
@@ -413,15 +413,15 @@
      ]
     },
     "extensions": {
-     "https://w3id.org/xapi/ai/extensions/holocron/seq": 44,
-     "https://w3id.org/xapi/ai/extensions/holocron/hash": "3333333333333333333333333333333333333333333333333333333333333333",
-     "https://w3id.org/xapi/ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-     "https://w3id.org/xapi/ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-     "https://w3id.org/xapi/ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-     "https://w3id.org/xapi/ai/extensions/holocron/record-type": "communication",
-     "https://w3id.org/xapi/ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
-     "https://w3id.org/xapi/ai/extensions/holocron/mapping-version": "1",
-     "https://w3id.org/xapi/ai/extensions/agent-kind": "robot"
+     "https://w3id.org/xapi-ai/extensions/holocron/seq": 44,
+     "https://w3id.org/xapi-ai/extensions/holocron/hash": "3333333333333333333333333333333333333333333333333333333333333333",
+     "https://w3id.org/xapi-ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "https://w3id.org/xapi-ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "https://w3id.org/xapi-ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "https://w3id.org/xapi-ai/extensions/holocron/record-type": "communication",
+     "https://w3id.org/xapi-ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
+     "https://w3id.org/xapi-ai/extensions/holocron/mapping-version": "1",
+     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot"
     }
    }
   }
@@ -467,7 +467,7 @@
    ]
   },
   "statement": {
-   "id": "f176150a-cb57-57c7-9f6a-ac4dbc511da0",
+   "id": "a164467a-c9cc-5aa1-8902-728a6c097695",
    "actor": {
     "objectType": "Agent",
     "account": {
@@ -476,7 +476,7 @@
     }
    },
    "verb": {
-    "id": "https://w3id.org/xapi/ai/verbs/perceived",
+    "id": "https://w3id.org/xapi-ai/verbs/perceived",
     "display": {
      "en": "perceived"
     }
@@ -485,7 +485,7 @@
     "objectType": "Activity",
     "id": "https://ltms.example.org/records/robot-1/45",
     "definition": {
-     "type": "https://w3id.org/xapi/ai/activity-type/record",
+     "type": "https://w3id.org/xapi-ai/activity-type/record",
      "name": {
       "en": "Pose window"
      }
@@ -498,7 +498,7 @@
      "category": [
       {
        "objectType": "Activity",
-       "id": "https://w3id.org/xapi/ai/profile/0.10.0",
+       "id": "https://w3id.org/xapi-ai/profile/0.10.0",
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
@@ -506,23 +506,23 @@
      ]
     },
     "extensions": {
-     "https://w3id.org/xapi/ai/extensions/holocron/seq": 45,
-     "https://w3id.org/xapi/ai/extensions/holocron/hash": "4444444444444444444444444444444444444444444444444444444444444444",
-     "https://w3id.org/xapi/ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-     "https://w3id.org/xapi/ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-     "https://w3id.org/xapi/ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-     "https://w3id.org/xapi/ai/extensions/holocron/record-type": "perception",
-     "https://w3id.org/xapi/ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
-     "https://w3id.org/xapi/ai/extensions/holocron/mapping-version": "1",
-     "https://w3id.org/xapi/ai/extensions/agent-kind": "robot",
-     "https://w3id.org/xapi/ai/extensions/holocron/tags": [
+     "https://w3id.org/xapi-ai/extensions/holocron/seq": 45,
+     "https://w3id.org/xapi-ai/extensions/holocron/hash": "4444444444444444444444444444444444444444444444444444444444444444",
+     "https://w3id.org/xapi-ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "https://w3id.org/xapi-ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "https://w3id.org/xapi-ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "https://w3id.org/xapi-ai/extensions/holocron/record-type": "perception",
+     "https://w3id.org/xapi-ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
+     "https://w3id.org/xapi-ai/extensions/holocron/mapping-version": "1",
+     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot",
+     "https://w3id.org/xapi-ai/extensions/holocron/tags": [
       "telemetry"
      ]
     }
    },
    "result": {
     "extensions": {
-     "https://w3id.org/xapi/ai/extensions/telemetry": {
+     "https://w3id.org/xapi-ai/extensions/telemetry": {
       "kind": "pose",
       "frame": "map",
       "samples": [
@@ -571,7 +571,7 @@
    "$generate": "sensor battery percent, 2000 samples {t:i, v:70}"
   },
   "statement": {
-   "id": "052235da-1a16-51d7-a989-f37dcdad6e07",
+   "id": "ca8e6454-03d1-5d85-8514-aa96b4d32058",
    "actor": {
     "objectType": "Agent",
     "account": {
@@ -580,7 +580,7 @@
     }
    },
    "verb": {
-    "id": "https://w3id.org/xapi/ai/verbs/perceived",
+    "id": "https://w3id.org/xapi-ai/verbs/perceived",
     "display": {
      "en": "perceived"
     }
@@ -589,7 +589,7 @@
     "objectType": "Activity",
     "id": "https://ltms.example.org/records/robot-1/46",
     "definition": {
-     "type": "https://w3id.org/xapi/ai/activity-type/record",
+     "type": "https://w3id.org/xapi-ai/activity-type/record",
      "name": {
       "en": "Battery window"
      }
@@ -602,7 +602,7 @@
      "category": [
       {
        "objectType": "Activity",
-       "id": "https://w3id.org/xapi/ai/profile/0.10.0",
+       "id": "https://w3id.org/xapi-ai/profile/0.10.0",
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
@@ -610,16 +610,16 @@
      ]
     },
     "extensions": {
-     "https://w3id.org/xapi/ai/extensions/holocron/seq": 46,
-     "https://w3id.org/xapi/ai/extensions/holocron/hash": "5555555555555555555555555555555555555555555555555555555555555555",
-     "https://w3id.org/xapi/ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-     "https://w3id.org/xapi/ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-     "https://w3id.org/xapi/ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-     "https://w3id.org/xapi/ai/extensions/holocron/record-type": "perception",
-     "https://w3id.org/xapi/ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
-     "https://w3id.org/xapi/ai/extensions/holocron/mapping-version": "1",
-     "https://w3id.org/xapi/ai/extensions/agent-kind": "robot",
-     "https://w3id.org/xapi/ai/extensions/holocron/tags": [
+     "https://w3id.org/xapi-ai/extensions/holocron/seq": 46,
+     "https://w3id.org/xapi-ai/extensions/holocron/hash": "5555555555555555555555555555555555555555555555555555555555555555",
+     "https://w3id.org/xapi-ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "https://w3id.org/xapi-ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "https://w3id.org/xapi-ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "https://w3id.org/xapi-ai/extensions/holocron/record-type": "perception",
+     "https://w3id.org/xapi-ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
+     "https://w3id.org/xapi-ai/extensions/holocron/mapping-version": "1",
+     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot",
+     "https://w3id.org/xapi-ai/extensions/holocron/tags": [
       "telemetry",
       "internal"
      ]
@@ -627,7 +627,7 @@
    },
    "result": {
     "extensions": {
-     "https://w3id.org/xapi/ai/extensions/telemetry": {
+     "https://w3id.org/xapi-ai/extensions/telemetry": {
       "kind": "sensor",
       "sensor": "battery",
       "unit": "percent",
@@ -668,7 +668,7 @@
    ]
   },
   "statement": {
-   "id": "c2fb45b3-71ed-5377-9e40-e53b9771744a",
+   "id": "73ceb300-a07b-5741-85ef-1a53ef922b7b",
    "actor": {
     "objectType": "Agent",
     "account": {
@@ -677,7 +677,7 @@
     }
    },
    "verb": {
-    "id": "https://w3id.org/xapi/ai/verbs/perceived",
+    "id": "https://w3id.org/xapi-ai/verbs/perceived",
     "display": {
      "en": "perceived"
     }
@@ -686,7 +686,7 @@
     "objectType": "Activity",
     "id": "https://ltms.example.org/records/robot-1/47",
     "definition": {
-     "type": "https://w3id.org/xapi/ai/activity-type/record"
+     "type": "https://w3id.org/xapi-ai/activity-type/record"
     }
    },
    "timestamp": "2026-10-31T14:02:11Z",
@@ -696,7 +696,7 @@
      "category": [
       {
        "objectType": "Activity",
-       "id": "https://w3id.org/xapi/ai/profile/0.10.0",
+       "id": "https://w3id.org/xapi-ai/profile/0.10.0",
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
@@ -704,16 +704,16 @@
      ]
     },
     "extensions": {
-     "https://w3id.org/xapi/ai/extensions/holocron/seq": 47,
-     "https://w3id.org/xapi/ai/extensions/holocron/hash": "6666666666666666666666666666666666666666666666666666666666666666",
-     "https://w3id.org/xapi/ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-     "https://w3id.org/xapi/ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-     "https://w3id.org/xapi/ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-     "https://w3id.org/xapi/ai/extensions/holocron/record-type": "perception",
-     "https://w3id.org/xapi/ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
-     "https://w3id.org/xapi/ai/extensions/holocron/mapping-version": "1",
-     "https://w3id.org/xapi/ai/extensions/agent-kind": "robot",
-     "https://w3id.org/xapi/ai/extensions/holocron/tags": [
+     "https://w3id.org/xapi-ai/extensions/holocron/seq": 47,
+     "https://w3id.org/xapi-ai/extensions/holocron/hash": "6666666666666666666666666666666666666666666666666666666666666666",
+     "https://w3id.org/xapi-ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "https://w3id.org/xapi-ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "https://w3id.org/xapi-ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "https://w3id.org/xapi-ai/extensions/holocron/record-type": "perception",
+     "https://w3id.org/xapi-ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
+     "https://w3id.org/xapi-ai/extensions/holocron/mapping-version": "1",
+     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot",
+     "https://w3id.org/xapi-ai/extensions/holocron/tags": [
       "telemetry"
      ]
     }
@@ -744,7 +744,7 @@
    "samples": []
   },
   "statement": {
-   "id": "2fe64551-3ffe-55b9-82f2-3f9f2d5edc0a",
+   "id": "bb035d2c-7474-5da7-b3f1-ecf13dc879ec",
    "actor": {
     "objectType": "Agent",
     "account": {
@@ -753,7 +753,7 @@
     }
    },
    "verb": {
-    "id": "https://w3id.org/xapi/ai/verbs/perceived",
+    "id": "https://w3id.org/xapi-ai/verbs/perceived",
     "display": {
      "en": "perceived"
     }
@@ -762,7 +762,7 @@
     "objectType": "Activity",
     "id": "https://ltms.example.org/records/robot-1/48",
     "definition": {
-     "type": "https://w3id.org/xapi/ai/activity-type/record",
+     "type": "https://w3id.org/xapi-ai/activity-type/record",
      "name": {
       "en": "Obstacle 12 cm ahead"
      }
@@ -775,7 +775,7 @@
      "category": [
       {
        "objectType": "Activity",
-       "id": "https://w3id.org/xapi/ai/profile/0.10.0",
+       "id": "https://w3id.org/xapi-ai/profile/0.10.0",
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
@@ -783,15 +783,15 @@
      ]
     },
     "extensions": {
-     "https://w3id.org/xapi/ai/extensions/holocron/seq": 48,
-     "https://w3id.org/xapi/ai/extensions/holocron/hash": "7777777777777777777777777777777777777777777777777777777777777777",
-     "https://w3id.org/xapi/ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-     "https://w3id.org/xapi/ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-     "https://w3id.org/xapi/ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-     "https://w3id.org/xapi/ai/extensions/holocron/record-type": "perception",
-     "https://w3id.org/xapi/ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
-     "https://w3id.org/xapi/ai/extensions/holocron/mapping-version": "1",
-     "https://w3id.org/xapi/ai/extensions/agent-kind": "robot"
+     "https://w3id.org/xapi-ai/extensions/holocron/seq": 48,
+     "https://w3id.org/xapi-ai/extensions/holocron/hash": "7777777777777777777777777777777777777777777777777777777777777777",
+     "https://w3id.org/xapi-ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "https://w3id.org/xapi-ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "https://w3id.org/xapi-ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "https://w3id.org/xapi-ai/extensions/holocron/record-type": "perception",
+     "https://w3id.org/xapi-ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
+     "https://w3id.org/xapi-ai/extensions/holocron/mapping-version": "1",
+     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot"
     }
    }
   }
@@ -822,7 +822,7 @@
   },
   "payload": null,
   "statement": {
-   "id": "7cc54634-1c69-558e-8cb6-2893d7e0dcf0",
+   "id": "15d43abe-7071-5da7-b12e-fe646c673402",
    "actor": {
     "objectType": "Agent",
     "account": {
@@ -831,7 +831,7 @@
     }
    },
    "verb": {
-    "id": "https://w3id.org/xapi/ai/verbs/learned",
+    "id": "https://w3id.org/xapi-ai/verbs/learned",
     "display": {
      "en": "learned"
     }
@@ -840,7 +840,7 @@
     "objectType": "Activity",
     "id": "https://ltms.example.org/records/planner-agent/7",
     "definition": {
-     "type": "https://w3id.org/xapi/ai/activity-type/record",
+     "type": "https://w3id.org/xapi-ai/activity-type/record",
      "name": {
       "en": "Approach robot-2 slowly on the rug"
      }
@@ -853,7 +853,7 @@
      "category": [
       {
        "objectType": "Activity",
-       "id": "https://w3id.org/xapi/ai/profile/0.10.0",
+       "id": "https://w3id.org/xapi-ai/profile/0.10.0",
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
@@ -861,16 +861,16 @@
      ]
     },
     "extensions": {
-     "https://w3id.org/xapi/ai/extensions/holocron/seq": 7,
-     "https://w3id.org/xapi/ai/extensions/holocron/hash": "8888888888888888888888888888888888888888888888888888888888888888",
-     "https://w3id.org/xapi/ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-     "https://w3id.org/xapi/ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-     "https://w3id.org/xapi/ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-     "https://w3id.org/xapi/ai/extensions/holocron/record-type": "lesson",
-     "https://w3id.org/xapi/ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
-     "https://w3id.org/xapi/ai/extensions/holocron/mapping-version": "1",
-     "https://w3id.org/xapi/ai/extensions/agent-kind": "ai-agent",
-     "https://w3id.org/xapi/ai/extensions/holocron/refs": {
+     "https://w3id.org/xapi-ai/extensions/holocron/seq": 7,
+     "https://w3id.org/xapi-ai/extensions/holocron/hash": "8888888888888888888888888888888888888888888888888888888888888888",
+     "https://w3id.org/xapi-ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "https://w3id.org/xapi-ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "https://w3id.org/xapi-ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "https://w3id.org/xapi-ai/extensions/holocron/record-type": "lesson",
+     "https://w3id.org/xapi-ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
+     "https://w3id.org/xapi-ai/extensions/holocron/mapping-version": "1",
+     "https://w3id.org/xapi-ai/extensions/agent-kind": "ai-agent",
+     "https://w3id.org/xapi-ai/extensions/holocron/refs": {
       "from": [
        "robot-1:43"
       ]
@@ -900,7 +900,7 @@
   },
   "payload": null,
   "statement": {
-   "id": "365b625c-14d4-50fb-a644-efca1431e857",
+   "id": "2db33152-c2f1-56de-95fd-1c129b8c3305",
    "actor": {
     "objectType": "Agent",
     "account": {
@@ -918,7 +918,7 @@
     "objectType": "Activity",
     "id": "https://ltms.example.org/records/robot-1/49",
     "definition": {
-     "type": "https://w3id.org/xapi/ai/activity-type/record",
+     "type": "https://w3id.org/xapi-ai/activity-type/record",
      "name": {
       "en": "Docked"
      }
@@ -931,7 +931,7 @@
      "category": [
       {
        "objectType": "Activity",
-       "id": "https://w3id.org/xapi/ai/profile/0.10.0",
+       "id": "https://w3id.org/xapi-ai/profile/0.10.0",
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
@@ -939,15 +939,15 @@
      ]
     },
     "extensions": {
-     "https://w3id.org/xapi/ai/extensions/holocron/seq": 49,
-     "https://w3id.org/xapi/ai/extensions/holocron/hash": "9999999999999999999999999999999999999999999999999999999999999999",
-     "https://w3id.org/xapi/ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-     "https://w3id.org/xapi/ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-     "https://w3id.org/xapi/ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-     "https://w3id.org/xapi/ai/extensions/holocron/record-type": "event",
-     "https://w3id.org/xapi/ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
-     "https://w3id.org/xapi/ai/extensions/holocron/mapping-version": "1",
-     "https://w3id.org/xapi/ai/extensions/agent-kind": "robot"
+     "https://w3id.org/xapi-ai/extensions/holocron/seq": 49,
+     "https://w3id.org/xapi-ai/extensions/holocron/hash": "9999999999999999999999999999999999999999999999999999999999999999",
+     "https://w3id.org/xapi-ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "https://w3id.org/xapi-ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "https://w3id.org/xapi-ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "https://w3id.org/xapi-ai/extensions/holocron/record-type": "event",
+     "https://w3id.org/xapi-ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
+     "https://w3id.org/xapi-ai/extensions/holocron/mapping-version": "1",
+     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot"
     }
    }
   }
