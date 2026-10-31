@@ -256,7 +256,14 @@ async def activity(
         for key, rtype, bucket_idx, is_tele, count in rows:
             g = groups.setdefault(
                 key,
-                {"total": 0, "telemetry": 0, "by_type": {}, "series": [0] * 24, "series_by_type": {}},
+                {
+                    "total": 0,
+                    "telemetry": 0,
+                    "by_type": {},
+                    "series": [0] * 24,
+                    "series_by_type": {},
+                    "telemetry_series": [0] * 24,
+                },
             )
             g["total"] += count
             b = min(max(int(bucket_idx), 0), 23)
@@ -265,6 +272,7 @@ async def activity(
             g["series_by_type"].setdefault(rtype, [0] * 24)[b] += count
             if is_tele:
                 g["telemetry"] += count
+                g["telemetry_series"][b] += count
 
         # previous_total: equal window just before, grouped by key only
         prev_since = since - timedelta(hours=hours)
@@ -282,7 +290,14 @@ async def activity(
         for key in previous_by_key:
             groups.setdefault(
                 key,
-                {"total": 0, "telemetry": 0, "by_type": {}, "series": [0] * 24, "series_by_type": {}},
+                {
+                    "total": 0,
+                    "telemetry": 0,
+                    "by_type": {},
+                    "series": [0] * 24,
+                    "series_by_type": {},
+                    "telemetry_series": [0] * 24,
+                },
             )
 
         result = []
@@ -296,6 +311,7 @@ async def activity(
                     "by_type": g["by_type"],
                     "series": g["series"],
                     "series_by_type": g["series_by_type"],
+                    "telemetry_series": g["telemetry_series"],
                 }
             )
         result.sort(key=lambda g: (-g["total"], g["key"] is None, g["key"] or ""))

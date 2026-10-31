@@ -1,8 +1,6 @@
 // Activity page (issue #75): swarm activity overview for the research dashboard.
 // Data: GET /admin/activity?hours=<1|24|168|720>, grouped by swarm (busiest first),
 // the free-agent group reported as key null and titled "Free agents".
-// Known limit: with telemetry hidden, totals and bars drop telemetry but the
-// sparkline still includes it (the API has no per-bucket telemetry series).
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useApi } from "../api/useApi.js";
@@ -30,7 +28,13 @@ function withoutTelemetry(group) {
   const tele = group.telemetry || 0;
   const byType = { ...group.by_type };
   byType.perception = Math.max(0, (byType.perception || 0) - tele);
-  return { ...group, total: Math.max(0, group.total - tele), by_type: byType };
+  return {
+    ...group,
+    total: Math.max(0, group.total - tele),
+    by_type: byType,
+    // Drop the per-bucket telemetry count so the sparkline matches the bars.
+    series: group.series.map((n, i) => Math.max(0, n - (group.telemetry_series?.[i] || 0))),
+  };
 }
 
 function trendArrow(direction) {
