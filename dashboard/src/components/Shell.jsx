@@ -4,6 +4,7 @@ import { useAdmin } from "../App.jsx";
 import { useApi } from "../api/useApi.js";
 
 const NAV = [
+  { to: "/activity", label: "Activity" },
   { to: "/", label: "Timeline", end: true },
   { to: "/members", label: "Members", badge: "pending" },
   { to: "/integrity", label: "Integrity" },

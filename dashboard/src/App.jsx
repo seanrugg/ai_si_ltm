@@ -16,6 +16,7 @@ import RecordPage from "./pages/RecordPage.jsx";
 import Settings from "./pages/Settings.jsx";
 import RecallLog from "./pages/RecallLog.jsx";
 import Timeline from "./pages/Timeline.jsx";
+import Activity from "./pages/Activity.jsx";
 
 const AdminContext = createContext(null);
 export const useAdmin = () => useContext(AdminContext);
@@ -65,6 +66,7 @@ const router = createHashRouter([
     element: <RequireAdmin />,
     children: [
       { path: "/", element: <Timeline /> },
+      { path: "/activity", element: <Activity /> },
       { path: "/members", element: <Members /> },
       { path: "/integrity", element: <Integrity /> },
       { path: "/volume", element: <Volume /> },
