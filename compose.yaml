@@ -1,24 +1,19 @@
 # Docker Compose stack for LTMS.
 #
-# Default (no profiles): LTMS + Postgres only.
-#   docker compose up -d
-#
-# Optional services are opt-in through Compose profiles:
-#   docker compose --profile mqtt up -d   # MQTT broker (see deploy/compose/mosquitto.conf)
-#
-# An LRS profile is intentionally not included: the official Yet Analytics SQL
-# LRS image name and environment variables could not be confirmed, so I did
-# not want to guess them (see the issue notes). Any xAPI-conformant LRS works
-# with LTMS -- an admin adds the LRS endpoint in LTMS, it is not part of this
-# stack.
-#
-# Quick start:
+# Default (no profiles): LTMS + Postgres.
 #   cp deploy/compose/.env.example .env     # then edit .env
 #   docker compose up -d
 #
-# LTMS creates its own database schema on start, so there is no separate
-# schema command to run (unlike the Plesk deploy, see deploy/root-setup.sh).
+# Optional services, opt-in through profiles (see docs/docker.md):
+#   --profile mqtt   Mosquitto broker for swarm hubs and members
+#   --profile lrs    Yet Analytics SQL LRS with its own Postgres
+# LTMS works without either. Any xAPI-conformant LRS can be connected instead;
+# an admin adds LRS endpoints in LTMS.
 #
+# LTMS and the LRS publish on 127.0.0.1 only by default. Put a TLS reverse
+# proxy in front before exposing them, or set LTMS_BIND / LRS_BIND in .env.
+# LTMS creates its own schema on start.
+
 services:
   db:
     image: postgres:16
@@ -46,18 +41,63 @@ services:
       LTMS_ADMIN_PASSWORD: ${LTMS_ADMIN_PASSWORD}
       LTMS_COOKIE_SECURE: ${LTMS_COOKIE_SECURE}
       LTMS_DASHBOARD_DIR: /app/dashboard/dist
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
     ports:
-      - "${LTMS_PORT:-8080}:8080"
+      - "${LTMS_BIND:-127.0.0.1}:${LTMS_PORT:-8080}:8080"
 
-  # Optional MQTT broker. Opt in with --profile mqtt.
+  # Optional MQTT broker for swarms. Members connect on the local network,
+  # so it listens on all interfaces; authentication is required.
   mqtt:
     image: eclipse-mosquitto:2
-    profiles:
-      - mqtt
+    profiles: [mqtt]
     volumes:
       - ./deploy/compose/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./deploy/compose/mosquitto.passwd:/mosquitto/config/passwd:ro
+      - ./deploy/compose/mosquitto.acl:/mosquitto/config/acl:ro
+      - mqtt-data:/mosquitto/data
     ports:
-      - "1883:1883"
+      - "${MQTT_PORT:-1883}:1883"
+
+  # Optional xAPI LRS: Yet Analytics SQL LRS, as in its own compose example.
+  # Pin LRSQL_IMAGE to a release tag for anything beyond a trial.
+  lrs-db:
+    image: postgres:16
+    profiles: [lrs]
+    volumes:
+      - lrs-db-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${LRSQL_DB_NAME:-lrsql}
+      POSTGRES_USER: ${LRSQL_DB_USER:-lrsql}
+      POSTGRES_PASSWORD: ${LRSQL_DB_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LRSQL_DB_USER:-lrsql} -d ${LRSQL_DB_NAME:-lrsql}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  lrs:
+    image: ${LRSQL_IMAGE:-yetanalytics/lrsql:latest}
+    profiles: [lrs]
+    command: /lrsql/bin/run_postgres.sh
+    depends_on:
+      lrs-db:
+        condition: service_healthy
+    environment:
+      LRSQL_DB_HOST: lrs-db
+      LRSQL_DB_NAME: ${LRSQL_DB_NAME:-lrsql}
+      LRSQL_DB_USER: ${LRSQL_DB_USER:-lrsql}
+      LRSQL_DB_PASSWORD: ${LRSQL_DB_PASSWORD}
+      LRSQL_ADMIN_USER_DEFAULT: ${LRSQL_ADMIN_USER}
+      LRSQL_ADMIN_PASS_DEFAULT: ${LRSQL_ADMIN_PASS}
+      LRSQL_API_KEY_DEFAULT: ${LRSQL_API_KEY}
+      LRSQL_API_SECRET_DEFAULT: ${LRSQL_API_SECRET}
+      LRSQL_POOL_INITIALIZATION_FAIL_TIMEOUT: "10000"
+      LRSQL_ALLOW_ALL_ORIGINS: "false"
+    ports:
+      - "${LRS_BIND:-127.0.0.1}:${LRS_PORT:-8081}:8080"
 
 volumes:
   db-data:
+  mqtt-data:
+  lrs-db-data:

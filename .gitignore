@@ -33,3 +33,7 @@ dashboard/dist/
 
 # Plesk deploy runtime
 tmp/
+
+# compose secrets
+deploy/compose/mosquitto.passwd
+deploy/compose/mosquitto.acl
