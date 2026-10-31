@@ -1,8 +1,12 @@
 # echo-base deployment runbook
 
+This is one reference deployment. Names, hosts and devices here are examples; use your own.
+
 Everything needed to run echo-base for real: the Mosquitto broker with per-member
 ACL, systemd units for the hub (Jetson) and a member (Pi Zero W / UNO Q), and the
 steps to stand them up. Config and docs only — no Python changes.
+
+Run the commands below from this folder (`examples/echo-base`); the `deploy/` paths are relative to it.
 
 ## 1. What runs where
 
@@ -33,8 +37,8 @@ ACL explicitly.
 2. Copy the broker config and ACL into place:
 
    ```
-   sudo cp deploy/echo-base/mosquitto-echo-base.conf /etc/mosquitto/conf.d/
-   sudo cp deploy/echo-base/echo-base.acl /etc/mosquitto/echo-base.acl
+   sudo cp deploy/mosquitto-echo-base.conf /etc/mosquitto/conf.d/
+   sudo cp deploy/echo-base.acl /etc/mosquitto/echo-base.acl
    ```
 
 3. Create the password file. The first user (`jetson-hub`) needs `-c`; then add each
@@ -75,13 +79,13 @@ Runs as `python -m cli_agent.hub_main` under systemd as user `echobase`.
    ```
 
 3. Generate and enroll the hub key and appoint it with the offline swarm key — see
-   `docs/swarms.md` (not repeated here). The key file is mode 0600 owned by `echobase`.
+   `../../docs/swarms.md` (not repeated here). The key file is mode 0600 owned by `echobase`.
 
-4. Copy `deploy/echo-base/hub.env.example` to `/etc/echo-base/hub.env`, fill in the
+4. Copy `deploy/hub.env.example` to `/etc/echo-base/hub.env`, fill in the
    real values (placeholders are only placeholders), and set mode 0600:
 
    ```
-   sudo cp deploy/echo-base/hub.env.example /etc/echo-base/hub.env
+   sudo cp deploy/hub.env.example /etc/echo-base/hub.env
    sudo chown echobase:echobase /etc/echo-base/hub.env
    sudo chmod 0600 /etc/echo-base/hub.env
    ```
@@ -89,7 +93,7 @@ Runs as `python -m cli_agent.hub_main` under systemd as user `echobase`.
 5. Install and enable the unit, then watch the log:
 
    ```
-   sudo cp deploy/echo-base/echo-base-hub.service /etc/systemd/system/
+   sudo cp deploy/echo-base-hub.service /etc/systemd/system/
    sudo systemctl daemon-reload
    sudo systemctl enable --now echo-base-hub
    journalctl -u echo-base-hub -f
@@ -102,14 +106,14 @@ dependency in the unit.
 
 1. Create the user and directories, clone, venv, and install with `'.[member]'` instead of `'.[hub]'`, exactly as in the hub steps.
 
-2. Generate and enroll the member key (its filename is the member name, e.g. `pi-zero`), mode 0600 owned by `echobase`, and appoint it per `docs/swarms.md`.
+2. Generate and enroll the member key (its filename is the member name, e.g. `pi-zero`), mode 0600 owned by `echobase`, and appoint it per `../../docs/swarms.md`.
 
-3. Copy `deploy/echo-base/member.env.example` to `/etc/echo-base/member.env`, set `MQTT_HOST` to the Jetson's address, fill in the real values, mode 0600.
+3. Copy `deploy/member.env.example` to `/etc/echo-base/member.env`, set `MQTT_HOST` to the Jetson's address, fill in the real values, mode 0600.
 
 4. Install and enable the member unit:
 
    ```
-   sudo cp deploy/echo-base/echo-base-member.service /etc/systemd/system/
+   sudo cp deploy/echo-base-member.service /etc/systemd/system/
    sudo systemctl daemon-reload
    sudo systemctl enable --now echo-base-member
    ```
