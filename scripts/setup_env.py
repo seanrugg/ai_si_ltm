@@ -18,6 +18,7 @@ import argparse
 import base64
 import os
 import secrets
+import socket
 import sys
 from pathlib import Path
 
@@ -48,7 +49,7 @@ BOOTSTRAP_VARS = [
 ]
 
 # Keys that may be appended when they are not already in the example, in order.
-APPEND_ORDER = ["LTMS_SECRET_KEY", "COMPOSE_PROFILES"] + BOOTSTRAP_VARS
+APPEND_ORDER = ["LTMS_SECRET_KEY", "COMPOSE_PROFILES", "LTMS_PUBLIC_BASE_URL"] + BOOTSTRAP_VARS
 
 
 def _fernet_key() -> str:
@@ -151,9 +152,29 @@ def main(argv=None) -> int:
     parser.add_argument("--with-lrs", action="store_true")
     parser.add_argument("--with-mqtt", action="store_true")
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--public-url", default=None,
+                        help="LTMS_PUBLIC_BASE_URL (base for statement IRIs; required for LRS forwarding). "
+                             "Required in web mode (must start with https://). Defaults in local mode.")
     parser.add_argument("--out", default=".env")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args(argv)
+
+    # LTMS_PUBLIC_BASE_URL: base for statement IRIs; required for LRS forwarding.
+    if args.mode == "web":
+        if args.public_url is None:
+            print("--mode web requires --public-url", file=sys.stderr)
+            return 1
+        if not args.public_url.startswith("https://"):
+            print("--public-url must start with https://", file=sys.stderr)
+            return 1
+    if args.public_url is None:
+        # Local default: http://<hostname lower>[:<port>], with .local appended
+        # when the hostname has no dot (so other LAN devices reach it via mDNS).
+        host = socket.gethostname().lower()
+        if "." not in host:
+            host = f"{host}.local"
+        args.public_url = f"http://{host}:{args.port}"
+    args.public_url = args.public_url.rstrip("/")
 
     out_path = Path(args.out)
     if out_path.exists() and not args.force:
@@ -162,6 +183,7 @@ def main(argv=None) -> int:
 
     example_text = EXAMPLE.read_text(encoding="utf-8")
     values = build_values(example_text, args.mode, args.with_lrs, args.with_mqtt, args.port)
+    values["LTMS_PUBLIC_BASE_URL"] = args.public_url
     text = render(example_text, values, args.mode)
 
     # Create the file with mode 0600 from the start: writing first and chmod-ing
@@ -179,6 +201,7 @@ def main(argv=None) -> int:
     print(f"profiles: {profiles or '(none)'}")
     print(f"admin username: {values['LTMS_ADMIN_USERNAME']}")
     print("admin password: in .env (LTMS_ADMIN_PASSWORD)")
+    print(f"public base URL: {values['LTMS_PUBLIC_BASE_URL']}")
     print("next: docker compose up -d")
     if args.mode == "local":
         print("warning: the dashboard login travels over plain HTTP on your network")
