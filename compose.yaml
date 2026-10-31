@@ -1,0 +1,63 @@
+# Docker Compose stack for LTMS.
+#
+# Default (no profiles): LTMS + Postgres only.
+#   docker compose up -d
+#
+# Optional services are opt-in through Compose profiles:
+#   docker compose --profile mqtt up -d   # MQTT broker (see deploy/compose/mosquitto.conf)
+#
+# An LRS profile is intentionally not included: the official Yet Analytics SQL
+# LRS image name and environment variables could not be confirmed, so I did
+# not want to guess them (see the issue notes). Any xAPI-conformant LRS works
+# with LTMS -- an admin adds the LRS endpoint in LTMS, it is not part of this
+# stack.
+#
+# Quick start:
+#   cp deploy/compose/.env.example .env     # then edit .env
+#   docker compose up -d
+#
+# LTMS creates its own database schema on start, so there is no separate
+# schema command to run (unlike the Plesk deploy, see deploy/root-setup.sh).
+#
+services:
+  db:
+    image: postgres:16
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${LTMS_DB_NAME}
+      POSTGRES_USER: ${LTMS_DB_USER}
+      POSTGRES_PASSWORD: ${LTMS_DB_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LTMS_DB_USER} -d ${LTMS_DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  ltms:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      LTMS_DATABASE_URL: postgresql+asyncpg://${LTMS_DB_USER}:${LTMS_DB_PASSWORD}@db:5432/${LTMS_DB_NAME}
+      LTMS_ADMIN_USERNAME: ${LTMS_ADMIN_USERNAME}
+      LTMS_ADMIN_PASSWORD: ${LTMS_ADMIN_PASSWORD}
+      LTMS_COOKIE_SECURE: ${LTMS_COOKIE_SECURE}
+      LTMS_DASHBOARD_DIR: /app/dashboard/dist
+    ports:
+      - "${LTMS_PORT:-8080}:8080"
+
+  # Optional MQTT broker. Opt in with --profile mqtt.
+  mqtt:
+    image: eclipse-mosquitto:2
+    profiles:
+      - mqtt
+    volumes:
+      - ./deploy/compose/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      - "1883:1883"
+
+volumes:
+  db-data:
