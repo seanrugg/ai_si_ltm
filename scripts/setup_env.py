@@ -164,8 +164,14 @@ def main(argv=None) -> int:
     values = build_values(example_text, args.mode, args.with_lrs, args.with_mqtt, args.port)
     text = render(example_text, values, args.mode)
 
-    out_path.write_text(text, encoding="utf-8")
-    os.chmod(out_path, 0o600)
+    # Create the file with mode 0600 from the start: writing first and chmod-ing
+    # after would leave the secrets world-readable for a moment (umask 022).
+    # Without --force, O_EXCL also closes the race with the exists() check above.
+    flags = os.O_WRONLY | os.O_CREAT | (os.O_TRUNC if args.force else os.O_EXCL)
+    fd = os.open(out_path, flags, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.chmod(out_path, 0o600)  # an existing file overwritten with --force keeps its old mode otherwise
 
     profiles = values.get("COMPOSE_PROFILES", "")
     print(f"wrote {out_path}")
