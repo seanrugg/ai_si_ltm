@@ -41,7 +41,8 @@ def _parse_env(path: Path) -> dict:
 def test_web_with_lrs_and_mqtt(tmp_path):
     out = tmp_path / ".env"
     rc = setup_env.main(
-        ["--mode", "web", "--with-lrs", "--with-mqtt", "--out", str(out)]
+        ["--mode", "web", "--with-lrs", "--with-mqtt",
+         "--public-url", "https://ltms.example.org", "--out", str(out)]
     )
     assert rc == 0
     values = _parse_env(out)
@@ -53,6 +54,7 @@ def test_web_with_lrs_and_mqtt(tmp_path):
     assert values["LTMS_BIND"] == "127.0.0.1"
     assert values["LTMS_COOKIE_SECURE"] == "true"
     assert values["FORWARDED_ALLOW_IPS"] == "*"
+    assert values["LTMS_PUBLIC_BASE_URL"] == "https://ltms.example.org"
 
     # Bootstrap credentials mirror the generated LRSQL key/secret.
     assert values["LTMS_LRS_BOOTSTRAP_USERNAME"] == values["LRSQL_API_KEY"]
@@ -100,7 +102,8 @@ def test_two_runs_produce_different_passwords(tmp_path):
 def test_output_leaks_no_generated_secrets(tmp_path, capsys):
     out = tmp_path / ".env"
     setup_env.main(
-        ["--mode", "web", "--with-lrs", "--with-mqtt", "--out", str(out)]
+        ["--mode", "web", "--with-lrs", "--with-mqtt",
+         "--public-url", "https://ltms.example.org", "--out", str(out)]
     )
     captured = capsys.readouterr()
     values = _parse_env(out)
@@ -113,3 +116,36 @@ def test_output_leaks_no_generated_secrets(tmp_path, capsys):
     for key in secret_keys:
         assert values[key] not in captured.out
         assert values[key] not in captured.err
+
+
+def test_web_requires_public_url(tmp_path):
+    out = tmp_path / ".env"
+    rc = setup_env.main(["--mode", "web", "--out", str(out)])
+    assert rc != 0
+    assert not out.exists()
+
+
+def test_web_public_url_must_be_https(tmp_path):
+    out = tmp_path / ".env"
+    rc = setup_env.main(["--mode", "web", "--public-url", "http://x", "--out", str(out)])
+    assert rc != 0
+    assert not out.exists()
+
+
+def test_web_public_url_strips_trailing_slash(tmp_path):
+    out = tmp_path / ".env"
+    rc = setup_env.main(
+        ["--mode", "web", "--public-url", "https://ltms.example.org/", "--out", str(out)]
+    )
+    assert rc == 0, out.read_text() if out.exists() else "no file"
+    values = _parse_env(out)
+    assert values["LTMS_PUBLIC_BASE_URL"] == "https://ltms.example.org"
+
+
+def test_local_public_url_defaults_to_hostname_port(tmp_path, monkeypatch):
+    monkeypatch.setattr(setup_env.socket, "gethostname", lambda: "Lab-Mac")
+    out = tmp_path / ".env"
+    rc = setup_env.main(["--mode", "local", "--port", "9000", "--out", str(out)])
+    assert rc == 0
+    values = _parse_env(out)
+    assert values["LTMS_PUBLIC_BASE_URL"] == "http://lab-mac.local:9000"
