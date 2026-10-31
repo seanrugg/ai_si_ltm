@@ -3,11 +3,12 @@ import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client.js";
 import RecordRow from "../components/RecordRow.jsx";
 import { EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui.jsx";
+import { localTime } from "../lib/format.js";
 
 const TYPES = ["communication", "thought", "decision", "action", "event", "perception", "lesson", "policy", "system"];
 const OUTCOMES = ["success", "partial", "reflex_stop", "stuck", "abandoned", "failed"];
 const PAGE = 50;
-const FILTERS = ["agent", "type", "outcome", "place", "q"];
+const FILTERS = ["agent", "type", "outcome", "place", "q", "since"];
 
 export default function Timeline() {
   const [params, setParams] = useSearchParams();
@@ -20,6 +21,13 @@ export default function Timeline() {
   const [more, setMore] = useState(false);
   const [auto, setAuto] = useState(false);
   const [draft, setDraft] = useState(filters);
+
+  function removeSince() {
+    setParams((prev) => {
+      prev.delete("since");
+      return prev;
+    });
+  }
   // off by default: telemetry is hidden unless the box is checked
   const [showTelemetry, setShowTelemetry] = useState(false);
 
@@ -27,11 +35,15 @@ export default function Timeline() {
     setLoading(true);
     setError(null);
     try {
+      // The admin timeline endpoint takes the window start as the "from" query
+      // param; the browser URL keeps it as "since" so drill-down links can share it.
+      const { since, ...rest } = filters;
       const res = await api("/admin/timeline", {
         params: {
-          ...filters,
+          ...rest,
           limit: PAGE,
           offset,
+          ...(since ? { from: since } : {}),
           ...(showTelemetry ? {} : { exclude_tag: "telemetry" }),
         },
       });
@@ -117,6 +129,20 @@ export default function Timeline() {
           <button type="button" className="btn" onClick={() => setParams({})}>
             Clear
           </button>
+        )}
+        {filters.since && (
+          <span className="flex items-center gap-2 rounded border border-ink-line bg-ink-raised px-2.5 py-1.5 text-xs">
+            <span className="text-paper-muted">Since</span>
+            <span className="font-mono">{localTime(filters.since)}</span>
+            <button
+              type="button"
+              onClick={removeSince}
+              className="min-h-[44px] min-w-[44px] rounded border border-ink-line hover:bg-ink-hover"
+              aria-label="Remove since filter"
+            >
+              &times;
+            </button>
+          </span>
         )}
       </form>
 
