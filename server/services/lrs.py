@@ -1,27 +1,29 @@
 """LRS endpoints: storage, encrypted credentials and connection tests (issue #59).
 
-Forwarding and xAPI translation are separate issues. This layer only stores
-admin-configured endpoints and encrypts their credentials at rest.
-
-The secret is never returned by any API, logged, or written to the audit log.
+Forwarding (issue #61) and xAPI translation are built on this layer. The secret
+is never returned by any API, logged, or written to the audit log.
 """
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import uuid
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import httpx
 from cryptography.fernet import Fernet
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ltms_contract.record import NAME_RE
 from server.config import ServerConfig
-from server.models import AuditLog, LrsEndpoint
+from server.models import AuditLog, LrsEndpoint, Member, Record, RecordProvenance, Swarm
 from server.services.enrollment import _validate_scope
 from server.services.errors import ServiceError
+from server.services.recall import apply_scope, effective_scope, fetch_payloads
+from server.xapi.translate import record_to_statement
 
 log = logging.getLogger(__name__)
 
@@ -274,3 +276,151 @@ async def test_connection(cfg: ServerConfig, endpoint: LrsEndpoint, http: httpx.
     else:
         result["error"] = f"HTTP {resp.status_code}"
     return result
+
+
+async def backlog(session: AsyncSession, endpoint: LrsEndpoint) -> int:
+    """Count in-scope records the forwarder hasn't sent yet (``id > cursor``).
+
+    Deny-by-default: an endpoint with no scope, or an empty ``types`` list, has
+    a backlog of 0.
+    """
+    scope = effective_scope(["recall:scoped"], endpoint.scope)
+    stmt = select(func.count(Record.id)).where(Record.id > endpoint.cursor)
+    stmt = apply_scope(stmt, scope)
+    return int((await session.execute(stmt)).scalar() or 0)
+
+
+async def forward_once(session: AsyncSession, cfg: ServerConfig, http: httpx.AsyncClient) -> dict:
+    """Send each enabled endpoint its next batch of in-scope xAPI statements.
+
+    Endpoints are independent: one endpoint's failure never stops the others,
+    and the secret is never logged. Returns the total number of statements sent.
+    """
+    if not cfg.public_base_url:
+        log.warning("lrs forwarder: LTMS_PUBLIC_BASE_URL is unset; sending nothing")
+        return {"forwarded": 0}
+
+    forwarded = 0
+    for endpoint in await list_endpoints(session):
+        if not endpoint.enabled:
+            continue
+
+        scope = effective_scope(["recall:scoped"], endpoint.scope)
+        # Keep sending full batches until the endpoint is caught up (telemetry can
+        # outrun one batch per run), capped so one busy endpoint can't hold the run.
+        for _ in range(max(1, cfg.lrs_max_batches_per_run)):
+            stmt = (
+                select(Record)
+                .where(Record.id > endpoint.cursor)
+                .order_by(Record.id)
+                .limit(cfg.lrs_batch_size)
+            )
+            stmt = apply_scope(stmt, scope)
+            records = list(await session.scalars(stmt))
+            if not records:
+                break
+            try:
+                await _forward_endpoint(session, cfg, http, endpoint, records)
+                forwarded += len(records)
+            except httpx.HTTPError as exc:
+                endpoint.last_error = f"network error: {exc}"
+                endpoint.last_error_at = datetime.now(timezone.utc)
+                break
+            except Exception as exc:  # one endpoint must not stop the others
+                endpoint.last_error = f"{type(exc).__name__}: {exc}"
+                endpoint.last_error_at = datetime.now(timezone.utc)
+                break
+            if len(records) < cfg.lrs_batch_size:
+                break
+
+    return {"forwarded": forwarded}
+
+
+async def _forward_endpoint(
+    session: AsyncSession,
+    cfg: ServerConfig,
+    http: httpx.AsyncClient,
+    endpoint: LrsEndpoint,
+    records: list[Record],
+) -> int:
+    """Translate and POST one endpoint's batch; returns the number sent.
+
+    Raises on network or translator failure so the caller records last_error and
+    continues with the next endpoint. On 409 or any other status the cursor is
+    kept and last_error recorded.
+    """
+    # Author and provenance for the statement envelope.
+    member_by_id = {
+        m.id: m
+        for m in await session.scalars(
+            select(Member).where(Member.id.in_([r.member_id for r in records]))
+        )
+    }
+    provenance_by_record = {
+        p.record_id: p
+        for p in await session.scalars(
+            select(RecordProvenance).where(
+                RecordProvenance.record_id.in_([r.id for r in records])
+            )
+        )
+    }
+    swarm_ids = {p.swarm_id for p in provenance_by_record.values()
+                 if p is not None and p.swarm_id is not None}
+    relay_ids = {p.relay_member_id for p in provenance_by_record.values()
+                 if p is not None and p.relay_member_id is not None}
+    swarm_names = {
+        s.id: s.name for s in await session.scalars(select(Swarm).where(Swarm.id.in_(list(swarm_ids))))
+    } if swarm_ids else {}
+    relay_names = {
+        m.id: m.name for m in await session.scalars(select(Member).where(Member.id.in_(list(relay_ids))))
+    } if relay_ids else {}
+
+    # Payloads only for perception records tagged telemetry; other payloads are
+    # never loaded and never sent.
+    telemetry_ids = {r.id for r in records
+                     if r.type == "perception" and "telemetry" in (r.tags or [])}
+    payloads = await fetch_payloads(session, [r for r in records if r.id in telemetry_ids])
+
+    statements = []
+    for r in records:
+        prov = provenance_by_record.get(r.id)
+        rec = json.loads(r.header_raw)
+        rec["hash"] = r.hash
+        rec["sig"] = r.sig
+        rec["swarm"] = swarm_names.get(prov.swarm_id) if prov is not None and prov.swarm_id is not None else None
+        rec["relay"] = relay_names.get(prov.relay_member_id) if prov is not None and prov.relay_member_id is not None else None
+        rec["agent_kind"] = member_by_id[r.member_id].kind
+        rec["received_at"] = r.received_at.isoformat()
+        payload = None
+        if r.id in telemetry_ids:
+            row = payloads.get(r.id)
+            payload = json.loads(row.payload_raw) if row is not None else None
+        statements.append(record_to_statement(
+            rec, base=cfg.public_base_url, xapi_version=endpoint.xapi_version, payload=payload))
+
+    secret = decrypt_secret(cfg, endpoint)
+    if secret is None:
+        raise ServiceError(422, "no_secret", f"endpoint {endpoint.name!r} has no secret to forward with")
+    token = base64.b64encode(f"{endpoint.username}:{secret}".encode("utf-8")).decode("ascii")
+    headers = {
+        "Authorization": f"Basic {token}",
+        "X-Experience-API-Version": endpoint.xapi_version,
+        "Content-Type": "application/json",
+    }
+    resp = await http.post(f"{endpoint.url}/statements", json=statements, headers=headers)
+
+    if resp.status_code in (200, 204):
+        endpoint.cursor = records[-1].id
+        endpoint.last_success_at = datetime.now(timezone.utc)
+        endpoint.last_error = None
+        session.add(AuditLog(
+            actor="system:lrs-forward", action="lrs_export",
+            detail={"endpoint": endpoint.name, "count": len(records),
+                    "first_record_id": records[0].id, "last_record_id": records[-1].id},
+        ))
+        return len(records)
+    if resp.status_code == 409:
+        raise ServiceError(409, "lrs_mapping_changed",
+                           f"endpoint {endpoint.name!r}: HTTP 409, the LRS mapping may have changed; cursor unchanged")
+    raise ServiceError(resp.status_code, "bad_response",
+                       f"endpoint {endpoint.name!r}: HTTP {resp.status_code}")

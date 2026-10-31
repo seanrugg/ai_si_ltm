@@ -605,3 +605,13 @@ async def test_lrs_endpoint(endpoint_id: str, request: Request, admin: AdminAuth
         endpoint = await lrs_service.get_endpoint(session, endpoint_id)
     async with httpx.AsyncClient() as http:
         return await lrs_service.test_connection(request.app.state.config, endpoint, http)
+
+
+@router.get("/admin/lrs/{endpoint_id}/status")
+async def lrs_endpoint_status(endpoint_id: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    """Endpoint view plus the backlog of in-scope, unsent records (issue #61)."""
+    async with transaction(request) as session:
+        endpoint = await lrs_service.get_endpoint(session, endpoint_id)
+        data = lrs_service.endpoint_to_dict(endpoint)
+        data["backlog"] = await lrs_service.backlog(session, endpoint)
+        return data
