@@ -1,6 +1,24 @@
 # LTMS with Docker Compose
 
-Quick start (LTMS + Postgres only):
+## Quick start
+
+One command prepares a working `.env` for the whole stack, then start it:
+
+```sh
+python3 scripts/setup_env.py --mode local   # devices on your LAN
+# or
+python3 scripts/setup_env.py --mode web     # public, behind a TLS reverse proxy
+docker compose up -d
+```
+
+The script generates every secret, writes `.env` with mode `0600`, prints the
+path, mode, profiles and admin username (never the passwords or secrets), and
+tells you the next command. Add `--with-lrs` to bootstrap a SQL LRS endpoint
+on first start, and/or `--with-mqtt` to include the Mosquitto broker. See
+`scripts/setup_env.py --help` for all flags (`--port`, `--out`, `--force`).
+
+<details>
+<summary>Manual setup</summary>
 
 ```sh
 cp deploy/compose/.env.example .env
@@ -21,6 +39,8 @@ the first start. Change the admin password later with:
 ```sh
 docker compose exec ltms python -m server.manage set-admin-password
 ```
+
+</details>
 
 ## Database schema
 
