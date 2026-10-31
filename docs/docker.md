@@ -7,9 +7,11 @@ One command prepares a working `.env` for the whole stack, then start it:
 ```sh
 python3 scripts/setup_env.py --mode local   # devices on your LAN
 # or
-python3 scripts/setup_env.py --mode web     # public, behind a TLS reverse proxy
+python3 scripts/setup_env.py --mode web --public-url https://ltms.example.org  # public, behind a TLS reverse proxy
 docker compose up -d
 ```
+
+`--public-url` sets `LTMS_PUBLIC_BASE_URL`, the base used for every xAPI statement's IRIs (`<base>/records/<agent>/<seq>`). It must be the address people and the LRS use to reach this LTMS, and it should not change once statements have been sent (it's part of every statement's IRI).
 
 The script generates every secret, writes `.env` with mode `0600`, prints the
 path, mode, profiles and admin username (never the passwords or secrets), and
