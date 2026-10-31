@@ -26,12 +26,17 @@ XAPI_VERSIONS = ("2.0.0", "1.0.3")
 AUTH_TYPES = ("basic",)
 
 _UPDATABLE_FIELDS = {"name", "url", "username", "xapi_version", "auth_type", "scope", "enabled"}
+PATCH_FIELDS = _UPDATABLE_FIELDS | {"secret"}
 
 
 def _fernet(cfg: ServerConfig) -> Fernet:
     if not cfg.secret_key:
         raise ServiceError(422, "no_secret_key", "set LTMS_SECRET_KEY to store LRS credentials")
-    return Fernet(cfg.secret_key.encode("utf-8"))
+    try:
+        return Fernet(cfg.secret_key.encode("utf-8"))
+    except (ValueError, TypeError):
+        # Don't echo the key: just say it's malformed.
+        raise ServiceError(422, "bad_secret_key", "LTMS_SECRET_KEY is not a valid Fernet key") from None
 
 
 def encrypt_secret(cfg: ServerConfig, plaintext: str) -> bytes:
@@ -182,6 +187,12 @@ async def update_endpoint(
             value = _validate_auth_type(value)
         elif field == "scope":
             value = _validate_scope(value)
+        elif field == "enabled":
+            if not isinstance(value, bool):
+                raise ServiceError(422, "bad_lrs", "enabled must be true or false")
+        elif field == "username":
+            if not isinstance(value, str):
+                raise ServiceError(422, "bad_lrs", "username must be a string")
         setattr(endpoint, field, value)
         changed.append(field)
     session.add(AuditLog(actor=actor, action="lrs_update",

@@ -212,3 +212,22 @@ def test_lrs_endpoints_require_admin(http, admin, mesh):
     del admin.headers["x-ltms-admin"]
     assert admin.post("/api/admin/lrs", json=_body()).status_code == 403
     assert admin.post("/api/admin/lrs/00000000-0000-0000-0000-000000000000/test").status_code == 403
+
+
+def test_settings_never_returns_secrets(admin):
+    body = admin.get("/api/admin/settings").json()
+    for k in body:
+        assert "password" not in k and "secret" not in k and not k.endswith("_key")
+    assert "database_url" not in body
+
+
+def test_create_missing_fields_and_bad_patch_are_422(admin):
+    r = admin.post("/api/admin/lrs", json={})
+    assert r.status_code == 422
+    r = admin.post("/api/admin/lrs", json={"name": "x-lrs", "url": "https://lrs.example.org/xapi"})
+    assert r.status_code == 200, r.text
+    eid = r.json()["id"]
+    assert admin.request("PATCH", f"/api/admin/lrs/{eid}", json={"enabled": "yes"}).status_code == 422
+    # unknown keys (including "actor" or "cursor") are ignored, not a 500
+    r = admin.request("PATCH", f"/api/admin/lrs/{eid}", json={"actor": "x", "cursor": 99, "enabled": True})
+    assert r.status_code == 200 and r.json()["cursor"] == 0 and r.json()["enabled"] is True

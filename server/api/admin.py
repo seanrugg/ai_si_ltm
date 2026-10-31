@@ -550,8 +550,11 @@ async def recall_log(
 async def settings(request: Request, admin: AdminAuth = ADMIN) -> dict:
     """Effective configuration, without secrets. Editing comes in P4."""
     cfg = request.app.state.config
-    hidden = {"db_password", "admin_password", "database_url"}
-    return {k: v for k, v in json.loads(cfg.model_dump_json()).items() if k not in hidden}
+    # Never return credentials: anything named like a password, secret or key,
+    # plus the database URL (it can embed a password).
+    def hidden(k: str) -> bool:
+        return k == "database_url" or any(w in k for w in ("password", "secret", "_key"))
+    return {k: v for k, v in json.loads(cfg.model_dump_json()).items() if not hidden(k)}
 
 
 # --------------------------------------------------------------------------- #
@@ -569,6 +572,8 @@ async def list_lrs_endpoints(request: Request, admin: AdminAuth = ADMIN) -> dict
 @router.post("/admin/lrs")
 async def create_lrs_endpoint(request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
     data = {k: v for k, v in body.items() if k in _CREATE_FIELDS}
+    data.setdefault("name", None)  # missing -> the validator's 422, not a TypeError 500
+    data.setdefault("url", None)
     async with transaction(request) as session:
         endpoint = await lrs_service.create_endpoint(
             session, request.app.state.config, actor=f"admin:{admin.username}", **data,
@@ -581,7 +586,8 @@ async def update_lrs_endpoint(endpoint_id: str, request: Request, body: dict, ad
     async with transaction(request) as session:
         endpoint = await lrs_service.update_endpoint(
             session, request.app.state.config, endpoint_id,
-            actor=f"admin:{admin.username}", **body,
+            actor=f"admin:{admin.username}",
+            **{k: v for k, v in body.items() if k in lrs_service.PATCH_FIELDS},
         )
         return lrs_service.endpoint_to_dict(endpoint)
 
