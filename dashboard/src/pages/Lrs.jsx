@@ -57,7 +57,7 @@ function EndpointRow({ endpoint, backlog, onReload }) {
           <h2 id={`lrs-${endpoint.name}-h`} className="text-lg font-bold">{endpoint.name}</h2>
           <p className="text-sm text-paper-muted">{endpoint.url}</p>
         </div>
-        <dl className="grid grid-cols-[8rem_1rem_1rem_1rem] gap-x-2 gap-y-1 text-sm">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
           <dt className="text-paper-muted">xAPI version</dt>
           <dd>{endpoint.xapi_version}</dd>
           <dt className="text-paper-muted">Enabled</dt>
@@ -106,7 +106,7 @@ function EndpointRow({ endpoint, backlog, onReload }) {
       <ErrorNote error={error} />
 
       {mode === "edit" && (
-        <EndpointForm initial={endpoint} onSaved={onReload} onCancel={() => setMode(null)} busy={busy} />
+        <EndpointForm initial={endpoint} onSaved={() => { setMode(null); onReload(); }} onCancel={() => setMode(null)} busy={busy} />
       )}
       {mode === "delete" && (
         <div className="mt-3 rounded-md border border-bad/40 bg-bad/5 p-3 text-sm">
@@ -163,7 +163,11 @@ function EndpointForm({ initial, onSaved, onCancel, busy }) {
       if (initial) {
         await api(`/admin/lrs/${initial.id}`, { method: "PATCH", body });
       } else {
-        await api("/admin/lrs", { method: "POST", body });
+        const created = await api("/admin/lrs", { method: "POST", body });
+        // The create API doesn't take "enabled" (endpoints start disabled).
+        if (form.enabled && created?.id) {
+          await api(`/admin/lrs/${created.id}`, { method: "PATCH", body: { enabled: true } });
+        }
       }
       onSaved();
     } catch (err) {
@@ -172,38 +176,40 @@ function EndpointForm({ initial, onSaved, onCancel, busy }) {
   }
 
   const heading = initial ? "Edit endpoint" : "Add endpoint";
+  const fid = initial ? `lrs-${initial.id}` : "lrs-new";
+
   return (
-    <section className="mb-6 border rounded-md border-ink-line bg-ink p-4" aria-labelledby="lrs-form-h">
-      <h2 id="lrs-form-h" className="mb-3 text-lg font-bold">{heading}</h2>
+    <section className="mb-6 border rounded-md border-ink-line bg-ink p-4" aria-labelledby={`${fid}-h`}>
+      <h2 id={`${fid}-h`} className="mb-3 text-lg font-bold">{heading}</h2>
       <form onSubmit={(e) => { e.preventDefault(); save(); }}
             className="mb-4 flex flex-wrap items-end gap-2" aria-label={heading}>
-        <label className="block text-sm text-paper-muted">Name</label>
+        <label htmlFor={`${fid}-name`} className="block text-sm text-paper-muted">Name</label>
         <input className="field w-48" value={form.name}
                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-               placeholder="sql-lrs" aria-label="Endpoint name" required />
-        <label className="block text-sm text-paper-muted">URL</label>
+               placeholder="sql-lrs" id={`${fid}-name`} required />
+        <label htmlFor={`${fid}-url`} className="block text-sm text-paper-muted">URL</label>
         <input className="field w-64" value={form.url}
                onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
-               placeholder="https://lrs.example.org/xapi" aria-label="LRS URL" required />
-        <label className="block text-sm text-paper-muted">xAPI version</label>
+               placeholder="https://lrs.example.org/xapi" id={`${fid}-url`} required />
+        <label htmlFor={`${fid}-xapi`} className="block text-sm text-paper-muted">xAPI version</label>
         <select className="field" value={form.xapi_version}
                 onChange={(e) => setForm((f) => ({ ...f, xapi_version: e.target.value }))}
-                aria-label="xAPI version">
+                id={`${fid}-xapi`}>
           {XAPI_VERSIONS.map((v) => <option key={v} value={v}>{v}</option>)}
         </select>
-        <label className="block text-sm text-paper-muted">Username</label>
+        <label htmlFor={`${fid}-username`} className="block text-sm text-paper-muted">Username</label>
         <input className="field w-40" value={form.username}
                onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
-               placeholder="admin" aria-label="Username" />
+               placeholder="admin" id={`${fid}-username`} />
         <div className="flex flex-wrap items-end gap-2">
           <div>
-            <label className="block text-sm text-paper-muted">Password (write-only)</label>
+            <label htmlFor={`${fid}-password`} className="block text-sm text-paper-muted">Password (write-only)</label>
             <input className="field w-48 mb-1" type="password" value={form.password}
                    onChange={(e) => setForm((f) => ({ ...f, password: e.target.value, clearPassword: false }))}
-                   placeholder="leave blank to keep" aria-label="Password" />
+                   placeholder="leave blank to keep" id={`${fid}-password`} />
             <p className="text-xs text-paper-muted">
               Never prefilled. Leave blank to keep the current one.
-              {initial ? ` Password set: {initial.has_secret ? "yes" : "no"}.` : ""}
+              {initial ? ` Password set: ${initial.has_secret ? "yes" : "no"}.` : ""}
             </p>
             <label className="flex items-center gap-1 text-sm text-paper-muted cursor-pointer">
               <input type="checkbox" checked={form.clearPassword}
@@ -216,10 +222,10 @@ function EndpointForm({ initial, onSaved, onCancel, busy }) {
         <div className="mt-2 flex flex-wrap gap-x-4">
           {SCOPE_KEYS.map((key) => (
             <div key={key} className="flex flex-col gap-1">
-              <label className="text-sm text-paper-muted">{key}</label>
+              <label htmlFor={`${fid}-${key}`} className="text-sm text-paper-muted">{key}</label>
               <input className="field w-32" value={form[key]}
                      onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                     placeholder={key} aria-label={`${key} scope`} />
+                     placeholder={key} id={`${fid}-${key}`} />
             </div>
           ))}
         </div>
@@ -229,7 +235,7 @@ function EndpointForm({ initial, onSaved, onCancel, busy }) {
                  onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))} className="accent-led" />
           Enabled
         </label>
-        <button className="btn btn-primary" disabled={busy}>Save</button>
+        <button type="submit" className="btn btn-primary" disabled={busy}>Save</button>
         <button className="btn" type="button" onClick={onCancel} disabled={busy}>Cancel</button>
       </form>
       <ErrorNote error={error} />
@@ -239,20 +245,21 @@ function EndpointForm({ initial, onSaved, onCancel, busy }) {
 
 export default function Lrs() {
   const { data, error, loading, reload } = useApi("/admin/lrs");
-  const endpoints = (data?.endpoints || []).slice();
+  const endpoints = data?.endpoints || [];
   const [backlog, setBacklog] = useState({});
 
+  // Depend on the fetched data, not a derived array: a new array each render
+  // re-ran this effect (and its requests) forever.
   useEffect(() => {
-    const next = {};
-    let done = 0;
-    for (const ep of endpoints) {
+    const list = data?.endpoints || [];
+    let cancelled = false;
+    Promise.all(list.map((ep) =>
       api(`/admin/lrs/${encodeURIComponent(ep.id)}/status`)
-        .then((d) => { next[ep.id] = d.backlog ?? 0; })
-        .catch(() => { next[ep.id] = null; })
-        .finally(() => { if (++done === endpoints.length) setBacklog(next); });
-    }
-    if (endpoints.length === 0) setBacklog({});
-  }, [endpoints]);
+        .then((d) => [ep.id, d.backlog ?? 0])
+        .catch(() => [ep.id, null]),
+    )).then((pairs) => { if (!cancelled) setBacklog(Object.fromEntries(pairs)); });
+    return () => { cancelled = true; };
+  }, [data]);
 
   if (loading && !data) return <Loading what="Loading LRS endpoints" />;
   if (error) return <ErrorNote error={error} onRetry={reload} />;
