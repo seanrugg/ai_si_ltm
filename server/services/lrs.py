@@ -306,26 +306,32 @@ async def forward_once(session: AsyncSession, cfg: ServerConfig, http: httpx.Asy
             continue
 
         scope = effective_scope(["recall:scoped"], endpoint.scope)
-        stmt = (
-            select(Record)
-            .where(Record.id > endpoint.cursor)
-            .order_by(Record.id)
-            .limit(cfg.lrs_batch_size)
-        )
-        stmt = apply_scope(stmt, scope)
-        records = list(await session.scalars(stmt))
-        if not records:
-            continue
-
-        try:
-            await _forward_endpoint(session, cfg, http, endpoint, records)
-            forwarded += len(records)
-        except httpx.HTTPError as exc:
-            endpoint.last_error = f"network error: {exc}"
-            endpoint.last_error_at = datetime.now(timezone.utc)
-        except Exception as exc:  # one endpoint must not stop the others
-            endpoint.last_error = f"{type(exc).__name__}: {exc}"
-            endpoint.last_error_at = datetime.now(timezone.utc)
+        # Keep sending full batches until the endpoint is caught up (telemetry can
+        # outrun one batch per run), capped so one busy endpoint can't hold the run.
+        for _ in range(max(1, cfg.lrs_max_batches_per_run)):
+            stmt = (
+                select(Record)
+                .where(Record.id > endpoint.cursor)
+                .order_by(Record.id)
+                .limit(cfg.lrs_batch_size)
+            )
+            stmt = apply_scope(stmt, scope)
+            records = list(await session.scalars(stmt))
+            if not records:
+                break
+            try:
+                await _forward_endpoint(session, cfg, http, endpoint, records)
+                forwarded += len(records)
+            except httpx.HTTPError as exc:
+                endpoint.last_error = f"network error: {exc}"
+                endpoint.last_error_at = datetime.now(timezone.utc)
+                break
+            except Exception as exc:  # one endpoint must not stop the others
+                endpoint.last_error = f"{type(exc).__name__}: {exc}"
+                endpoint.last_error_at = datetime.now(timezone.utc)
+                break
+            if len(records) < cfg.lrs_batch_size:
+                break
 
     return {"forwarded": forwarded}
 

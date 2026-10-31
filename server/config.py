@@ -104,6 +104,7 @@ class ServerConfig(BaseSettings):
     # Empty LTMS_PUBLIC_BASE_URL disables forwarding (one warning per run, nothing sent).
     lrs_forward_seconds: int = 30
     lrs_batch_size: int = 50
+    lrs_max_batches_per_run: int = 20  # keep sending until caught up, up to this many batches per endpoint per run
     public_base_url: str = ""
 
     @property

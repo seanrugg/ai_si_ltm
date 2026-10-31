@@ -30,6 +30,7 @@ def config(db_url):
         recall_rate=1000,
         secret_key=Fernet.generate_key().decode(),
         lrs_batch_size=2,
+        lrs_max_batches_per_run=1,  # one batch per run unless a test raises it
         public_base_url="https://ltms.example.org",
     )
 
@@ -306,3 +307,34 @@ def test_no_public_base_url_sends_nothing(app, http):
                 return await lrs_service.forward_once(session, cfg, client)
 
     assert http.portal.call(go) == {"forwarded": 0}
+
+
+def test_one_run_catches_up_in_several_batches_up_to_the_cap(admin, mesh, http, app, db_exec):
+    # batch size 2 (fixture); 5 in-scope records -> 3 POSTs in one run
+    app.state.config.lrs_max_batches_per_run = 20
+    _endpoint(admin, "lrs-one", scope={"types": ["event"]})
+    z3 = mesh.member("z3-r0")
+    for i in range(5):
+        z3.append("event", summary=f"tick {i}")
+    z3.flush()
+    ids = _record_ids(db_exec)
+    sizes = []
+
+    def handler(req):
+        sizes.append(len(json.loads(req.content)))
+        return httpx.Response(200)
+
+    assert _forward(app, http, handler) == {"forwarded": 5}
+    assert sizes == [2, 2, 1]
+    assert _endpoint_row(db_exec, "lrs-one").cursor == ids[-1]
+
+    # the cap: with at most 1 batch per run, 5 new records take 3 runs
+    app.state.config.lrs_max_batches_per_run = 1
+    for i in range(5):
+        z3.append("event", summary=f"more {i}")
+    z3.flush()
+    sizes.clear()
+    assert _forward(app, http, handler) == {"forwarded": 2}
+    assert _forward(app, http, handler) == {"forwarded": 2}
+    assert _forward(app, http, handler) == {"forwarded": 1}
+    assert sizes == [2, 2, 1]
