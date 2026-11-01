@@ -20,6 +20,7 @@ dependencies = [
     "apscheduler>=3.10,<4",
     "httpx>=0.27",
     "cryptography>=42",  # issue #59: encrypted LRS credentials
+    "alembic>=1.13",  # issue #97: database migrations
 ]
 
 [project.optional-dependencies]
@@ -33,6 +34,7 @@ exclude = ["server.tests*"]
 
 [tool.setuptools.package-data]
 ltms_contract = ["vectors.json"]
+server = ["migrations/sql/*.sql"]  # issue #97: migration SQL shipped with the package
 
 [tool.pytest.ini_options]
 testpaths = ["server/tests"]
