@@ -46,10 +46,20 @@ def _baseline_sql_path() -> str:
     return os.path.join(os.path.dirname(__file__), "..", "sql", "0001_baseline.sql")
 
 
-def upgrade() -> None:
+# schema.sql wraps itself in BEGIN; ... COMMIT; for psql. Alembic already runs
+# this revision inside one transaction, and a bare COMMIT here would commit the
+# tables separately from the alembic_version stamp. Skip the wrapper only.
+_TXN_WRAPPERS = {"BEGIN;", "COMMIT;"}
+
+
+def baseline_statements() -> List[str]:
     with open(_baseline_sql_path()) as fh:
         text = fh.read()
-    for stmt in split_sql(text):
+    return [s for s in split_sql(text) if s.strip().upper() not in _TXN_WRAPPERS]
+
+
+def upgrade() -> None:
+    for stmt in baseline_statements():
         op.execute(sa.text(stmt))
 
 

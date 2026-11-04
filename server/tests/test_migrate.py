@@ -157,3 +157,19 @@ CREATE TABLE u (id INTEGER);
         "$$ LANGUAGE plpgsql;",
         "CREATE TABLE u (id INTEGER);",
     ]
+
+
+
+def test_baseline_has_no_transaction_wrappers():
+    # Runs everywhere: the baseline runs inside Alembic's own transaction, so the
+    # file's BEGIN;/COMMIT; must be skipped (a COMMIT would split the migration).
+    import importlib.util, pathlib
+    path = pathlib.Path(__file__).resolve().parents[1] / "migrations" / "versions" / "0001_baseline.py"
+    spec = importlib.util.spec_from_file_location("baseline_0001", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    stmts = mod.baseline_statements()
+    assert stmts, "baseline is empty"
+    assert all(s.strip().upper() not in ("BEGIN;", "COMMIT;") for s in stmts)
+    # the function body containing BEGIN ... END stays one statement
+    assert any("records_no_mutation" in s and "$$" in s for s in stmts)
