@@ -1,4 +1,6 @@
 """Admin session, CSRF guard, enrollment decisions, dashboard views."""
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from sqlalchemy import delete, select
 
@@ -116,20 +118,29 @@ def test_views(mesh, admin):
     assert admin.get("/api/admin/timeline", params={"type": "lesson"}).json()["count"] == 1
 
 
+def _days_ago(n: int, hour: int = 8) -> tuple[str, str]:
+    """(RFC 3339 ts, YYYY-MM-DD) n days ago at hour:00 UTC: inside the Volume window whatever today is."""
+    d = (datetime.now(timezone.utc) - timedelta(days=n)).replace(hour=hour, minute=0, second=0, microsecond=0)
+    return d.strftime("%Y-%m-%dT%H:%M:%SZ"), d.strftime("%Y-%m-%d")
+
+
 def test_volume_counts_and_bytes(mesh, admin, db_exec):
     z3 = mesh.member("z3-r0")
     vec = mesh.member("vector")
-    z3.append("perception", summary="one", ts="2026-10-20T08:00:00Z", payload={"n": 1})
-    z3.append("action", summary="two", ts="2026-10-20T09:00:00Z", payload={"n": 2, "x": "longer"})
-    vec.append("perception", summary="three", ts="2026-10-21T08:00:00Z", payload={"n": 3})
+    ts_a, day_a = _days_ago(3)
+    ts_b, _ = _days_ago(3, hour=9)
+    ts_c, day_c = _days_ago(2)
+    z3.append("perception", summary="one", ts=ts_a, payload={"n": 1})
+    z3.append("action", summary="two", ts=ts_b, payload={"n": 2, "x": "longer"})
+    vec.append("perception", summary="three", ts=ts_c, payload={"n": 3})
     z3.flush()
     vec.flush()
 
     rows = admin.get("/api/admin/volume", params={"days": 14}).json()["rows"]
     by_key = {(r["agent"], r["type"], r["day"]): r for r in rows}
-    assert by_key[("z3-r0", "perception", "2026-10-20")]["records"] == 1
-    assert by_key[("z3-r0", "action", "2026-10-20")]["records"] == 1
-    assert by_key[("vector", "perception", "2026-10-21")]["records"] == 1
+    assert by_key[("z3-r0", "perception", day_a)]["records"] == 1
+    assert by_key[("z3-r0", "action", day_a)]["records"] == 1
+    assert by_key[("vector", "perception", day_c)]["records"] == 1
     assert all(r["day"] == r["day"][:10] for r in rows)  # YYYY-MM-DD
 
     # payload bytes match what is still in the payload table
@@ -140,7 +151,7 @@ def test_volume_counts_and_bytes(mesh, admin, db_exec):
 
 def test_volume_purged_payload_counts_zero_bytes(mesh, admin, db_exec):
     z3 = mesh.member("z3-r0")
-    z3.append("event", summary="to be purged", ts="2026-10-20T08:00:00Z", payload={"n": 1})
+    z3.append("event", summary="to be purged", ts=_days_ago(3)[0], payload={"n": 1})
     z3.flush()
     (record_id,) = db_exec(select(RecordPayload.record_id).limit(1)).one()
     db_exec(delete(RecordPayload).where(RecordPayload.record_id == record_id))
