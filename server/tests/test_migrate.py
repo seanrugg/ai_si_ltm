@@ -11,9 +11,11 @@ import asyncio
 import io
 import os
 import pathlib
+import subprocess
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
 # ``split_sql`` lives in the baseline migration module, whose name leads with a
@@ -173,3 +175,163 @@ def test_baseline_has_no_transaction_wrappers():
     assert all(s.strip().upper() not in ("BEGIN;", "COMMIT;") for s in stmts)
     # the function body containing BEGIN ... END stays one statement
     assert any("records_no_mutation" in s and "$$" in s for s in stmts)
+
+
+def _db_password(db_url: str) -> str | None:
+    return make_url(db_url).password
+
+
+async def _stage_db_at_0001_with_record(db_url):
+    """Apply the baseline schema, stamp revision 0001, and insert one record row."""
+    schema_sql = SCHEMA_SQL.read_text()
+    asyncio.run(_apply_schema(db_url, schema_sql))
+    _invoke(["stamp", "0001"], db_url)
+    engine = create_async_engine(db_url, isolation_level="AUTOCOMMIT")
+    try:
+        async with engine.connect() as conn:
+            await conn.exec_driver_sql(
+                "INSERT INTO members (id, public_key, name, kind, permissions, "
+                "requested_permissions, status, last_ack_seq, last_hash, created_at) "
+                "VALUES ('00000000-0000-0000-0000-000000000001', '\\x00'::bytea, "
+                "'test-member', 'robot', '[]'::jsonb, '[]'::jsonb, 'active', 0, "
+                "'genesis', NOW())"
+            )
+            await conn.exec_driver_sql(
+                "INSERT INTO records (member_id, agent, seq, ts, type, prev_hash, "
+                "payload_hash, hash, sig, header_raw, received_at) "
+                "VALUES ('00000000-0000-0000-0000-000000000001', 'test', 1, NOW(), "
+                "'event', 'genesis', 'aaaa', 'aaaa', 'sig', '\\x00'::bytea, NOW())"
+            )
+    finally:
+        await engine.dispose()
+
+
+@needs_postgres
+def test_upgrade_backs_up_before_migrating(db_url, monkeypatch, tmp_path):
+    # A database at revision 0001 with a record, then a (faked) pending head.
+    asyncio.run(_stage_db_at_0001_with_record(db_url))
+
+    upgraded = []
+    monkeypatch.setattr("server.migrate._head", lambda cfg: "0002")
+    monkeypatch.setattr(
+        "alembic.command.upgrade", lambda cfg, rev: upgraded.append(rev)
+    )
+    monkeypatch.setattr("shutil.which", lambda cmd: "/fake/pg_dump" if cmd == "pg_dump" else None)
+
+    captured: dict = {}
+
+    def fake_run(cmd, **kw):
+        captured["cmd"] = list(cmd)
+        captured["env"] = kw.get("env")
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    code, out, err = _invoke(["upgrade", "--backup-dir", str(tmp_path)], db_url)
+    assert code == 0, err
+    assert upgraded == ["head"], upgraded
+
+    cmd = captured["cmd"]
+    assert "--format=custom" in cmd, cmd
+    file_idx = cmd.index("--file")
+    backup_file = cmd[file_idx + 1]
+    assert backup_file.startswith(str(tmp_path) + os.sep), backup_file
+    assert backup_file.startswith("ltms-pre-0001-to-0002-"), backup_file
+    assert backup_file.endswith(".dump"), backup_file
+
+    env = captured["env"]
+    assert env is not None and "PGPASSWORD" in env, env
+    password = _db_password(db_url)
+    assert password is not None
+    # the password is never on the command line and never printed
+    assert password not in " ".join(cmd), cmd
+    assert password not in out and password not in err
+
+
+@needs_postgres
+def test_upgrade_refuses_without_pg_dump(db_url, monkeypatch):
+    asyncio.run(_stage_db_at_0001_with_record(db_url))
+
+    upgraded = []
+    monkeypatch.setattr("server.migrate._head", lambda cfg: "0002")
+    monkeypatch.setattr(
+        "alembic.command.upgrade", lambda cfg, rev: upgraded.append(rev)
+    )
+    monkeypatch.setattr("shutil.which", lambda cmd: None)  # pg_dump missing
+
+    code, _, err = _invoke(["upgrade"], db_url)
+    assert code == 1, err
+    assert "backup failed" in err and "not migrating" in err, err
+    assert upgraded == [], upgraded  # did not migrate
+
+    code, out, _ = _invoke(["current"], db_url)
+    assert code == 0
+    assert out.strip() == "0001", out
+
+
+@needs_postgres
+def test_upgrade_no_backup_warns_and_migrates(db_url, monkeypatch):
+    asyncio.run(_stage_db_at_0001_with_record(db_url))
+
+    upgraded = []
+    monkeypatch.setattr("server.migrate._head", lambda cfg: "0002")
+    monkeypatch.setattr(
+        "alembic.command.upgrade", lambda cfg, rev: upgraded.append(rev)
+    )
+    monkeypatch.setattr("shutil.which", lambda cmd: "/fake/pg_dump")
+    monkeypatch.setattr(
+        "subprocess.run", lambda *a, **k: subprocess.CompletedProcess(a[0], 0)
+    )
+
+    code, out, err = _invoke(["upgrade", "--no-backup"], db_url)
+    assert code == 0, err
+    assert "warning" in (out + err).lower(), (out, err)
+    assert upgraded == ["head"], upgraded
+
+
+@needs_postgres
+def test_lifespan_refuses_wrong_schema_and_passes_after_upgrade(db_url):
+    from fastapi.testclient import TestClient
+
+    from server.config import load_config
+    from server.main import create_app
+
+    cfg = load_config(
+        database_url=db_url,
+        schema_mode="migrate",
+        admin_username="admin",
+        admin_password="correct horse battery staple",
+        cookie_secure=False,
+        enable_scheduler=False,
+    )
+
+    # Empty database: schema is at None, this LTMS needs 0001 -> startup refuses.
+    with pytest.raises(RuntimeError, match="server.migrate upgrade"):
+        with TestClient(create_app(cfg)):
+            pass
+
+    # After upgrading to head, startup succeeds (no create_all in migrate mode).
+    assert _invoke(["upgrade"], db_url)[0] == 0
+    with TestClient(create_app(cfg)) as client:
+        r = client.get("/api/health")
+        assert r.status_code == 200, r.text
+
+
+def test_sqlite_starts_in_migrate_mode():
+    # Runs everywhere: SQLite always uses create_all regardless of schema_mode.
+    from fastapi.testclient import TestClient
+
+    from server.config import load_config
+    from server.main import create_app
+
+    cfg = load_config(
+        database_url="sqlite+aiosqlite://",
+        schema_mode="migrate",
+        admin_username="admin",
+        admin_password="correct horse battery staple",
+        cookie_secure=False,
+        enable_scheduler=False,
+    )
+    with TestClient(create_app(cfg)) as client:
+        r = client.get("/api/health")
+        assert r.status_code == 200, r.text

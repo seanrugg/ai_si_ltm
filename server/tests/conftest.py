@@ -56,6 +56,7 @@ def config(db_url):
         enable_scheduler=False,
         ingest_rate=1000,
         recall_rate=1000,
+        schema_mode="create",  # tests create their own schema; never migrate
     )
 
 

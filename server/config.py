@@ -6,7 +6,7 @@ from typing import Optional
 from urllib.parse import quote
 
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ltms_contract import RECORD_TYPES
@@ -55,6 +55,19 @@ class ServerConfig(BaseSettings):
     db_name: str = "ltms"
     db_user: str = "ltms"
     db_password: str = ""
+
+    # Schema startup mode. "migrate" (the default) requires a PostgreSQL
+    # database to already be at the Alembic head and refuses to create tables;
+    # "create" runs create_all like the old behaviour. SQLite always uses
+    # create_all regardless of this mode. Env: LTMS_SCHEMA_MODE.
+    schema_mode: str = "migrate"
+
+    @field_validator("schema_mode")
+    @classmethod
+    def _check_schema_mode(cls, v: str) -> str:
+        if v not in ("migrate", "create"):
+            raise ValueError("schema_mode must be 'migrate' or 'create'")
+        return v
 
     # Auth
     admin_username: str = "admin"

@@ -14,7 +14,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
+import shutil
+import subprocess
 import sys
+from datetime import datetime, timezone
+from urllib.parse import urlparse, urlunparse
 
 from alembic import command
 from alembic.config import Config
@@ -98,7 +103,61 @@ def _cmd_check(url: str) -> None:
         sys.exit(1)
 
 
-def _cmd_upgrade(url: str) -> None:
+def _backup(url: str, backup_dir: str, current: str, head: str) -> None:
+    """Back up the database with pg_dump before upgrading.
+
+    The password is passed through PGPASSWORD, never on the command line and
+    never printed. Exits 1 without migrating if pg_dump is missing or fails.
+    """
+    os.makedirs(backup_dir, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    filepath = os.path.join(backup_dir, f"ltms-pre-{current}-to-{head}-{stamp}.dump")
+
+    if shutil.which("pg_dump") is None:
+        print(
+            "backup failed: pg_dump not found; not migrating. "
+            "Fix it or pass --no-backup",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # libpq URL: the SQLAlchemy URL with "+asyncpg" removed.
+    libpq = url.replace("+asyncpg", "")
+    parsed = urlparse(libpq)
+    password = parsed.password
+    if password is not None:
+        # Never put the password on the command line; pass it via PGPASSWORD.
+        netloc = parsed.hostname or ""
+        if parsed.port is not None:
+            netloc += f":{parsed.port}"
+        if parsed.username:
+            netloc = f"{parsed.username}@{netloc}"
+        dump_url = urlunparse(
+            (parsed.scheme, netloc, parsed.path, parsed.params, parsed.query, parsed.fragment)
+        )
+    else:
+        dump_url = libpq
+
+    env = os.environ.copy()
+    if password is not None:
+        env["PGPASSWORD"] = password
+
+    try:
+        subprocess.run(
+            ["pg_dump", "--format=custom", "--file", filepath, dump_url],
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        print(
+            f"backup failed: {exc}; not migrating. Fix it or pass --no-backup",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def _cmd_upgrade(url: str, backup_dir: str, no_backup: bool) -> None:
     # A database that already holds records but was never stamped predates
     # migrations; it must be stamped to the baseline before upgrading.
     records = asyncio.run(_table_exists(url, "records"))
@@ -111,7 +170,18 @@ def _cmd_upgrade(url: str) -> None:
             file=sys.stderr,
         )
         sys.exit(1)
+
     cfg = alembic_config(url)
+    head = _head(cfg)
+    current = asyncio.run(_current_revision(url))
+    pending = current is not None and current != head
+
+    if pending and records:
+        if no_backup:
+            print("warning: --no-backup: skipping pre-upgrade backup")
+        else:
+            _backup(url, backup_dir, current, head)
+
     command.upgrade(cfg, "head")
 
 
@@ -129,6 +199,16 @@ def main(argv=None) -> None:
     parser.add_argument(
         "--url", default=None, help="database URL (defaults to LTMS config)"
     )
+    parser.add_argument(
+        "--backup-dir",
+        default="/var/backups/ltms",
+        help="directory for pre-upgrade pg_dump backups",
+    )
+    parser.add_argument(
+        "--no-backup",
+        action="store_true",
+        help="skip the pre-upgrade backup (prints a warning)",
+    )
     args = parser.parse_args(argv)
 
     url = args.url or ServerConfig().resolved_database_url
@@ -137,7 +217,7 @@ def main(argv=None) -> None:
     if args.command == "current":
         _cmd_current(url)
     elif args.command == "upgrade":
-        _cmd_upgrade(url)
+        _cmd_upgrade(url, args.backup_dir, args.no_backup)
     elif args.command == "check":
         _cmd_check(url)
     elif args.command == "stamp":
