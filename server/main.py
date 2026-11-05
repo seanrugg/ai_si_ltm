@@ -19,6 +19,7 @@ from server.api import admin, member, public
 from server.api.errors import register_exception_handlers
 from server.config import ServerConfig, load_config
 from server.db import create_all, make_engine, make_sessionmaker
+from server.migrate import alembic_config, _current_revision, _head
 from server.security.ratelimit import RateLimiter
 from server.services import lrs
 from server.services.auth import ensure_admin
@@ -33,7 +34,20 @@ def create_app(config: ServerConfig | None = None, *, create_tables: bool = True
         app.state.engine = engine
         app.state.sessionmaker = make_sessionmaker(engine)
         if create_tables:
-            await create_all(engine)
+            url = cfg.resolved_database_url
+            if url.startswith("sqlite") or cfg.schema_mode == "create":
+                await create_all(engine)
+            else:
+                # PostgreSQL in "migrate" mode: the database must already be at
+                # the Alembic head. Never create tables here; that would silently
+                # drift the schema away from the signed record contract.
+                current = await _current_revision(url)
+                head = _head(alembic_config(url))
+                if current != head:
+                    raise RuntimeError(
+                        f"database schema is at {current}, this LTMS needs {head}: "
+                        "run python -m server.migrate upgrade"
+                    )
         async with app.state.sessionmaker() as session:
             await ensure_admin(session, cfg.admin_username, cfg.admin_password)
             await lrs.bootstrap_endpoint(session, cfg)
