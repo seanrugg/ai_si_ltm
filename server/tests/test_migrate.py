@@ -181,11 +181,18 @@ def _db_password(db_url: str) -> str | None:
     return make_url(db_url).password
 
 
-async def _stage_db_at_0001_with_record(db_url):
-    """Apply the baseline schema, stamp revision 0001, and insert one record row."""
-    schema_sql = SCHEMA_SQL.read_text()
-    asyncio.run(_apply_schema(db_url, schema_sql))
+def _stage_db_at_0001_with_record(db_url):
+    """Apply the baseline schema, stamp revision 0001, and insert one record row.
+
+    Plain function: each async step gets its own asyncio.run, and the migrate CLI
+    (which runs Alembic's asyncio env.py) is called with no loop running.
+    """
+    asyncio.run(_apply_schema(db_url, SCHEMA_SQL.read_text()))
     _invoke(["stamp", "0001"], db_url)
+    asyncio.run(_insert_one_record(db_url))
+
+
+async def _insert_one_record(db_url):
     engine = create_async_engine(db_url, isolation_level="AUTOCOMMIT")
     try:
         async with engine.connect() as conn:
@@ -209,7 +216,7 @@ async def _stage_db_at_0001_with_record(db_url):
 @needs_postgres
 def test_upgrade_backs_up_before_migrating(db_url, monkeypatch, tmp_path):
     # A database at revision 0001 with a record, then a (faked) pending head.
-    asyncio.run(_stage_db_at_0001_with_record(db_url))
+    _stage_db_at_0001_with_record(db_url)
 
     upgraded = []
     monkeypatch.setattr("server.migrate._head", lambda cfg: "0002")
@@ -236,7 +243,7 @@ def test_upgrade_backs_up_before_migrating(db_url, monkeypatch, tmp_path):
     file_idx = cmd.index("--file")
     backup_file = cmd[file_idx + 1]
     assert backup_file.startswith(str(tmp_path) + os.sep), backup_file
-    assert backup_file.startswith("ltms-pre-0001-to-0002-"), backup_file
+    assert os.path.basename(backup_file).startswith("ltms-pre-0001-to-0002-"), backup_file
     assert backup_file.endswith(".dump"), backup_file
 
     env = captured["env"]
@@ -244,13 +251,16 @@ def test_upgrade_backs_up_before_migrating(db_url, monkeypatch, tmp_path):
     password = _db_password(db_url)
     assert password is not None
     # the password is never on the command line and never printed
-    assert password not in " ".join(cmd), cmd
+    # no password in the dump URL (the test user's password equals its name,
+    # so check the URL's password field rather than searching for the text)
+    from urllib.parse import urlparse
+    assert urlparse(cmd[-1]).password is None, cmd
     assert password not in out and password not in err
 
 
 @needs_postgres
 def test_upgrade_refuses_without_pg_dump(db_url, monkeypatch):
-    asyncio.run(_stage_db_at_0001_with_record(db_url))
+    _stage_db_at_0001_with_record(db_url)
 
     upgraded = []
     monkeypatch.setattr("server.migrate._head", lambda cfg: "0002")
@@ -271,7 +281,7 @@ def test_upgrade_refuses_without_pg_dump(db_url, monkeypatch):
 
 @needs_postgres
 def test_upgrade_no_backup_warns_and_migrates(db_url, monkeypatch):
-    asyncio.run(_stage_db_at_0001_with_record(db_url))
+    _stage_db_at_0001_with_record(db_url)
 
     upgraded = []
     monkeypatch.setattr("server.migrate._head", lambda cfg: "0002")
@@ -411,20 +421,24 @@ def test_signed_records_survive_upgrade(db_url):
     # 2. Start the app on the existing schema; create_tables=False so it never
     #    creates tables itself. The DB is at head, so "migrate" mode starts
     #    without creating anything.
+    from server.tests.conftest import ADMIN_PASS, ADMIN_USER, AdminClient
+
     cfg = load_config(
         database_url=db_url,
-        admin_username="admin",
-        admin_password="correct horse battery staple",
+        admin_username=ADMIN_USER,
+        admin_password=ADMIN_PASS,
         cookie_secure=False,
         enable_scheduler=False,
     )
     app = create_app(cfg, create_tables=False)
 
     with TestClient(app, base_url="http://testserver") as http:
+        admin = AdminClient(http)
+        assert admin.login().status_code == 200
         # 3. Enroll + approve a member and append 3 signed records (mirrors mesh).
         member = LTMSClient(name="alice", signing_key=generate_key(), http=http)
         res = member.enroll("robot", ["contribute", "recall"])
-        assert http.post(f"/api/admin/members/{res['id']}/approve", json={}).status_code == 200
+        assert admin.post(f"/api/admin/members/{res['id']}/approve", json={}).status_code == 200
         for i in range(1, 4):
             member.append("event", summary=f"record {i}", payload={"n": i})
         member.flush()
@@ -433,11 +447,17 @@ def test_signed_records_survive_upgrade(db_url):
         assert _invoke(["upgrade"], db_url)[0] == 0
 
         # 5. Integrity: the signed chain still verifies after the upgrade.
+        # A fresh engine: the app's engine belongs to the TestClient's event loop.
         async def go():
-            async with app.state.sessionmaker() as session:
-                from server.services.integrity import verify_all
+            from server.db import make_engine, make_sessionmaker
+            from server.services.integrity import verify_all
 
-                return await verify_all(session)
+            engine = make_engine(db_url)
+            try:
+                async with make_sessionmaker(engine)() as session:
+                    return await verify_all(session)
+            finally:
+                await engine.dispose()
 
         reports = asyncio.run(go())
         assert len(reports) == 1

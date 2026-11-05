@@ -22,6 +22,11 @@ from server.main import create_app
 ADMIN_USER, ADMIN_PASS = "admin", "correct horse battery staple"
 PG_URL = os.environ.get("LTMS_TEST_DATABASE_URL")
 
+# Tests build their own schema with create_all. Every config fixture (including
+# the per-file ones in the LRS tests) inherits this through the environment;
+# tests of the "migrate" startup gate pass schema_mode="migrate" explicitly.
+os.environ.setdefault("LTMS_SCHEMA_MODE", "create")
+
 
 @pytest.fixture
 def db_url():
