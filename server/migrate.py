@@ -109,10 +109,6 @@ def _backup(url: str, backup_dir: str, current: str, head: str) -> None:
     The password is passed through PGPASSWORD, never on the command line and
     never printed. Exits 1 without migrating if pg_dump is missing or fails.
     """
-    os.makedirs(backup_dir, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    filepath = os.path.join(backup_dir, f"ltms-pre-{current}-to-{head}-{stamp}.dump")
-
     if shutil.which("pg_dump") is None:
         print(
             "backup failed: pg_dump not found; not migrating. "
@@ -120,6 +116,18 @@ def _backup(url: str, backup_dir: str, current: str, head: str) -> None:
             file=sys.stderr,
         )
         sys.exit(1)
+
+    try:
+        os.makedirs(backup_dir, exist_ok=True)
+    except OSError as exc:
+        print(
+            f"backup failed: can't create {backup_dir} ({exc.strerror}); not migrating. "
+            "Fix it, pass --backup-dir, or pass --no-backup",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    filepath = os.path.join(backup_dir, f"ltms-pre-{current}-to-{head}-{stamp}.dump")
 
     # libpq URL: the SQLAlchemy URL with "+asyncpg" removed.
     libpq = url.replace("+asyncpg", "")

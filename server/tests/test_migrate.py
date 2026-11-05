@@ -259,6 +259,23 @@ def test_upgrade_backs_up_before_migrating(db_url, monkeypatch, tmp_path):
 
 
 @needs_postgres
+def test_upgrade_refuses_when_backup_dir_unusable(db_url, monkeypatch, tmp_path):
+    # A backup dir that can't be created: a clean message and no migration,
+    # not a traceback (e.g. the default /var/backups/ltms without permission).
+    _stage_db_at_0001_with_record(db_url)
+    upgraded = []
+    monkeypatch.setattr("server.migrate._head", lambda cfg: "0002")
+    monkeypatch.setattr("alembic.command.upgrade", lambda cfg, rev: upgraded.append(rev))
+    monkeypatch.setattr("shutil.which", lambda cmd: "/fake/pg_dump")
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("x")
+    code, _, err = _invoke(["upgrade", "--backup-dir", str(blocker / "sub")], db_url)
+    assert code == 1, err
+    assert "backup failed" in err and "not migrating" in err, err
+    assert upgraded == []
+
+
+@needs_postgres
 def test_upgrade_refuses_without_pg_dump(db_url, monkeypatch):
     _stage_db_at_0001_with_record(db_url)
 
