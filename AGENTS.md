@@ -151,3 +151,20 @@ Before opening the PR:
 - **chain**: each member's records link through `prev_hash`. A gap or edit is visible on the Integrity page.
 - **swarm / hub / relay**: a group of members; its hub (the Jetson) may submit members' records unchanged. See `docs/swarms.md`.
 - **context pack**: what a robot asks for before acting: recent outcomes, communications, lessons and policies.
+
+## 7. Database changes
+
+Every change to `server/models/` needs an Alembic revision in
+`server/migrations/versions/` (`python -m alembic -c ...` isn't available; write
+it by hand, named `NNNN_<slug>.py`, `down_revision` = the previous head) **and**
+a regenerated `config/schema.sql` (run `python -m scripts.dump_schema`).
+
+Never change or drop `records` header columns, hashes or signatures, and never
+delete records. Changes to `records` are additive only, and any migration
+touching `records` must drop and recreate its append-only triggers in the same
+migration and say so in the docstring. Such migrations need Sean's approval in
+the issue.
+
+Breaking changes are two releases: expand (add and backfill), then contract.
+
+Never edit an existing revision or `server/migrations/sql/0001_baseline.sql`.

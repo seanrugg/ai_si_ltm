@@ -335,3 +335,143 @@ def test_sqlite_starts_in_migrate_mode():
     with TestClient(create_app(cfg)) as client:
         r = client.get("/api/health")
         assert r.status_code == 200, r.text
+
+
+def _seed_one_record(db_url):
+    """Insert one member and one signed record (tables are assumed to exist)."""
+    import asyncio
+
+    async def go():
+        eng = create_async_engine(db_url, isolation_level="AUTOCOMMIT")
+        try:
+            async with eng.connect() as conn:
+                await conn.exec_driver_sql(
+                    "INSERT INTO members (id, public_key, name, kind, permissions, "
+                    "requested_permissions, status, last_ack_seq, last_hash, created_at) "
+                    "VALUES ('00000000-0000-0000-0000-000000000001', '\\x00'::bytea, "
+                    "'alice', 'robot', '[]'::jsonb, '[]'::jsonb, 'active', 0, "
+                    "'genesis', NOW())"
+                )
+                await conn.exec_driver_sql(
+                    "INSERT INTO records (member_id, agent, seq, ts, type, prev_hash, "
+                    "payload_hash, hash, sig, header_raw, received_at) "
+                    "VALUES ('00000000-0000-0000-0000-000000000001', 'test', 1, NOW(), "
+                    "'event', 'genesis', 'aaaa', 'aaaa', 'sig', '\\x00'::bytea, NOW())"
+                )
+        finally:
+            await eng.dispose()
+
+    asyncio.run(go())
+
+
+@needs_postgres
+def test_no_model_drift_after_upgrade(db_url):
+    """Upgrade an empty database to head; the model metadata must match exactly
+    (no drift). A model change without a migration fails this test."""
+    from alembic.autogenerate import compare_metadata
+    from alembic.runtime.migration import MigrationContext
+
+    from server.models import Base
+
+    assert _invoke(["upgrade"], db_url)[0] == 0
+
+    async def go():
+        engine = create_async_engine(db_url)
+        try:
+            async with engine.connect() as conn:
+
+                def compare(connection):
+                    context = MigrationContext.configure(connection)
+                    return compare_metadata(context, Base.metadata)
+
+                return await conn.run_sync(compare)
+        finally:
+            await engine.dispose()
+
+    diff = asyncio.run(go())
+    assert diff == [], diff
+
+
+@needs_postgres
+def test_signed_records_survive_upgrade(db_url):
+    """Create a database at revision 0001 (== head today), start the app on the
+    existing schema with create_tables=False, append signed records, upgrade to
+    head: the chain still verifies."""
+    from fastapi.testclient import TestClient
+
+    from cli_agent.client import LTMSClient
+    from ltms_contract import generate_key
+
+    from server.config import load_config
+    from server.main import create_app
+
+    # 1. Create the database at revision 0001 (schema exists, stamped).
+    assert _invoke(["upgrade"], db_url)[0] == 0
+
+    # 2. Start the app on the existing schema; create_tables=False so it never
+    #    creates tables itself. The DB is at head, so "migrate" mode starts
+    #    without creating anything.
+    cfg = load_config(
+        database_url=db_url,
+        admin_username="admin",
+        admin_password="correct horse battery staple",
+        cookie_secure=False,
+        enable_scheduler=False,
+    )
+    app = create_app(cfg, create_tables=False)
+
+    with TestClient(app, base_url="http://testserver") as http:
+        # 3. Enroll + approve a member and append 3 signed records (mirrors mesh).
+        member = LTMSClient(name="alice", signing_key=generate_key(), http=http)
+        res = member.enroll("robot", ["contribute", "recall"])
+        assert http.post(f"/api/admin/members/{res['id']}/approve", json={}).status_code == 200
+        for i in range(1, 4):
+            member.append("event", summary=f"record {i}", payload={"n": i})
+        member.flush()
+
+        # 4. Upgrade to head (0001 -> head; no-op today).
+        assert _invoke(["upgrade"], db_url)[0] == 0
+
+        # 5. Integrity: the signed chain still verifies after the upgrade.
+        async def go():
+            async with app.state.sessionmaker() as session:
+                from server.services.integrity import verify_all
+
+                return await verify_all(session)
+
+        reports = asyncio.run(go())
+        assert len(reports) == 1
+        assert reports[0]["status"] == "ok", reports
+
+
+@needs_postgres
+def test_records_stay_append_only_after_upgrade(db_url):
+    """After upgrading to head, UPDATE on records is still rejected by the
+    append-only trigger."""
+    from fastapi.testclient import TestClient
+    from sqlalchemy import text
+
+    from server.config import load_config
+    from server.main import create_app
+
+    assert _invoke(["upgrade"], db_url)[0] == 0
+
+    cfg = load_config(
+        database_url=db_url,
+        admin_username="admin",
+        admin_password="correct horse battery staple",
+        cookie_secure=False,
+        enable_scheduler=False,
+    )
+    app = create_app(cfg, create_tables=False)
+
+    with TestClient(app, base_url="http://testserver"):
+        _seed_one_record(db_url)
+
+        async def go():
+            async with app.state.sessionmaker() as session:
+                await session.execute(text("UPDATE records SET seq = seq"))
+                await session.commit()
+
+        with pytest.raises(Exception):
+            asyncio.run(go())
