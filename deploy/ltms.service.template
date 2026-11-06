@@ -10,16 +10,24 @@ User=@RUN_USER@
 Group=@RUN_GROUP@
 WorkingDirectory=@APP_DIR@
 EnvironmentFile=/etc/ltms/ltms.env
+# Run pending migrations before starting, so an upgrade is "pull, restart".
+# A pg_dump backup is written to /var/backups/ltms-migrate (owned by the service
+# user; root-setup.sh creates it) before any schema change. It's the only path
+# the sandbox below lets the service write; the nightly root backups stay in
+# /var/backups/ltms. A large dump can take a while, hence the start timeout.
+ExecStartPre=@APP_DIR@/.venv/bin/python -m server.migrate upgrade --backup-dir /var/backups/ltms-migrate
+TimeoutStartSec=15min
 # One worker on purpose: rate limits live in process memory.
 # Listens on localhost only; Plesk's nginx is the only way in.
 ExecStart=@APP_DIR@/.venv/bin/uvicorn server.main:app --host 127.0.0.1 --port 8090 --workers 1 --proxy-headers --forwarded-allow-ips 127.0.0.1 --no-server-header --log-level info
 Restart=on-failure
 RestartSec=5
 
-# Hardening: the service can't write to disk or gain privileges.
+# Hardening: the service can't write to disk (except its migration backups) or gain privileges.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
+ReadWritePaths=/var/backups/ltms-migrate
 ProtectHome=true
 ProtectKernelTunables=true
 ProtectKernelModules=true

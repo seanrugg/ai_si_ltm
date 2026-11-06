@@ -53,6 +53,8 @@ services:
       LTMS_PUBLIC_BASE_URL: ${LTMS_PUBLIC_BASE_URL:-}
     ports:
       - "${LTMS_BIND:-127.0.0.1}:${LTMS_PORT:-8080}:8080"
+    volumes:
+      - ltms-backups:/backups
 
   # Optional MQTT broker for swarms. Members connect on the local network,
   # so it listens on all interfaces; authentication is required.
@@ -110,3 +112,4 @@ volumes:
   db-data:
   mqtt-data:
   lrs-db-data:
+  ltms-backups:

@@ -26,7 +26,7 @@ RUN npm run build
 
 # Stage 2: run the LTMS server (same uvicorn flags as deploy/ltms.service.template,
 # listening on 0.0.0.0:8080 inside the container; uvicorn reads FORWARDED_ALLOW_IPS).
-FROM python:3.12-slim-bookworm
+FROM python:3.12-slim-trixie
 
 RUN useradd -r -u 10001 -U ltms
 
@@ -45,8 +45,23 @@ COPY . .
 # needs it; a real deployment overrides LTMS_DATABASE_URL with Postgres.
 RUN pip install --no-cache-dir . "aiosqlite>=0.20"
 
+# pg_dump is needed for the pre-upgrade backup the entrypoint takes (issue #99).
+# Trixie's client is newer than the Postgres 16 server, so pg_dump supports it;
+# bookworm's 15 can't dump a 16 server.
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# The entrypoint writes a pre-upgrade backup here; it must be writable by ltms.
+RUN mkdir /backups && chown ltms:ltms /backups
+
 # /app must be writable by the runtime user (e.g. a sqlite dev database at ./dev.db).
 RUN chown -R ltms:ltms /app
+
+# Migrate on start (PostgreSQL only), then run the command. An upgrade is
+# just "pull, restart".
+COPY deploy/docker-entrypoint.sh /app/deploy/docker-entrypoint.sh
+RUN chmod +x /app/deploy/docker-entrypoint.sh
+ENTRYPOINT ["/app/deploy/docker-entrypoint.sh"]
 
 USER ltms
 

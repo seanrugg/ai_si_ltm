@@ -98,3 +98,13 @@ xAPI-conformant LRS can be added the same way instead.
 
 - All configuration comes from `.env`; no secrets or site values are baked
   into the image (AGENTS.md rule 10).
+
+## Upgrades and migrations
+
+Upgrades run automatically on start: the container's entrypoint runs
+`python -m server.migrate upgrade --backup-dir /backups` before the server
+starts, but only when `LTMS_DATABASE_URL` points at PostgreSQL (SQLite keeps
+`create_all`). A backup is written before any schema change, to `/backups`
+inside the container (the `ltms-backups` compose volume). To roll back,
+restore that dump with `pg_restore` into a fresh database and redeploy the
+previous image version.

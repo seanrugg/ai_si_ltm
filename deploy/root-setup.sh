@@ -45,6 +45,11 @@ systemctl daemon-reload
 systemctl enable --quiet ltms.service ltms-restart.path
 systemctl restart ltms-restart.path
 
+say "Pre-migration backups: /var/backups/ltms-migrate (owned by $RUN_USER)"
+# The service writes a pg_dump here before any schema change (ExecStartPre);
+# the unit's sandbox allows writing to this path only.
+install -d -m 700 -o "$RUN_USER" -g "$RUN_GROUP" /var/backups/ltms-migrate
+
 say "Nightly backup (02:30 server time) to /var/backups/ltms"
 command -v pg_dump >/dev/null || echo "WARNING: pg_dump not found; backups will fail until the PostgreSQL client is installed."
 echo "30 2 * * * root bash $APP_DIR/deploy/backup.sh >> /var/log/ltms-backup.log 2>&1" > /etc/cron.d/ltms-backup
