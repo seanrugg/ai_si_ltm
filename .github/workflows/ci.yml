@@ -80,6 +80,7 @@ jobs:
         run: |
           APP=/srv/ltms-app
           sudo mkdir -p "$APP/.venv/bin" && sudo ln -sf /bin/true "$APP/.venv/bin/uvicorn"
+          sudo ln -sf /bin/true "$APP/.venv/bin/python"   # ExecStartPre (migrations)
           for t in deploy/*.template; do
             sed -e "s#@APP_DIR@#$APP#g" -e "s#@RUN_USER@#$(id -un)#g" -e "s#@RUN_GROUP@#$(id -gn)#g" "$t" > "/tmp/$(basename "${t%.template}")"
           done

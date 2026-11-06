@@ -4,7 +4,7 @@
 # create_all and skips this step.
 set -eu
 
-case "$LTMS_DATABASE_URL" in
+case "${LTMS_DATABASE_URL:-}" in
   postgresql*)
     python -m server.migrate upgrade --backup-dir /backups
     ;;

@@ -214,17 +214,14 @@ Run one now to confirm it works: `sudo bash <app-dir>/deploy/backup.sh`
 
 ## Upgrades and migrations
 
-Upgrades run automatically on start: the systemd service runs
-`ExecStartPre=@APP_DIR@/.venv/bin/python -m server.migrate upgrade --backup-dir /var/backups/ltms`
-before the server starts, so an upgrade is just "pull, restart" (PostgreSQL
-only; SQLite keeps `create_all`). A backup is written before any schema change,
-to `/var/backups/ltms`. To roll back, restore that dump with `pg_restore` into
-a fresh database and redeploy the previous version.
-
-Note: `root-setup.sh` does not create `/var/backups/ltms`, and the service runs
-as the site user, not root. Confirm `/var/backups/ltms` exists and is writable
-by the service user (the nightly `deploy/backup.sh` creates it as root), or the
-pre-upgrade backup will fail and the server will not start.
+Upgrades run automatically on start: the service's `ExecStartPre` runs
+`python -m server.migrate upgrade` before the server starts, so an upgrade is
+just "pull, restart" (PostgreSQL only; SQLite keeps `create_all`). Before any
+schema change it writes a `pg_dump` to `/var/backups/ltms-migrate`, which
+`root-setup.sh` creates for the service user (mode 700); it's the only path the
+service's sandbox can write. If the backup fails, nothing is migrated and the
+service doesn't start: check `journalctl -u ltms`. To roll back, restore that
+dump with `pg_restore` into a fresh database and redeploy the previous version.
 
 **Keep a copy off the server.** If the VPS is lost, the robots' memory is lost with it. Weekly, from the Mac:
 
