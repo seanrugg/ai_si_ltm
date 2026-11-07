@@ -31,6 +31,7 @@ services:
       start_period: 10s
 
   ltms:
+    image: ${LTMS_IMAGE:-ghcr.io/seanrugg/ai_si_ltm:latest}
     build: .
     depends_on:
       db:
