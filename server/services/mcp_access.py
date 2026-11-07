@@ -54,6 +54,10 @@ async def create(
 ) -> tuple[McpToken, str]:
     """Create a token, store only its hash, return (row, plaintext)."""
     scope = _validate_mcp_scope(scope)
+    if not name or len(name) > 64:
+        raise ServiceError(422, "bad_name", "name must be 1-64 characters")
+    if await session.scalar(select(McpToken.id).where(McpToken.name == name)) is not None:
+        raise ServiceError(409, "name_taken", "a token with that name already exists")
     plaintext = new_token()
     row = McpToken(
         name=name,

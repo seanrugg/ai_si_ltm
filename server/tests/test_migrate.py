@@ -33,6 +33,10 @@ needs_postgres = pytest.mark.skipif(
 )
 
 SCHEMA_SQL = pathlib.Path(__file__).resolve().parent.parent.parent / "config" / "schema.sql"
+# What a database "at revision 0001" (or one that predates migrations) actually
+# contains: the frozen baseline, not today's schema.sql, which grows with each
+# migration.
+BASELINE_SQL = pathlib.Path(__file__).resolve().parent.parent / "migrations" / "sql" / "0001_baseline.sql"
 
 
 def _invoke(argv, db_url):
@@ -82,6 +86,15 @@ async def _trigger_names(db_url):
         await engine.dispose()
 
 
+def _head() -> str:
+    """The code's head revision, so these tests don't change with every migration."""
+    from alembic.script import ScriptDirectory
+
+    from server.migrate import alembic_config
+
+    return ScriptDirectory.from_config(alembic_config("postgresql+asyncpg://x/y")).get_current_head()
+
+
 @needs_postgres
 def test_upgrade_empty_db(db_url):
     code, _, err = _invoke(["upgrade"], db_url)
@@ -89,7 +102,7 @@ def test_upgrade_empty_db(db_url):
 
     code, out, err = _invoke(["current"], db_url)
     assert code == 0
-    assert out.strip() == "0002", err
+    assert out.strip() == _head(), err
 
     triggers = asyncio.run(_trigger_names(db_url))
     assert "trg_records_no_mutation" in triggers
@@ -101,18 +114,18 @@ def test_check(db_url):
     # a fresh empty database is behind head
     code, out, _ = _invoke(["check"], db_url)
     assert code == 1
-    assert out.strip() == "behind: none -> 0002"
+    assert out.strip() == f"behind: none -> {_head()}"
 
     _invoke(["upgrade"], db_url)
 
     code, out, _ = _invoke(["check"], db_url)
     assert code == 0
-    assert out.strip() == "ok 0002"
+    assert out.strip() == f"ok {_head()}"
 
 
 @needs_postgres
 def test_pre_migration_db(db_url):
-    schema_sql = SCHEMA_SQL.read_text()
+    schema_sql = BASELINE_SQL.read_text()
     asyncio.run(_apply_schema(db_url, schema_sql))
 
     # upgrade refuses: the database predates migrations
@@ -121,21 +134,24 @@ def test_pre_migration_db(db_url):
     assert "predates migrations" in err
     assert "python -m server.migrate stamp 0001" in err
 
-    # stamping the baseline brings it to 0001, which is now behind head 0002
+    # The documented procedure: stamp the baseline it matches, then upgrade,
+    # which applies every later revision. (Stamping straight to head would skip
+    # creating the tables those revisions add.)
     code, _, err = _invoke(["stamp", "0001"], db_url)
     assert code == 0, err
 
     code, out, _ = _invoke(["check"], db_url)
-    assert code == 1
-    assert out.strip() == "behind: 0001 -> 0002", out
+    if _head() != "0001":
+        assert code == 1
+        assert out.strip() == f"behind: 0001 -> {_head()}", out
 
-    # stamping to head satisfies the check
-    code, _, err = _invoke(["stamp", "0002"], db_url)
+    code, _, err = _invoke(["upgrade", "--no-backup"], db_url)
     assert code == 0, err
 
     code, out, _ = _invoke(["check"], db_url)
     assert code == 0
-    assert out.strip() == "ok 0002"
+    assert out.strip() == f"ok {_head()}"
+    assert "mcp_tokens" in asyncio.run(_table_names(db_url))
 
 
 def test_sqlite_url_refused():
@@ -195,7 +211,7 @@ def _stage_db_at_0001_with_record(db_url):
     Plain function: each async step gets its own asyncio.run, and the migrate CLI
     (which runs Alembic's asyncio env.py) is called with no loop running.
     """
-    asyncio.run(_apply_schema(db_url, SCHEMA_SQL.read_text()))
+    asyncio.run(_apply_schema(db_url, BASELINE_SQL.read_text()))
     _invoke(["stamp", "0001"], db_url)
     asyncio.run(_insert_one_record(db_url))
 
@@ -520,3 +536,14 @@ def test_records_stay_append_only_after_upgrade(db_url):
 
         with pytest.raises(Exception):
             asyncio.run(go())
+
+
+
+async def _table_names(db_url):
+    engine = create_async_engine(db_url)
+    try:
+        async with engine.connect() as conn:
+            rows = await conn.exec_driver_sql("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+            return {r[0] for r in rows}
+    finally:
+        await engine.dispose()

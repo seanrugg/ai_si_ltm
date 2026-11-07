@@ -219,3 +219,10 @@ def test_migration_creates_mcp_tokens(db_url):
             await engine.dispose()
 
     assert asyncio.run(table_exists()), "mcp_tokens table missing after upgrade to head"
+
+
+
+def test_duplicate_token_name_is_409(admin):
+    assert admin.post("/api/admin/mcp/tokens", json={"name": "dup", "scope": {"types": ["event"]}}).status_code == 200
+    r = admin.post("/api/admin/mcp/tokens", json={"name": "dup", "scope": {"types": ["event"]}})
+    assert r.status_code == 409, r.text
