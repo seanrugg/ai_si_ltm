@@ -27,11 +27,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ltms_contract import canonicalize, now_ts, parse_ts
 from ltms_contract.record import NAME_RE, verify_signature
 from server.models import AuditLog, Member, Swarm, SwarmMember
+from server.models.member import PERMISSIONS
+from server.models.swarm import ENROLLMENT_MODES
 from server.services.errors import ServiceError
 
 SWARM_PREFIX = b"ltms-swarm-v1\n"
 APPOINTMENT_MAX_AGE = timedelta(days=30)
 MEMBER_ROLES = ("member", "observer")  # "hub" only through a signed appointment
+# Open enrollment may grant only ordinary member permissions: "relay" needs a
+# signed hub appointment and "policy" is an admin power.
+_OPEN_PERMISSIONS = {"contribute", "recall", "recall:scoped"}
 
 
 def swarm_id_for(public_key: bytes) -> str:
@@ -118,6 +123,41 @@ async def create_swarm(session: AsyncSession, *, name: str, public_key_hex: str,
     session.add(swarm)
     _audit(session, actor, "swarm_create", {"swarm": swarm.id, "name": name, "home": is_home})
     await session.flush()
+    return swarm
+
+
+def _validate_open_permissions(perms: list[str] | None) -> list[str]:
+    """Validate ``open_permissions``: known permissions only, never relay or
+    an admin permission (policy). Defaults to ``["contribute"]``."""
+    if perms is None:
+        return ["contribute"]
+    if not isinstance(perms, list) or not all(isinstance(p, str) for p in perms):
+        raise ServiceError(422, "bad_permissions", "open_permissions must be a list of strings")
+    bad = [p for p in perms if p not in PERMISSIONS]
+    if bad:
+        raise ServiceError(422, "bad_permissions", f"unknown permissions: {', '.join(bad)}")
+    barred = [p for p in perms if p not in _OPEN_PERMISSIONS]
+    if barred:
+        raise ServiceError(422, "bad_permissions",
+                           f"open enrollment cannot grant: {', '.join(barred)}")
+    return sorted(set(perms))
+
+
+async def set_enrollment_mode(
+    session: AsyncSession, swarm: Swarm, mode: str,
+    open_permissions: list[str] | None, *,
+    actor: str = "cli",
+) -> Swarm:
+    """Set how members join a swarm and what an open-enrolled member gets."""
+    if mode not in ENROLLMENT_MODES:
+        raise ServiceError(422, "bad_mode", "mode must be approval, invite or open")
+    if swarm.status != "active":
+        raise ServiceError(409, "swarm_revoked", f"swarm {swarm.name!r} is revoked")
+    swarm.enrollment_mode = mode
+    swarm.open_permissions = _validate_open_permissions(open_permissions)
+    _audit(session, actor, "swarm_mode",
+           {"swarm": swarm.name, "mode": mode,
+            "open_permissions": swarm.open_permissions})
     return swarm
 
 

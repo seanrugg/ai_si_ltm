@@ -10,9 +10,14 @@ import httpx
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy import func, Integer, literal, or_, select
 
+import hashlib
+import secrets
+
 from server.api.deps import ADMIN_COOKIE, AdminAuth, client_ip, current_admin, transaction
-from server.api.schemas import AdminLogin, ApproveRequest, McpTokenCreate, PermissionsRequest, ReasonRequest
-from server.models import AuditLog, EnrollmentSwarmRequest, Member, McpToken, Record, RecordPayload, RecordProvenance, Swarm, SwarmMember
+from server.api.schemas import (AdminLogin, ApproveRequest, InviteCreate, McpTokenCreate,
+                                PermissionsRequest, ReasonRequest, SwarmMode)
+from server.models import (AuditLog, EnrollmentSwarmRequest, Invite, Member, McpToken, Record,
+                           RecordPayload, RecordProvenance, Swarm, SwarmMember)
 from server.services import auth as auth_service
 from server.services import enrollment, integrity, lrs as lrs_service, mcp_access, recall, swarms
 from server.services.errors import ServiceError
@@ -396,6 +401,40 @@ async def remove_swarm_member(member: str, request: Request, admin: AdminAuth = 
             raise ServiceError(404, "no_member", f"no member named {member!r}")
         removed = await swarms.remove_member(session, m, actor=f"admin:{admin.username}")
         return {"member": m.name, "removed": removed}
+
+
+@router.post("/admin/swarms/{name}/invites")
+async def create_swarm_invite(name: str, request: Request, body: InviteCreate, admin: AdminAuth = ADMIN) -> dict:
+    """Create a one-time enrollment code for a swarm. The plaintext code is returned once."""
+    async with transaction(request) as session:
+        swarm = await swarms.get_swarm(session, name)
+        code = "ltms_inv_" + secrets.token_urlsafe(24)
+        row = Invite(
+            swarm_id=swarm.id,
+            code_hash=hashlib.sha256(code.encode("utf-8")).hexdigest(),
+            uses_left=body.uses,
+            expires_at=body.expires_at,
+        )
+        session.add(row)
+        await session.flush()
+        session.add(
+            AuditLog(actor=f"admin:{admin.username}", action="swarm_invite_create",
+                     detail={"swarm": swarm.name, "uses": body.uses,
+                             "expires_at": body.expires_at.isoformat() if body.expires_at else None})
+        )
+    return {"id": str(row.id), "code": code, "uses_left": row.uses_left,
+            "expires_at": row.expires_at.isoformat() if row.expires_at else None}
+
+
+@router.post("/admin/swarms/{name}/mode")
+async def set_swarm_mode(name: str, request: Request, body: SwarmMode, admin: AdminAuth = ADMIN) -> dict:
+    """Change how members join a swarm and what open-enrolled members get."""
+    async with transaction(request) as session:
+        swarm = await swarms.get_swarm(session, name)
+        swarm = await swarms.set_enrollment_mode(
+            session, swarm, body.mode, body.open_permissions, actor=f"admin:{admin.username}")
+    return {"swarm": swarm.name, "enrollment_mode": swarm.enrollment_mode,
+            "open_permissions": swarm.open_permissions}
 
 
 @router.post("/admin/swarms/{name}/hub")

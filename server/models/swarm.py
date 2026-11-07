@@ -38,11 +38,15 @@ from server.models.base import Base, BigIntPK, JSONType, UTCDateTime, utcnow
 
 SWARM_STATUSES = ("active", "revoked")
 SWARM_ROLES = ("hub", "member", "observer")
+ENROLLMENT_MODES = ("approval", "invite", "open")
 
 
 class Swarm(Base):
     __tablename__ = "swarms"
-    __table_args__ = (CheckConstraint(f"status IN {SWARM_STATUSES}", name="ck_swarms_status"),)
+    __table_args__ = (
+        CheckConstraint(f"status IN {SWARM_STATUSES}", name="ck_swarms_status"),
+        CheckConstraint(f"enrollment_mode IN {ENROLLMENT_MODES}", name="ck_swarms_enrollment_mode"),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)  # sha256(root public key), hex
     name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
@@ -50,6 +54,15 @@ class Swarm(Base):
     public_key: Mapped[bytes] = mapped_column(LargeBinary(32), unique=True, nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
     is_home: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # How members join: "approval" (admin approves, today's default), "invite"
+    # (a valid one-time code makes them active at once) or "open" (anyone may
+    # join and is active at once with open_permissions).
+    enrollment_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="approval", server_default="approval")
+    # What an open-enrolled member gets: never "relay" (signed hub appointment
+    # only) and never an admin permission. Validated on write.
+    open_permissions: Mapped[list] = mapped_column(
+        JSONType, nullable=False, default=lambda: ["contribute"], server_default='["contribute"]')
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utcnow)
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 

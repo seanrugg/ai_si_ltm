@@ -3,18 +3,26 @@
 Members request enrollment with their public key; nothing is granted until an
 admin approves, and the admin decides which permissions (and scope) to grant.
 Revoking keeps every record the member wrote and kills its tokens at once.
+
+A swarm sets how members join: ``approval`` (today's default; the member stays
+pending until an admin approves), ``invite`` (a valid one-time code makes the
+member active at once) or ``open`` (anyone may join and is active at once with
+the swarm's ``open_permissions``). Free agents (no swarm) always use approval.
 """
 from __future__ import annotations
 
+import hashlib
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from nacl.signing import VerifyKey
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ltms_contract.record import NAME_RE
-from server.models import AuditLog, EnrollmentSwarmRequest, Member, Swarm, Token
+from server.models import (
+    AuditLog, EnrollmentSwarmRequest, Invite, Member, Swarm, SwarmMember, Token,
+)
 from server.models.member import MEMBER_KINDS, PERMISSIONS
 from server.services import swarms
 from server.services.errors import ServiceError
@@ -45,6 +53,10 @@ def _validate_scope(scope: dict | None) -> dict | None:
     return scope
 
 
+def _invite_hash(code: str) -> str:
+    return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+
 async def request_enrollment(
     session: AsyncSession,
     *,
@@ -57,6 +69,7 @@ async def request_enrollment(
     remote_ip: str | None,
     max_pending: int,
     swarm: str | None = None,
+    invite: str | None = None,
 ) -> Member:
     if not NAME_RE.match(name or ""):
         raise ServiceError(422, "bad_name", "name must match ^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -74,9 +87,6 @@ async def request_enrollment(
     existing = await session.scalar(select(Member).where(or_(Member.name == name, Member.public_key == pk)))
     if existing is not None:
         raise ServiceError(409, "already_exists", "a member with this name or key already exists")
-    pending = await session.scalar(select(func.count()).select_from(Member).where(Member.status == "pending"))
-    if pending >= max_pending:
-        raise ServiceError(429, "too_many_pending", "too many pending enrollment requests; try later")
 
     swarm_row = None
     if swarm is not None:
@@ -85,6 +95,52 @@ async def request_enrollment(
         if swarm_row.status != "active":
             raise ServiceError(422, "bad_swarm", "swarm is not active")
 
+    # Free agents (no swarm) always use approval. A swarm's enrollment_mode
+    # decides: approval = pending as today; invite/open make the member
+    # active at once ("enroll_auto", audited with the mode).
+    mode = swarm_row.enrollment_mode if swarm_row is not None else "approval"
+    auto = mode in ("invite", "open")
+    now = datetime.now(timezone.utc)
+
+    granted = list(requested)
+    if auto:
+        if mode == "invite":
+            if invite is None:
+                raise ServiceError(403, "bad_invite", "this swarm requires an invite code")
+            row = await session.scalar(select(Invite).where(
+                Invite.swarm_id == swarm_row.id, Invite.code_hash == _invite_hash(invite)))
+            if row is None:
+                raise ServiceError(403, "bad_invite", "unknown invite code")
+            if row.uses_left <= 0:
+                raise ServiceError(403, "bad_invite", "invite code has no uses left")
+            if row.expires_at is not None and row.expires_at <= now:
+                raise ServiceError(403, "bad_invite", "invite code has expired")
+            # An invitee only ever gets contribute and/or recall, whatever it
+            # asked for and the code allows.
+            granted = sorted(set(requested) & {"contribute", "recall"})
+            row.uses_left -= 1
+        else:
+            # Open enrollment: rate limit to 20 per swarm per hour.
+            since = now - timedelta(hours=1)
+            count = await session.scalar(
+                select(func.count()).select_from(Member)
+                .join(SwarmMember, SwarmMember.member_id == Member.id)
+                .where(
+                    SwarmMember.swarm_id == swarm_row.id,
+                    SwarmMember.left_at.is_(None),
+                    Member.note == "open-enrolled",
+                    Member.created_at >= since,
+                ))
+            if count >= 20:
+                raise ServiceError(429, "slow_down",
+                                   "this swarm has had too many open enrollments this hour; try later")
+            granted = list(swarm_row.open_permissions)
+            note = "open-enrolled"
+    else:
+        pending = await session.scalar(select(func.count()).select_from(Member).where(Member.status == "pending"))
+        if pending >= max_pending:
+            raise ServiceError(429, "too_many_pending", "too many pending enrollment requests; try later")
+
     member = Member(
         name=name,
         kind=kind,
@@ -92,16 +148,22 @@ async def request_enrollment(
         operator=operator,
         note=note,
         requested_permissions=requested,
-        permissions=[],
-        status="pending",
+        permissions=granted if auto else [],
+        status="active" if auto else "pending",
         request_ip=remote_ip,
+        enrolled_at=now if auto else None,
     )
     session.add(member)
     await session.flush()
-    if swarm_row is not None:
+    if swarm_row is not None and auto:
+        await swarms.set_member(session, member, swarm_row, "member", actor=f"enroll:{name}")
+    elif swarm_row is not None:
         session.add(EnrollmentSwarmRequest(member_id=member.id, swarm_id=swarm_row.id))
-    session.add(AuditLog(member_id=member.id, actor=name, action="enroll_request",
-                         detail={"kind": kind, "requested": requested, "ip": remote_ip}))
+    session.add(AuditLog(member_id=member.id, actor=name,
+                         action="enroll_auto" if auto else "enroll_request",
+                         detail={"kind": kind, "mode": mode, "granted": granted,
+                                 "swarm": swarm_row.name if swarm_row is not None else None,
+                                 "ip": remote_ip}))
     return member
 
 
