@@ -15,6 +15,7 @@ class EnrollRequest(BaseModel):
     operator: str | None = Field(None, max_length=128)
     note: str | None = Field(None, max_length=1000)
     swarm: str | None = Field(None, max_length=64)
+    invite: str | None = Field(None, max_length=128)
 
 
 class ChallengeRequest(BaseModel):
@@ -55,3 +56,13 @@ class McpTokenCreate(BaseModel):
     name: str = Field(..., max_length=64)
     scope: dict | None = Field(default_factory=dict)
     expires_at: datetime | None = None
+
+
+class InviteCreate(BaseModel):
+    uses: int = Field(..., ge=1, le=10000)
+    expires_at: datetime | None = None
+
+
+class SwarmMode(BaseModel):
+    mode: str  # "approval", "invite" or "open"
+    open_permissions: list[str] | None = None

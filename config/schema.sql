@@ -85,10 +85,13 @@ CREATE TABLE swarms (
 	public_key BYTEA NOT NULL, 
 	status VARCHAR(16) NOT NULL, 
 	is_home BOOLEAN NOT NULL, 
+	enrollment_mode VARCHAR(16) DEFAULT 'approval' NOT NULL, 
+	open_permissions JSONB DEFAULT '["contribute"]' NOT NULL, 
 	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
 	revoked_at TIMESTAMP WITH TIME ZONE, 
 	PRIMARY KEY (id), 
 	CONSTRAINT ck_swarms_status CHECK (status IN ('active', 'revoked')), 
+	CONSTRAINT ck_swarms_enrollment_mode CHECK (enrollment_mode IN ('approval', 'invite', 'open')), 
 	UNIQUE (name), 
 	UNIQUE (public_key)
 );
@@ -138,6 +141,20 @@ CREATE TABLE enrollment_swarm_requests (
 	FOREIGN KEY(member_id) REFERENCES members (id), 
 	FOREIGN KEY(swarm_id) REFERENCES swarms (id)
 );
+
+CREATE TABLE invites (
+	id UUID NOT NULL, 
+	swarm_id VARCHAR(64) NOT NULL, 
+	code_hash VARCHAR(64) NOT NULL, 
+	uses_left INTEGER NOT NULL, 
+	expires_at TIMESTAMP WITH TIME ZONE, 
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(swarm_id) REFERENCES swarms (id), 
+	UNIQUE (code_hash)
+);
+
+CREATE INDEX idx_invites_swarm ON invites (swarm_id);
 
 CREATE TABLE records (
 	id BIGSERIAL NOT NULL, 

@@ -3,18 +3,27 @@
 Members request enrollment with their public key; nothing is granted until an
 admin approves, and the admin decides which permissions (and scope) to grant.
 Revoking keeps every record the member wrote and kills its tokens at once.
+
+A swarm sets how members join: ``approval`` (today's default; the member stays
+pending until an admin approves), ``invite`` (a valid one-time code makes the
+member active at once) or ``open`` (anyone may join and is active at once with
+the swarm's ``open_permissions``). Free agents (no swarm) always use approval.
 """
 from __future__ import annotations
 
+import hashlib
+import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from nacl.signing import VerifyKey
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ltms_contract.record import NAME_RE
-from server.models import AuditLog, EnrollmentSwarmRequest, Member, Swarm, Token
+from server.models import (
+    AuditLog, EnrollmentSwarmRequest, Invite, Member, Swarm, SwarmMember, Token,
+)
 from server.models.member import MEMBER_KINDS, PERMISSIONS
 from server.services import swarms
 from server.services.errors import ServiceError
@@ -45,6 +54,61 @@ def _validate_scope(scope: dict | None) -> dict | None:
     return scope
 
 
+INVITE_PREFIX = "ltms_inv_"
+
+
+def _invite_hash(code: str) -> str:
+    return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+
+async def create_invite(
+    session: AsyncSession, swarm: Swarm, *, uses: int, expires_at: datetime | None,
+    actor: str = "cli",
+) -> tuple[Invite, str]:
+    """Create a one-time enrollment code for ``swarm``.
+
+    Returns the row and the plaintext code. Only the code's SHA-256 is stored,
+    so the caller must show the plaintext now; it can't be recovered later.
+    """
+    if swarm.status != "active":
+        raise ServiceError(409, "swarm_revoked", f"swarm {swarm.name!r} is revoked")
+    if expires_at is not None:
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at <= datetime.now(timezone.utc):
+            raise ServiceError(422, "bad_expiry", "expires_at must be in the future")
+    code = INVITE_PREFIX + secrets.token_urlsafe(24)
+    row = Invite(swarm_id=swarm.id, code_hash=_invite_hash(code), uses_left=uses,
+                 expires_at=expires_at)
+    session.add(row)
+    await session.flush()
+    session.add(AuditLog(actor=actor, action="swarm_invite_create",
+                         detail={"swarm": swarm.name, "uses": uses,
+                                 "expires_at": expires_at.isoformat() if expires_at else None}))
+    return row, code
+
+
+async def _use_invite(session: AsyncSession, swarm: Swarm, code: str, now: datetime) -> None:
+    """Spend one use of an invite code, atomically.
+
+    The decrement is a single conditional UPDATE, so two enrollments racing
+    for the last use can't both win: the loser updates no row and gets 403.
+    """
+    row = await session.scalar(select(Invite).where(
+        Invite.swarm_id == swarm.id, Invite.code_hash == _invite_hash(code)))
+    if row is None:
+        raise ServiceError(403, "bad_invite", "unknown invite code")
+    if row.expires_at is not None and row.expires_at <= now:
+        raise ServiceError(403, "bad_invite", "invite code has expired")
+    result = await session.execute(
+        update(Invite)
+        .where(Invite.id == row.id, Invite.uses_left > 0)
+        .values(uses_left=Invite.uses_left - 1)
+        .execution_options(synchronize_session=False))
+    if result.rowcount != 1:
+        raise ServiceError(403, "bad_invite", "invite code has no uses left")
+
+
 async def request_enrollment(
     session: AsyncSession,
     *,
@@ -57,6 +121,7 @@ async def request_enrollment(
     remote_ip: str | None,
     max_pending: int,
     swarm: str | None = None,
+    invite: str | None = None,
 ) -> Member:
     if not NAME_RE.match(name or ""):
         raise ServiceError(422, "bad_name", "name must match ^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -74,9 +139,6 @@ async def request_enrollment(
     existing = await session.scalar(select(Member).where(or_(Member.name == name, Member.public_key == pk)))
     if existing is not None:
         raise ServiceError(409, "already_exists", "a member with this name or key already exists")
-    pending = await session.scalar(select(func.count()).select_from(Member).where(Member.status == "pending"))
-    if pending >= max_pending:
-        raise ServiceError(429, "too_many_pending", "too many pending enrollment requests; try later")
 
     swarm_row = None
     if swarm is not None:
@@ -85,6 +147,45 @@ async def request_enrollment(
         if swarm_row.status != "active":
             raise ServiceError(422, "bad_swarm", "swarm is not active")
 
+    # Free agents (no swarm) always use approval. A swarm's enrollment_mode
+    # decides: approval = pending as today; invite/open make the member
+    # active at once ("enroll_auto", audited with the mode).
+    mode = swarm_row.enrollment_mode if swarm_row is not None else "approval"
+    auto = mode in ("invite", "open")
+    now = datetime.now(timezone.utc)
+
+    granted = list(requested)
+    if auto:
+        if mode == "invite":
+            if invite is None:
+                raise ServiceError(403, "bad_invite", "this swarm requires an invite code")
+            await _use_invite(session, swarm_row, invite, now)
+            # An invitee only ever gets contribute and/or recall, whatever it
+            # asked for.
+            granted = sorted(set(requested) & {"contribute", "recall"})
+        else:
+            # Open enrollment: rate limit to 20 per swarm per hour.
+            since = now - timedelta(hours=1)
+            count = await session.scalar(
+                select(func.count()).select_from(Member)
+                .join(SwarmMember, SwarmMember.member_id == Member.id)
+                .where(
+                    # Members who joined and then left still count, so
+                    # join-and-leave can't get around the limit.
+                    SwarmMember.swarm_id == swarm_row.id,
+                    Member.note == "open-enrolled",
+                    Member.created_at >= since,
+                ))
+            if count >= 20:
+                raise ServiceError(429, "slow_down",
+                                   "this swarm has had too many open enrollments this hour; try later")
+            granted = list(swarm_row.open_permissions)
+            note = "open-enrolled"
+    else:
+        pending = await session.scalar(select(func.count()).select_from(Member).where(Member.status == "pending"))
+        if pending >= max_pending:
+            raise ServiceError(429, "too_many_pending", "too many pending enrollment requests; try later")
+
     member = Member(
         name=name,
         kind=kind,
@@ -92,16 +193,22 @@ async def request_enrollment(
         operator=operator,
         note=note,
         requested_permissions=requested,
-        permissions=[],
-        status="pending",
+        permissions=granted if auto else [],
+        status="active" if auto else "pending",
         request_ip=remote_ip,
+        enrolled_at=now if auto else None,
     )
     session.add(member)
     await session.flush()
-    if swarm_row is not None:
+    if swarm_row is not None and auto:
+        await swarms.set_member(session, member, swarm_row, "member", actor=f"enroll:{name}")
+    elif swarm_row is not None:
         session.add(EnrollmentSwarmRequest(member_id=member.id, swarm_id=swarm_row.id))
-    session.add(AuditLog(member_id=member.id, actor=name, action="enroll_request",
-                         detail={"kind": kind, "requested": requested, "ip": remote_ip}))
+    session.add(AuditLog(member_id=member.id, actor=name,
+                         action="enroll_auto" if auto else "enroll_request",
+                         detail={"kind": kind, "mode": mode, "granted": granted,
+                                 "swarm": swarm_row.name if swarm_row is not None else None,
+                                 "ip": remote_ip}))
     return member
 
 
