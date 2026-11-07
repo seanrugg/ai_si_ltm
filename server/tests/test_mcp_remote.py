@@ -160,7 +160,7 @@ def test_token_includes_payloads(db_url):
 # 4. get_record on a real record -> verified: true
 # --------------------------------------------------------------------------- #
 def test_get_record_verified(db_url):
-    http, admin, _app = _make_app(db_url, mcp_read_mode="open")
+    http, admin, _app = _make_app(db_url, mcp_read_mode="open", mcp_open_scope={"types": ["event"]})
     mesh = Mesh(http, admin)
     agent = mesh.member("agent-x")
     agent.append("event", summary="to verify")
@@ -184,7 +184,7 @@ def test_get_record_verified(db_url):
 # 5. list_members: no public_key, permissions, scope
 # --------------------------------------------------------------------------- #
 def test_list_members_no_sensitive_fields(db_url):
-    http, admin, _app = _make_app(db_url, mcp_read_mode="open")
+    http, admin, _app = _make_app(db_url, mcp_read_mode="open", mcp_open_scope={"types": ["event"]})
     mesh = Mesh(http, admin)
     mesh.member("agent-x")
 
@@ -243,3 +243,45 @@ def test_host_evil_rejected(db_url):
         http, "tools/call", {"name": "search_records", "arguments": {}}, host="evil.example"
     )
     assert response.status_code == 421, response.text
+
+
+# --------------------------------------------------------------------------- #
+# Scope applies to every tool, not just search (review of #112)
+# --------------------------------------------------------------------------- #
+def test_get_record_outside_scope_is_not_found(db_url):
+    # Open scope sees events only; guessing agent + seq of a thought must not
+    # return it, and must look exactly like a missing record.
+    http, admin, _app = _make_app(db_url, mcp_read_mode="open", mcp_open_scope={"types": ["event"]})
+    mesh = Mesh(http, admin)
+    a = mesh.member("agent-y")
+    a.append("event", summary="visible")   # seq 1
+    a.append("thought", summary="private")  # seq 2
+    a.flush()
+    _initialize(http)
+
+    ok = _extract_result(_rpc(http, "tools/call", {"name": "get_record", "arguments": {"agent": "agent-y", "seq": 1}}))
+    assert ok.get("summary") == "visible", ok
+
+    hidden = _rpc(http, "tools/call", {"name": "get_record", "arguments": {"agent": "agent-y", "seq": 2}}).json()
+    missing = _rpc(http, "tools/call", {"name": "get_record", "arguments": {"agent": "agent-y", "seq": 99}}).json()
+    assert "private" not in json.dumps(hidden)
+    # same shape of answer for out-of-scope and missing
+    assert ("error" in hidden) == ("error" in missing)
+    assert ("result" in hidden and hidden["result"].get("isError")) == ("result" in missing and missing["result"].get("isError"))
+
+
+def test_directory_tools_hide_members_outside_scope(db_url):
+    # An open scope limited to swarm "public-swarm" must not reveal other
+    # members' names (e.g. a private swarm or free agents).
+    http, admin, _app = _make_app(
+        db_url, mcp_read_mode="open", mcp_open_scope={"types": ["event"], "swarms": ["public-swarm"]}
+    )
+    mesh = Mesh(http, admin)
+    mesh.member("free-agent-secret")
+    _initialize(http)
+
+    members = _extract_result(_rpc(http, "tools/call", {"name": "list_members", "arguments": {}}))
+    assert isinstance(members, list)
+    assert all(m["name"] != "free-agent-secret" for m in members), members
+    report = _extract_result(_rpc(http, "tools/call", {"name": "integrity_report", "arguments": {}}))
+    assert all(r["member"] != "free-agent-secret" for r in report), report

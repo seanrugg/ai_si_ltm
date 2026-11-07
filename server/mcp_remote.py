@@ -77,16 +77,28 @@ def create_mcp_server(cfg: ServerConfig, sessionmaker) -> MCPServer:
                 return value.split(" ", 1)[1].strip()
         return None
 
-    async def _authorized(session, headers):
+    def _client_ip(ctx) -> str:
+        # uvicorn's --proxy-headers already turns X-Forwarded-For from a trusted
+        # proxy into request.client, so this is the real client address.
+        try:
+            req = ctx.request_context.request
+            return req.client.host if req is not None and req.client else "unknown"
+        except (AttributeError, ValueError):
+            return "unknown"
+
+    async def _authorized(session, ctx):
         """Resolve the read scope for this request, enforcing mode and rate.
 
         Returns ``(scope, token)``; raises ``MCPError`` on denial or rate limit.
+        Rate limit: per token when one is presented, otherwise per client IP, so
+        one anonymous caller can't use up everyone's open-mode budget.
         """
+        headers = ctx.headers if ctx else None
         token = _bearer_token(headers)
         scope = await mcp_access.resolve(session, cfg, token)
         if scope is None:
             raise MCPError(403, "access denied", "MCP read access denied")
-        key = "token:" + hashlib.sha256(token.encode("utf-8")).hexdigest() if token else "open"
+        key = ("token:" + hashlib.sha256(token.encode("utf-8")).hexdigest()) if token else ("ip:" + _client_ip(ctx))
         if not limiter.allow(key):
             raise MCPError(429, "rate_limited", "too many tool calls; slow down")
         return scope, token
@@ -99,6 +111,18 @@ def create_mcp_server(cfg: ServerConfig, sessionmaker) -> MCPServer:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt
+
+    def _visible_member(scope, name: str, swarm_name: str | None) -> bool:
+        """Whether a member is inside the read scope: its name passes ``agents``
+        and its swarm (None = free agent) passes ``swarms``. A private swarm left
+        out of the scope stays invisible, names included."""
+        if scope.agents is not None and name not in scope.agents:
+            return False
+        if scope.swarms is not None and swarm_name not in scope.swarms:
+            return False
+        if scope.types is not None and not scope.types:
+            return False  # deny-by-default scope sees nothing
+        return True
 
     # ------------------------------------------------------------------ # tools
 
@@ -129,7 +153,7 @@ def create_mcp_server(cfg: ServerConfig, sessionmaker) -> MCPServer:
             limit=capped,
         )
         async with sessionmaker() as session:
-            scope, _ = await _authorized(session, ctx.headers if ctx else None)
+            scope, _ = await _authorized(session, ctx)
             stmt = recall.build_query(session, f, scope)
             if swarm is not None:
                 stmt = stmt.join(
@@ -154,18 +178,16 @@ def create_mcp_server(cfg: ServerConfig, sessionmaker) -> MCPServer:
     ) -> dict:
         """Return one record, with ``verified`` from re-checking its signature."""
         async with sessionmaker() as session:
-            scope, _ = await _authorized(session, ctx.headers if ctx else None)
-            row = (
-                await session.execute(
-                    select(Record)
-                    .join(Member, Member.id == Record.member_id)
-                    .where(Member.name == agent, Record.seq == seq)
-                )
-            ).scalar_one_or_none()
+            scope, _ = await _authorized(session, ctx)
+            # The whole scope applies (types, agents, places, swarms), not just
+            # agents; a record outside it is reported exactly like a missing one,
+            # so callers can't probe for records they may not read.
+            stmt = recall.apply_scope(
+                select(Record).where(Record.agent == agent, Record.seq == seq), scope
+            )
+            row = (await session.execute(stmt)).scalar_one_or_none()
             if row is None:
-                raise MCPError(404, "not_found", f"no record {agent}:{seq}")
-            if scope.agents is not None and agent not in scope.agents:
-                raise MCPError(403, "access denied", "MCP read access denied")
+                raise MCPError(404, "not_found", f"no record {agent}:{seq} in your read scope")
             member = await session.get(Member, row.member_id)
             verified = (
                 hashlib.sha256(row.header_raw).hexdigest() == row.hash
@@ -185,7 +207,7 @@ def create_mcp_server(cfg: ServerConfig, sessionmaker) -> MCPServer:
     async def list_swarms(ctx: Context | None = None) -> list[dict]:
         """List swarms: name, id, hub name, member count (no keys)."""
         async with sessionmaker() as session:
-            scope, _ = await _authorized(session, ctx.headers if ctx else None)
+            scope, _ = await _authorized(session, ctx)
             membership_rows = await session.execute(
                 select(SwarmMember, Member, Swarm)
                 .join(Member, Member.id == SwarmMember.member_id)
@@ -194,6 +216,8 @@ def create_mcp_server(cfg: ServerConfig, sessionmaker) -> MCPServer:
             )
             by_swarm: dict[str, dict] = {}
             for sm, member, swarm in membership_rows:
+                if not _visible_member(scope, member.name, swarm.name):
+                    continue
                 entry = by_swarm.setdefault(
                     swarm.id, {"name": swarm.name, "hub": None, "member_count": 0}
                 )
@@ -210,7 +234,7 @@ def create_mcp_server(cfg: ServerConfig, sessionmaker) -> MCPServer:
     async def list_members(ctx: Context | None = None) -> list[dict]:
         """List members: name, kind, status, swarm (no keys, permissions, scope)."""
         async with sessionmaker() as session:
-            scope, _ = await _authorized(session, ctx.headers if ctx else None)
+            scope, _ = await _authorized(session, ctx)
             membership_rows = await session.execute(
                 select(SwarmMember, Swarm)
                 .join(Swarm, Swarm.id == SwarmMember.swarm_id)
@@ -222,14 +246,23 @@ def create_mcp_server(cfg: ServerConfig, sessionmaker) -> MCPServer:
                 {"name": m.name, "kind": m.kind, "status": m.status,
                  "swarm": swarm_by_member.get(m.id)}
                 for m in members
+                if _visible_member(scope, m.name, swarm_by_member.get(m.id))
             ]
 
     @mcp.tool()
     async def integrity_report(ctx: Context | None = None) -> list[dict]:
         """Per-member chain re-verification summary (status, counts)."""
         async with sessionmaker() as session:
-            scope, _ = await _authorized(session, ctx.headers if ctx else None)
+            scope, _ = await _authorized(session, ctx)
             reports = await integrity.verify_all(session)
+            membership_rows = await session.execute(
+                select(SwarmMember, Member, Swarm)
+                .join(Member, Member.id == SwarmMember.member_id)
+                .join(Swarm, Swarm.id == SwarmMember.swarm_id)
+                .where(SwarmMember.left_at.is_(None))
+            )
+            swarm_by_name = {member.name: swarm.name for _, member, swarm in membership_rows}
+            reports = [r for r in reports if _visible_member(scope, r["member"], swarm_by_name.get(r["member"]))]
             return [
                 {
                     "member": r["member"],
