@@ -108,6 +108,9 @@ services:
       LRSQL_API_SECRET_DEFAULT: ${LRSQL_API_SECRET}
       LRSQL_POOL_INITIALIZATION_FAIL_TIMEOUT: "10000"
       LRSQL_ALLOW_ALL_ORIGINS: "false"
+      # The public address of the admin UI (e.g. https://lrs.example.org) when it
+      # sits behind a reverse proxy; without it, browser logins get 403.
+      LRSQL_ALLOWED_ORIGINS: ${LRSQL_ALLOWED_ORIGINS:-}
     ports:
       - "${LRS_BIND:-127.0.0.1}:${LRS_PORT:-8081}:8080"
 

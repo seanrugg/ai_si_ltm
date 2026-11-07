@@ -149,3 +149,28 @@ def test_local_public_url_defaults_to_hostname_port(tmp_path, monkeypatch):
     assert rc == 0
     values = _parse_env(out)
     assert values["LTMS_PUBLIC_BASE_URL"] == "http://lab-mac.local:9000"
+
+
+def test_lrs_public_url_sets_allowed_origins(tmp_path):
+    out = tmp_path / ".env"
+    rc = setup_env.main(["--mode", "web", "--public-url", "https://ltms.example.org",
+                         "--with-lrs", "--lrs-public-url", "https://lrs.example.org/",
+                         "--out", str(out)])
+    assert rc == 0
+    assert _parse_env(out)["LRSQL_ALLOWED_ORIGINS"] == "https://lrs.example.org"
+
+
+def test_lrs_public_url_needs_with_lrs_and_https(tmp_path):
+    out = tmp_path / ".env"
+    assert setup_env.main(["--mode", "web", "--public-url", "https://ltms.example.org",
+                           "--lrs-public-url", "https://lrs.example.org", "--out", str(out)]) == 1
+    assert setup_env.main(["--mode", "web", "--public-url", "https://ltms.example.org", "--with-lrs",
+                           "--lrs-public-url", "http://lrs.example.org", "--out", str(out)]) == 1
+    assert not out.exists()
+
+
+def test_without_lrs_public_url_no_allowed_origins(tmp_path):
+    out = tmp_path / ".env"
+    assert setup_env.main(["--mode", "web", "--public-url", "https://ltms.example.org",
+                           "--with-lrs", "--out", str(out)]) == 0
+    assert "LRSQL_ALLOWED_ORIGINS" not in _parse_env(out)

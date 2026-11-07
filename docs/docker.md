@@ -94,6 +94,14 @@ admin adds it as an LRS endpoint: `http://lrs:8080/xapi` from inside the
 stack, with `LRSQL_API_KEY` / `LRSQL_API_SECRET` as the credentials. Any other
 xAPI-conformant LRS can be added the same way instead.
 
+To use the SQL LRS admin UI through a TLS reverse proxy (for example at
+`https://lrs.example.org/admin`), set `LRSQL_ALLOWED_ORIGINS` to that public
+address (`setup_env.py --lrs-public-url https://lrs.example.org`) and recreate
+the `lrs` container. SQL LRS rejects browser requests from origins it doesn't
+know, so without it the login fails with 403 even with the right credentials.
+The admin account is `LRSQL_ADMIN_USER` / `LRSQL_ADMIN_PASS` from `.env`; it is
+created only the first time the LRS database starts.
+
 ## Prebuilt image (issue #105)
 
 The `ltms` Compose service uses `image: ${LTMS_IMAGE:-ghcr.io/seanrugg/ai_si_ltm:latest}` and keeps `build: .`. Compose pulls the published image when `docker compose up` runs (so the stack deploys without SSH or a local build), and `docker compose build` still builds from the local Dockerfile when you want a local image.
