@@ -94,6 +94,12 @@ admin adds it as an LRS endpoint: `http://lrs:8080/xapi` from inside the
 stack, with `LRSQL_API_KEY` / `LRSQL_API_SECRET` as the credentials. Any other
 xAPI-conformant LRS can be added the same way instead.
 
+## Prebuilt image (issue #105)
+
+The `ltms` Compose service uses `image: ${LTMS_IMAGE:-ghcr.io/seanrugg/ai_si_ltm:latest}` and keeps `build: .`. Compose pulls the published image when `docker compose up` runs (so the stack deploys without SSH or a local build), and `docker compose build` still builds from the local Dockerfile when you want a local image.
+
+A new image is published to `ghcr.io/seanrugg/ai_si_ltm` on every push to `main` and on every `v*` tag (see `.github/workflows/image.yml`). For production, pin `LTMS_IMAGE` to a tag or sha (`…:v1.2.3` or `…@sha256:…`) rather than `latest`, and make the package public in GitHub's package settings so anonymous pulls work. The image embeds no secrets or site values; all configuration comes from `.env` (AGENTS.md rule 10).
+
 ## Notes
 
 - All configuration comes from `.env`; no secrets or site values are baked
