@@ -48,7 +48,7 @@ export default function Access() {
   const { data, error, loading, reload } = useApi("/admin/mcp");
   // null | "new": whether the "new token" form is open.
   const [mode, setMode] = useState(null);
-  const [form, setForm] = useState({ name: "", types: "", agents: "", swarms: "", payloads: false, expires: "" });
+  const [form, setForm] = useState({ name: "", types: "", agents: "", swarms: "", payloads: false, expires: "", owner: "", purpose: "" });
   // Shown exactly once after creation, then cleared on reload.
   const [shown, setShown] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -69,7 +69,7 @@ export default function Access() {
       const values = splitList(form[key]);
       if (values.length) scope[key] = values;
     }
-    const body = { name: form.name.trim(), scope, expires_at: form.expires || null };
+    const body = { name: form.name.trim(), scope, expires_at: form.expires || null, owner: form.owner.trim() || null, purpose: form.purpose.trim() || null };
     if (!body.name) { setFormError("Give the token a name"); return; }
     setBusy(true);
     try {
@@ -148,6 +148,14 @@ export default function Access() {
               <input className="field h-11 w-48" value={form.name}
                      onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                      placeholder="daily-read" id={`${fid}-name`} required />
+              <label htmlFor={`${fid}-owner`} className="block text-sm text-paper-muted">Owner</label>
+              <input className="field h-11 w-48" value={form.owner}
+                     onChange={(e) => setForm((f) => ({ ...f, owner: e.target.value }))}
+                     placeholder="Sean (Claude connector)" id={`${fid}-owner`} />
+              <label htmlFor={`${fid}-purpose`} className="block text-sm text-paper-muted">Purpose</label>
+              <input className="field h-11 w-48" value={form.purpose}
+                     onChange={(e) => setForm((f) => ({ ...f, purpose: e.target.value }))}
+                     placeholder="Daily read of robot outcomes" id={`${fid}-purpose`} />
               <label htmlFor={`${fid}-types`} className="block text-sm text-paper-muted">Record types</label>
               <input className="field h-11 w-40" value={form.types}
                      onChange={(e) => setForm((f) => ({ ...f, types: e.target.value }))}
@@ -213,10 +221,16 @@ export default function Access() {
                 <div>
                   <h2 id={`token-${token.id}-h`} className="text-lg font-bold">{token.name}</h2>
                   <p className="text-sm text-paper-muted">{scopeSummary(token.scope)}</p>
+                  {token.owner && <p className="text-sm text-paper-muted">Owner: {token.owner}</p>}
+                  {token.purpose && <p className="text-sm text-paper-muted">Purpose: {token.purpose}</p>}
                 </div>
                 <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
                   <dt className="text-paper-muted">Status</dt>
                   <dd><StatusBadge status={tokenStatus(token)} /></dd>
+                  <dt className="text-paper-muted">Uses</dt>
+                  <dd>{token.use_count ?? 0}</dd>
+                  <dt className="text-paper-muted">Stale</dt>
+                  <dd>{token.stale ? "Yes" : "No"}</dd>
                   <dt className="text-paper-muted">Created</dt>
                   <dd><span title={localTime(token.created_at)}>{localTime(token.created_at) || "—"}</span></dd>
                   <dt className="text-paper-muted">Expires</dt>

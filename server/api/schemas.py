@@ -56,6 +56,8 @@ class McpTokenCreate(BaseModel):
     name: str = Field(..., max_length=64)
     scope: dict | None = Field(default_factory=dict)
     expires_at: datetime | None = None
+    owner: str | None = Field(None, max_length=128)
+    purpose: str | None = Field(None, max_length=500)
 
 
 class InviteCreate(BaseModel):

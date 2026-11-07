@@ -587,11 +587,33 @@ def _mcp_token_to_dict(t: McpToken) -> dict:
         "id": str(t.id),
         "name": t.name,
         "scope": t.scope,
+        "owner": t.owner,
+        "purpose": t.purpose,
+        "use_count": t.use_count,
+        "stale": _is_stale(t),
         "created_at": t.created_at.isoformat() if t.created_at else None,
         "expires_at": t.expires_at.isoformat() if t.expires_at else None,
         "revoked_at": t.revoked_at.isoformat() if t.revoked_at else None,
         "last_used_at": t.last_used_at.isoformat() if t.last_used_at else None,
     }
+
+
+def _is_stale(t: McpToken) -> bool:
+    """True when the token is active and hasn't been used in 90 days.
+
+    Active means not revoked and not expired. A token that was never used is
+    stale when created more than 90 days ago; otherwise it's stale when its
+    last use is older than 90 days.
+    """
+    now = datetime.now(timezone.utc)
+    if t.revoked_at is not None:
+        return False
+    if t.expires_at is not None and t.expires_at <= now:
+        return False
+    cutoff = now - timedelta(days=90)
+    if t.last_used_at is not None:
+        return t.last_used_at <= cutoff
+    return (t.created_at or now) <= cutoff
 
 
 # --------------------------------------------------------------------------- #
@@ -618,6 +640,8 @@ async def create_mcp_token(request: Request, body: McpTokenCreate, admin: AdminA
             name=body.name,
             scope=body.scope,
             expires_at=body.expires_at,
+            owner=body.owner,
+            purpose=body.purpose,
             actor=f"admin:{admin.username}",
         )
         return {"id": str(row.id), "name": row.name, "token": plaintext}

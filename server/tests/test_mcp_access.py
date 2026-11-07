@@ -226,3 +226,142 @@ def test_duplicate_token_name_is_409(admin):
     assert admin.post("/api/admin/mcp/tokens", json={"name": "dup", "scope": {"types": ["event"]}}).status_code == 200
     r = admin.post("/api/admin/mcp/tokens", json={"name": "dup", "scope": {"types": ["event"]}})
     assert r.status_code == 409, r.text
+
+
+# --------------------------------------------------------------------------- #
+# 7. Token metadata: owner, purpose, use_count and stale (issue #117).
+# --------------------------------------------------------------------------- #
+def test_create_with_owner_and_purpose(http, admin):
+    r = admin.post(
+        "/api/admin/mcp/tokens",
+        json={"name": "meta", "scope": {"types": ["thought"]},
+              "owner": "Sean (Claude connector)",
+              "purpose": "Daily read of robot outcomes"},
+    )
+    assert r.status_code == 200, r.text
+    g = admin.get("/api/admin/mcp")
+    assert g.status_code == 200, g.text
+    tokens = g.json()["tokens"]
+    t = next(t for t in tokens if t["name"] == "meta")
+    assert t["owner"] == "Sean (Claude connector)"
+    assert t["purpose"] == "Daily read of robot outcomes"
+    assert t["use_count"] == 0
+    # The audit row records owner and purpose, never the token or its hash.
+    a = admin.get("/api/admin/recall-log?action=mcp_token_create")
+    assert a.status_code == 200, a.text
+    entries = [e for e in a.json()["entries"] if e["action"] == "mcp_token_create" and e["detail"].get("name") == "meta"]
+    assert entries, "expected an mcp_token_create audit row for meta"
+    for e in entries:
+        assert e["detail"]["owner"] == "Sean (Claude connector)"
+        assert e["detail"]["purpose"] == "Daily read of robot outcomes"
+        assert "token" not in e["detail"]
+        assert "token_hash" not in e["detail"]
+
+
+def test_create_owner_purpose_over_limit_422(admin):
+    assert admin.post("/api/admin/mcp/tokens", json={"name": "lim", "scope": {}}).status_code == 200
+    r = admin.post("/api/admin/mcp/tokens", json={
+        "name": "lim", "owner": "x" * 129, "purpose": "y" * 501,
+    })
+    assert r.status_code == 422, r.text
+
+
+def test_resolve_increments_use_count(db_url):
+    cfg = _make_config(db_url, mcp_read_mode="token")
+
+    async def go():
+        engine = create_async_engine(db_url)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            sm = async_sessionmaker(engine, expire_on_commit=False)
+            async with sm() as session:
+                row, plaintext = await mcp_access.create(
+                    session, name="reader", scope={"types": ["thought"]},
+                    expires_at=None, actor="admin:admin",
+                )
+                await session.commit()
+                for _ in range(3):
+                    assert (await mcp_access.resolve(session, cfg, plaintext)) is not None
+                await session.commit()
+
+                from sqlalchemy import select as sa_select
+                got = await session.scalar(
+                    sa_select(McpToken.use_count).where(McpToken.id == row.id)
+                )
+                assert got == 3
+        finally:
+            await engine.dispose()
+
+    asyncio.run(go())
+
+
+def test_resolve_denied_never_increments(db_url):
+    cfg = _make_config(db_url, mcp_read_mode="token")
+
+    async def go():
+        engine = create_async_engine(db_url)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            sm = async_sessionmaker(engine, expire_on_commit=False)
+            async with sm() as session:
+                row, plaintext = await mcp_access.create(
+                    session, name="reader", scope={"types": ["thought"]},
+                    expires_at=None, actor="admin:admin",
+                )
+                await session.commit()
+                assert await mcp_access.resolve(session, cfg, "ltms_wrong") is None
+                assert await mcp_access.resolve(session, cfg, "") is None
+                # A valid read still increments once.
+                assert (await mcp_access.resolve(session, cfg, plaintext)) is not None
+                await session.commit()
+
+                from sqlalchemy import select as sa_select
+                got = await session.scalar(
+                    sa_select(McpToken.use_count).where(McpToken.id == row.id)
+                )
+                assert got == 1
+        finally:
+            await engine.dispose()
+
+    asyncio.run(go())
+
+
+def test_stale_flag(db_url):
+    from server.api.admin import _is_stale
+    now = datetime.now(timezone.utc)
+
+    async def go():
+        engine = create_async_engine(db_url)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            sm = async_sessionmaker(engine, expire_on_commit=False)
+            async with sm() as session:
+                used_91, _ = await mcp_access.create(
+                    session, name="stale-91", scope={}, expires_at=None, actor="admin:admin",
+                )
+                used_91.last_used_at = now - timedelta(days=91)
+                never_91, _ = await mcp_access.create(
+                    session, name="stale-never", scope={}, expires_at=None, actor="admin:admin",
+                )
+                never_91.created_at = now - timedelta(days=91)
+                used_89, _ = await mcp_access.create(
+                    session, name="fresh-89", scope={}, expires_at=None, actor="admin:admin",
+                )
+                used_89.last_used_at = now - timedelta(days=89)
+                revoked, _ = await mcp_access.create(
+                    session, name="revoked", scope={}, expires_at=None, actor="admin:admin",
+                )
+                revoked.revoked_at = now
+                await session.commit()
+
+                assert _is_stale(used_91) is True
+                assert _is_stale(never_91) is True
+                assert _is_stale(used_89) is False
+                assert _is_stale(revoked) is False
+        finally:
+            await engine.dispose()
+
+    asyncio.run(go())
