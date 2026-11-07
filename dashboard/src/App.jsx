@@ -18,6 +18,7 @@ import RecallLog from "./pages/RecallLog.jsx";
 import Timeline from "./pages/Timeline.jsx";
 import Activity from "./pages/Activity.jsx";
 import Lrs from "./pages/Lrs.jsx";
+import Access from "./pages/Access.jsx";
 
 const AdminContext = createContext(null);
 export const useAdmin = () => useContext(AdminContext);
@@ -69,6 +70,7 @@ const router = createHashRouter([
       { path: "/", element: <Timeline /> },
       { path: "/activity", element: <Activity /> },
       { path: "/lrs", element: <Lrs /> },
+      { path: "/access", element: <Access /> },
       { path: "/members", element: <Members /> },
       { path: "/integrity", element: <Integrity /> },
       { path: "/volume", element: <Volume /> },
