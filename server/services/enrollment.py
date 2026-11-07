@@ -12,6 +12,7 @@ the swarm's ``open_permissions``). Free agents (no swarm) always use approval.
 from __future__ import annotations
 
 import hashlib
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -53,8 +54,59 @@ def _validate_scope(scope: dict | None) -> dict | None:
     return scope
 
 
+INVITE_PREFIX = "ltms_inv_"
+
+
 def _invite_hash(code: str) -> str:
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+
+async def create_invite(
+    session: AsyncSession, swarm: Swarm, *, uses: int, expires_at: datetime | None,
+    actor: str = "cli",
+) -> tuple[Invite, str]:
+    """Create a one-time enrollment code for ``swarm``.
+
+    Returns the row and the plaintext code. Only the code's SHA-256 is stored,
+    so the caller must show the plaintext now; it can't be recovered later.
+    """
+    if swarm.status != "active":
+        raise ServiceError(409, "swarm_revoked", f"swarm {swarm.name!r} is revoked")
+    if expires_at is not None:
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at <= datetime.now(timezone.utc):
+            raise ServiceError(422, "bad_expiry", "expires_at must be in the future")
+    code = INVITE_PREFIX + secrets.token_urlsafe(24)
+    row = Invite(swarm_id=swarm.id, code_hash=_invite_hash(code), uses_left=uses,
+                 expires_at=expires_at)
+    session.add(row)
+    await session.flush()
+    session.add(AuditLog(actor=actor, action="swarm_invite_create",
+                         detail={"swarm": swarm.name, "uses": uses,
+                                 "expires_at": expires_at.isoformat() if expires_at else None}))
+    return row, code
+
+
+async def _use_invite(session: AsyncSession, swarm: Swarm, code: str, now: datetime) -> None:
+    """Spend one use of an invite code, atomically.
+
+    The decrement is a single conditional UPDATE, so two enrollments racing
+    for the last use can't both win: the loser updates no row and gets 403.
+    """
+    row = await session.scalar(select(Invite).where(
+        Invite.swarm_id == swarm.id, Invite.code_hash == _invite_hash(code)))
+    if row is None:
+        raise ServiceError(403, "bad_invite", "unknown invite code")
+    if row.expires_at is not None and row.expires_at <= now:
+        raise ServiceError(403, "bad_invite", "invite code has expired")
+    result = await session.execute(
+        update(Invite)
+        .where(Invite.id == row.id, Invite.uses_left > 0)
+        .values(uses_left=Invite.uses_left - 1)
+        .execution_options(synchronize_session=False))
+    if result.rowcount != 1:
+        raise ServiceError(403, "bad_invite", "invite code has no uses left")
 
 
 async def request_enrollment(
@@ -107,18 +159,10 @@ async def request_enrollment(
         if mode == "invite":
             if invite is None:
                 raise ServiceError(403, "bad_invite", "this swarm requires an invite code")
-            row = await session.scalar(select(Invite).where(
-                Invite.swarm_id == swarm_row.id, Invite.code_hash == _invite_hash(invite)))
-            if row is None:
-                raise ServiceError(403, "bad_invite", "unknown invite code")
-            if row.uses_left <= 0:
-                raise ServiceError(403, "bad_invite", "invite code has no uses left")
-            if row.expires_at is not None and row.expires_at <= now:
-                raise ServiceError(403, "bad_invite", "invite code has expired")
+            await _use_invite(session, swarm_row, invite, now)
             # An invitee only ever gets contribute and/or recall, whatever it
-            # asked for and the code allows.
+            # asked for.
             granted = sorted(set(requested) & {"contribute", "recall"})
-            row.uses_left -= 1
         else:
             # Open enrollment: rate limit to 20 per swarm per hour.
             since = now - timedelta(hours=1)
@@ -126,8 +170,9 @@ async def request_enrollment(
                 select(func.count()).select_from(Member)
                 .join(SwarmMember, SwarmMember.member_id == Member.id)
                 .where(
+                    # Members who joined and then left still count, so
+                    # join-and-leave can't get around the limit.
                     SwarmMember.swarm_id == swarm_row.id,
-                    SwarmMember.left_at.is_(None),
                     Member.note == "open-enrolled",
                     Member.created_at >= since,
                 ))

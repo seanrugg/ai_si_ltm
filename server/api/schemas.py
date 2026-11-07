@@ -59,7 +59,7 @@ class McpTokenCreate(BaseModel):
 
 
 class InviteCreate(BaseModel):
-    uses: int = Field(..., ge=1)
+    uses: int = Field(..., ge=1, le=10000)
     expires_at: datetime | None = None
 
 

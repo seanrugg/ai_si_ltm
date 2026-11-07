@@ -126,11 +126,9 @@ async def create_swarm(session: AsyncSession, *, name: str, public_key_hex: str,
     return swarm
 
 
-def _validate_open_permissions(perms: list[str] | None) -> list[str]:
+def _validate_open_permissions(perms: list[str]) -> list[str]:
     """Validate ``open_permissions``: known permissions only, never relay or
-    an admin permission (policy). Defaults to ``["contribute"]``."""
-    if perms is None:
-        return ["contribute"]
+    an admin permission (policy)."""
     if not isinstance(perms, list) or not all(isinstance(p, str) for p in perms):
         raise ServiceError(422, "bad_permissions", "open_permissions must be a list of strings")
     bad = [p for p in perms if p not in PERMISSIONS]
@@ -154,7 +152,10 @@ async def set_enrollment_mode(
     if swarm.status != "active":
         raise ServiceError(409, "swarm_revoked", f"swarm {swarm.name!r} is revoked")
     swarm.enrollment_mode = mode
-    swarm.open_permissions = _validate_open_permissions(open_permissions)
+    # Omitting open_permissions keeps the swarm's current value, so switching
+    # modes back and forth never silently resets a custom setting.
+    if open_permissions is not None:
+        swarm.open_permissions = _validate_open_permissions(open_permissions)
     _audit(session, actor, "swarm_mode",
            {"swarm": swarm.name, "mode": mode,
             "open_permissions": swarm.open_permissions})

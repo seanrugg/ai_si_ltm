@@ -154,6 +154,8 @@ CREATE TABLE invites (
 	UNIQUE (code_hash)
 );
 
+CREATE INDEX idx_invites_swarm ON invites (swarm_id);
+
 CREATE TABLE records (
 	id BIGSERIAL NOT NULL, 
 	member_id UUID NOT NULL, 
