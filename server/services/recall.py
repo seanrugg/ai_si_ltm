@@ -32,6 +32,7 @@ class Scope:
     agents: list[str] | None = None
     places: list[str] | None = None
     swarms: list[str] | None = None
+    payloads: bool = False
 
 
 def effective_scope(permissions: list[str], scope: dict | None) -> Scope:

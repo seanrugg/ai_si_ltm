@@ -126,6 +126,7 @@ def _scope_from_dict(scope: dict) -> Scope:
         agents=scope.get("agents"),
         places=scope.get("places"),
         swarms=scope.get("swarms"),
+        payloads=bool(scope.get("payloads") is True),
     )
 
 
