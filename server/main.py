@@ -20,9 +20,12 @@ from server.api.errors import register_exception_handlers
 from server.config import ServerConfig, load_config
 from server.db import create_all, make_engine, make_sessionmaker
 from server.migrate import alembic_config, _current_revision, _head
+from server.mcp_remote import _mcp_allowed_hosts, create_mcp_server
 from server.security.ratelimit import RateLimiter
 from server.services import lrs
 from server.services.auth import ensure_admin
+
+from mcp.server.streamable_http import TransportSecuritySettings
 
 
 def create_app(config: ServerConfig | None = None, *, create_tables: bool = True) -> FastAPI:
@@ -57,7 +60,8 @@ def create_app(config: ServerConfig | None = None, *, create_tables: bool = True
             from server.tasks import start_scheduler
             scheduler = start_scheduler(app)
         try:
-            yield
+            async with mcp_server.session_manager.run():
+                yield
         finally:
             if scheduler is not None:
                 scheduler.shutdown(wait=False)
@@ -98,6 +102,22 @@ def create_app(config: ServerConfig | None = None, *, create_tables: bool = True
     app.include_router(member.router)
     app.include_router(admin.router)
     register_exception_handlers(app)
+
+    # Remote MCP read-only endpoint (issue #107), mounted before the dashboard's
+    # StaticFiles catch-all so /mcp takes precedence.
+    mcp_server = create_mcp_server(cfg, lambda: app.state.sessionmaker())
+    app.mount(
+        "/mcp",
+        mcp_server.streamable_http_app(
+            streamable_http_path="/",
+            stateless_http=True,
+            json_response=True,
+            transport_security=TransportSecuritySettings(
+                allowed_hosts=_mcp_allowed_hosts(cfg),
+            ),
+        ),
+        name="mcp",
+    )
 
     if cfg.dashboard_dir:
         from pathlib import Path

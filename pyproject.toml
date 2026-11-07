@@ -10,6 +10,7 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
+    "mcp>=2,<3",  # server: the remote read-only MCP endpoint at /mcp (#107)
     "pydantic>=2.6",
     "pydantic-settings>=2.2",
     "SQLAlchemy[asyncio]>=2.0.30",
