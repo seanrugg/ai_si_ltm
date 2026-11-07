@@ -46,7 +46,9 @@ DEFAULT_PAYLOAD_RULES = [
 
 
 class ServerConfig(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="LTMS_", extra="ignore")
+    # env_ignore_empty: Compose passes unset variables as "" (${VAR:-}); treat
+    # those as unset so the defaults apply instead of failing to parse.
+    model_config = SettingsConfigDict(env_prefix="LTMS_", extra="ignore", env_ignore_empty=True)
 
     # Database
     database_url: str = ""

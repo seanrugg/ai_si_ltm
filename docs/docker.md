@@ -100,6 +100,25 @@ The `ltms` Compose service uses `image: ${LTMS_IMAGE:-ghcr.io/seanrugg/ai_si_ltm
 
 A new image is published to `ghcr.io/seanrugg/ai_si_ltm` on every push to `main` and on every `v*` tag (see `.github/workflows/image.yml`). For production, pin `LTMS_IMAGE` to a tag or sha (`…:v1.2.3` or `…@sha256:…`) rather than `latest`, and make the package public in GitHub's package settings so anonymous pulls work. The image embeds no secrets or site values; all configuration comes from `.env` (AGENTS.md rule 10).
 
+## Remote MCP (`/mcp`)
+
+LTMS serves read-only MCP tools at `https://<your host>/mcp`. Read access is
+off until you set it in `.env` and recreate the container
+(`docker compose up -d`):
+
+```
+LTMS_MCP_READ_MODE=token     # or open; default off
+LTMS_MCP_OPEN_SCOPE={"types":["thought","decision","lesson","policy"],"swarms":null}
+```
+
+`token` needs a read token from the dashboard's Access page. `open` needs no
+token and grants only `LTMS_MCP_OPEN_SCOPE` (an empty or missing `types`
+list sees nothing; payloads are never included). `"swarms": null` means every
+swarm; a list such as `["<your-swarm>", null]` limits it (`null` in the list
+means free agents). The Access page shows the current mode; changing it means
+editing `.env`. `LTMS_PUBLIC_BASE_URL` must match the public host, because
+`/mcp` only accepts requests addressed to it.
+
 ## Notes
 
 - All configuration comes from `.env`; no secrets or site values are baked

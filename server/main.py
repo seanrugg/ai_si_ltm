@@ -28,6 +28,24 @@ from server.services.auth import ensure_admin
 from mcp.server.streamable_http import TransportSecuritySettings
 
 
+class _McpNoSlash:
+    """Serve ``/mcp`` as ``/mcp/`` without a redirect.
+
+    The MCP app is mounted at ``/mcp``, which only matches ``/mcp/...``. A bare
+    ``/mcp`` (what people type into an MCP client) would otherwise fall through
+    to the dashboard's catch-all and get 405, and a redirect would make some
+    clients drop the POST body. So rewrite the path before routing.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] == "http" and scope["path"] == "/mcp":
+            scope = dict(scope, path="/mcp/", raw_path=b"/mcp/")
+        await self.app(scope, receive, send)
+
+
 def create_app(config: ServerConfig | None = None, *, create_tables: bool = True) -> FastAPI:
     cfg = config or load_config()
 
@@ -118,6 +136,7 @@ def create_app(config: ServerConfig | None = None, *, create_tables: bool = True
         ),
         name="mcp",
     )
+    app.add_middleware(_McpNoSlash)
 
     if cfg.dashboard_dir:
         from pathlib import Path
