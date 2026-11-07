@@ -285,3 +285,18 @@ def test_directory_tools_hide_members_outside_scope(db_url):
     assert all(m["name"] != "free-agent-secret" for m in members), members
     report = _extract_result(_rpc(http, "tools/call", {"name": "integrity_report", "arguments": {}}))
     assert all(r["member"] != "free-agent-secret" for r in report), report
+
+
+def test_bare_mcp_path_works_with_dashboard_mounted(db_url, tmp_path):
+    """``/mcp`` (no slash) reaches MCP directly, even with the dashboard's
+    catch-all mounted, and without a redirect."""
+    (tmp_path / "index.html").write_text("<!doctype html>")
+    http, _admin, _app = _make_app(db_url, mcp_read_mode="open", dashboard_dir=str(tmp_path))
+    body = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2025-06-12", "capabilities": {},
+                       "clientInfo": {"name": "t", "version": "1"}}}
+    r = http.post("/mcp", json=body, headers={"Host": "testserver"}, follow_redirects=False)
+    assert r.status_code == 200, r.text
+    assert "result" in r.json()
+    # The dashboard still serves everything else.
+    assert http.get("/").status_code == 200
