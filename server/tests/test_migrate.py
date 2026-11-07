@@ -89,7 +89,7 @@ def test_upgrade_empty_db(db_url):
 
     code, out, err = _invoke(["current"], db_url)
     assert code == 0
-    assert out.strip() == "0001", err
+    assert out.strip() == "0002", err
 
     triggers = asyncio.run(_trigger_names(db_url))
     assert "trg_records_no_mutation" in triggers
@@ -101,13 +101,13 @@ def test_check(db_url):
     # a fresh empty database is behind head
     code, out, _ = _invoke(["check"], db_url)
     assert code == 1
-    assert out.strip() == "behind: none -> 0001"
+    assert out.strip() == "behind: none -> 0002"
 
     _invoke(["upgrade"], db_url)
 
     code, out, _ = _invoke(["check"], db_url)
     assert code == 0
-    assert out.strip() == "ok 0001"
+    assert out.strip() == "ok 0002"
 
 
 @needs_postgres
@@ -121,13 +121,21 @@ def test_pre_migration_db(db_url):
     assert "predates migrations" in err
     assert "python -m server.migrate stamp 0001" in err
 
-    # stamping the baseline satisfies the check
+    # stamping the baseline brings it to 0001, which is now behind head 0002
     code, _, err = _invoke(["stamp", "0001"], db_url)
     assert code == 0, err
 
     code, out, _ = _invoke(["check"], db_url)
+    assert code == 1
+    assert out.strip() == "behind: 0001 -> 0002", out
+
+    # stamping to head satisfies the check
+    code, _, err = _invoke(["stamp", "0002"], db_url)
+    assert code == 0, err
+
+    code, out, _ = _invoke(["check"], db_url)
     assert code == 0
-    assert out.strip() == "ok 0001"
+    assert out.strip() == "ok 0002"
 
 
 def test_sqlite_url_refused():

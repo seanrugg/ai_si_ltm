@@ -120,6 +120,26 @@ class ServerConfig(BaseSettings):
     lrs_max_batches_per_run: int = 20  # keep sending until caught up, up to this many batches per endpoint per run
     public_base_url: str = ""
 
+    # Remote MCP read access (issue #106): who may read records over MCP, and
+    # what they may read when no token is presented.
+    #   off      - read access is denied (default, closed).
+    #   token    - only a presented, valid mcp read token grants read scope.
+    #   open     - no token needed; the open scope (mcp_open_scope) applies.
+    # Env: LTMS_MCP_READ_MODE.
+    mcp_read_mode: str = "off"
+
+    @field_validator("mcp_read_mode")
+    @classmethod
+    def _check_mcp_read_mode(cls, v: str) -> str:
+        if v not in ("off", "token", "open"):
+            raise ValueError("mcp_read_mode must be 'off', 'token' or 'open'")
+        return v
+
+    # The read scope granted when mode is "open" and no token is presented.
+    # JSON, e.g. {"types":["thought","lesson"],"swarms":["alpha"]}. Defaults are
+    # closed: an empty "types" list sees nothing. Env: LTMS_MCP_OPEN_SCOPE.
+    mcp_open_scope: dict = {"types": [], "swarms": None}
+
     @property
     def resolved_database_url(self) -> str:
         if self.database_url:
