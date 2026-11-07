@@ -11,10 +11,10 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy import func, Integer, literal, or_, select
 
 from server.api.deps import ADMIN_COOKIE, AdminAuth, client_ip, current_admin, transaction
-from server.api.schemas import AdminLogin, ApproveRequest, PermissionsRequest, ReasonRequest
-from server.models import AuditLog, EnrollmentSwarmRequest, Member, Record, RecordPayload, RecordProvenance, Swarm, SwarmMember
+from server.api.schemas import AdminLogin, ApproveRequest, McpTokenCreate, PermissionsRequest, ReasonRequest
+from server.models import AuditLog, EnrollmentSwarmRequest, Member, McpToken, Record, RecordPayload, RecordProvenance, Swarm, SwarmMember
 from server.services import auth as auth_service
-from server.services import enrollment, integrity, lrs as lrs_service, recall, swarms
+from server.services import enrollment, integrity, lrs as lrs_service, mcp_access, recall, swarms
 from server.services.errors import ServiceError
 
 router = APIRouter(prefix="/api", tags=["admin"])
@@ -555,6 +555,65 @@ async def settings(request: Request, admin: AdminAuth = ADMIN) -> dict:
     def hidden(k: str) -> bool:
         return k == "database_url" or any(w in k for w in ("password", "secret", "_key"))
     return {k: v for k, v in json.loads(cfg.model_dump_json()).items() if not hidden(k)}
+
+
+def _mcp_token_to_dict(t: McpToken) -> dict:
+    """A token row for the admin API: every field except the hash."""
+    return {
+        "id": str(t.id),
+        "name": t.name,
+        "scope": t.scope,
+        "created_at": t.created_at.isoformat() if t.created_at else None,
+        "expires_at": t.expires_at.isoformat() if t.expires_at else None,
+        "revoked_at": t.revoked_at.isoformat() if t.revoked_at else None,
+        "last_used_at": t.last_used_at.isoformat() if t.last_used_at else None,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# MCP read access (issue #106)
+# --------------------------------------------------------------------------- #
+@router.get("/admin/mcp")
+async def mcp_settings(request: Request, admin: AdminAuth = ADMIN) -> dict:
+    """MCP read mode, open scope and the current tokens (hashes withheld)."""
+    cfg = request.app.state.config
+    async with transaction(request) as session:
+        tokens = [
+            _mcp_token_to_dict(t)
+            for t in await session.scalars(select(McpToken).order_by(McpToken.created_at.desc()))
+        ]
+    return {"mode": cfg.mcp_read_mode, "open_scope": cfg.mcp_open_scope, "tokens": tokens}
+
+
+@router.post("/admin/mcp/tokens")
+async def create_mcp_token(request: Request, body: McpTokenCreate, admin: AdminAuth = ADMIN) -> dict:
+    """Create a read token. The plaintext is returned exactly once."""
+    async with transaction(request) as session:
+        row, plaintext = await mcp_access.create(
+            session,
+            name=body.name,
+            scope=body.scope,
+            expires_at=body.expires_at,
+            actor=f"admin:{admin.username}",
+        )
+        return {"id": str(row.id), "name": row.name, "token": plaintext}
+
+
+@router.post("/admin/mcp/tokens/{token_id}/revoke")
+async def revoke_mcp_token(token_id: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        await mcp_access.revoke(session, _uuid(token_id), actor=f"admin:{admin.username}")
+        return {"ok": True}
+
+
+@router.get("/admin/mcp/tokens")
+async def list_mcp_tokens(request: Request, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        tokens = [
+            _mcp_token_to_dict(t)
+            for t in await session.scalars(select(McpToken).order_by(McpToken.created_at.desc()))
+        ]
+    return {"tokens": tokens}
 
 
 # --------------------------------------------------------------------------- #

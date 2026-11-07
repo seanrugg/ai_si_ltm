@@ -2,6 +2,8 @@
 ``ltms_contract`` (pydantic would re-serialize them and break hashing)."""
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -47,3 +49,9 @@ class ReasonRequest(BaseModel):
 class PermissionsRequest(BaseModel):
     permissions: list[str]
     scope: dict | None = None
+
+
+class McpTokenCreate(BaseModel):
+    name: str = Field(..., max_length=64)
+    scope: dict | None = Field(default_factory=dict)
+    expires_at: datetime | None = None

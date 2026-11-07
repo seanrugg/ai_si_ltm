@@ -39,6 +39,20 @@ CREATE TABLE lrs_endpoints (
 	UNIQUE (name)
 );
 
+CREATE TABLE mcp_tokens (
+	id UUID NOT NULL, 
+	name VARCHAR(64) NOT NULL, 
+	token_hash VARCHAR(64) NOT NULL, 
+	scope JSONB NOT NULL, 
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	expires_at TIMESTAMP WITH TIME ZONE, 
+	revoked_at TIMESTAMP WITH TIME ZONE, 
+	last_used_at TIMESTAMP WITH TIME ZONE, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_mcp_tokens_name UNIQUE (name), 
+	CONSTRAINT uq_mcp_tokens_token_hash UNIQUE (token_hash)
+);
+
 CREATE TABLE members (
 	id UUID NOT NULL, 
 	public_key BYTEA NOT NULL, 

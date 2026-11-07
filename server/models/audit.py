@@ -25,6 +25,8 @@ AUDIT_ACTIONS = (
     "lrs_create",
     "lrs_update",
     "lrs_delete",
+    "mcp_token_create",
+    "mcp_token_revoke",
 )
 
 
