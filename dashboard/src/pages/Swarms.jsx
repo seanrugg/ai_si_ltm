@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, Loading, PageHeader, StatusBadge } from "../components/ui.jsx";
@@ -105,7 +106,9 @@ function SwarmCard({ swarm, allMembers, onReload }) {
 
   return (
     <section className="mb-8 border rounded-md border-ink-line bg-ink p-4" aria-labelledby={`swarm-${swarm.name}-h`}>
-      <h2 id={`swarm-${swarm.name}-h`} className="mb-2 text-lg font-bold">{swarm.name}</h2>
+      <h2 id={`swarm-${swarm.name}-h`} className="mb-2 text-lg font-bold">
+        <Link to={`/members?show=${encodeURIComponent(`swarm:${swarm.name}`)}`}>{swarm.name}</Link>
+      </h2>
       <p className="mb-3 text-xs text-paper-muted">
         <StatusBadge status={swarm.status} /> {swarm.home && <span className="ml-2">home swarm</span>}
         {swarm.description && <span className="ml-2">— {swarm.description}</span>}

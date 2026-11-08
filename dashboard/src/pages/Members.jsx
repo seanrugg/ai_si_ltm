@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, HashStrip, Loading, PageHeader, StatusBadge } from "../components/ui.jsx";
@@ -214,11 +214,27 @@ function MemberRow({ m, swarm, onDone }) {
   );
 }
 
+// Pure helper: filter the active members by the Show selection.
+// `show` is "all", "free", or "swarm:<name>". An unknown swarm returns none.
+export function filterMembers(active, swarmOf, show) {
+  if (!show || show === "all") return active;
+  if (show === "free") return active.filter((m) => !swarmOf.has(m.name));
+  if (show.startsWith("swarm:")) {
+    const name = show.slice("swarm:".length);
+    return active.filter((m) => {
+      const s = swarmOf.get(m.name);
+      return s && s.swarm === name;
+    });
+  }
+  return [];
+}
+
 export default function Members() {
   const { data, error, loading, reload } = useApi("/admin/members");
-  const { data: swarmsData, loading: swarmsLoading } = useApi("/admin/swarms");
+  const { data: swarmsData } = useApi("/admin/swarms");
   const [showPast, setShowPast] = useState(false);
-  const [freeOnly, setFreeOnly] = useState(false);
+  const [params, setParams] = useSearchParams();
+
   const members = data?.members || [];
   const swarmOf = new Map();
   for (const s of (swarmsData || [])) {
@@ -228,7 +244,41 @@ export default function Members() {
   const active = members.filter((m) => m.status === "active");
   const past = members.filter((m) => m.status === "revoked" || m.status === "rejected");
   const freeAgents = active.filter((m) => !swarmOf.has(m.name));
-  const list = freeOnly ? freeAgents : active;
+
+  const show = params.get("show") || "all";
+  const list = filterMembers(active, swarmOf, show);
+
+  function swarmCount(name) {
+    return active.filter((m) => {
+      const s = swarmOf.get(m.name);
+      return s && s.swarm === name;
+    }).length;
+  }
+
+  let heading, emptyTitle, emptyBody;
+  if (show === "all") {
+    heading = `Active (${active.length})`;
+    emptyTitle = "No active members";
+    emptyBody = (
+      <>
+        A robot or agent asks to join with <code className="hash">python -m cli_agent enroll</code> (or its own
+        client). Its request shows up here for you to approve.
+      </>
+    );
+  } else if (show === "free") {
+    heading = `Free agents (${freeAgents.length})`;
+    emptyTitle = "No free agents";
+    emptyBody = "Every active member is in a swarm.";
+  } else {
+    const name = show.slice("swarm:".length);
+    heading = `${name} (${list.length})`;
+    emptyTitle = `No active members in ${name}`;
+    emptyBody = null;
+  }
+
+  function onShow(value) {
+    setParams({ show: value });
+  }
 
   return (
     <>
@@ -246,23 +296,28 @@ export default function Members() {
             </section>
           )}
           <section aria-labelledby="active-h">
-            <h2 id="active-h" className="mb-3 text-lg font-bold">
-              {freeOnly ? `Free agents (${freeAgents.length})` : `Active (${active.length})`}
-            </h2>
-            {!swarmsLoading && swarmsData && (
-              <button type="button" className="mb-3 text-sm text-paper-muted underline" onClick={() => setFreeOnly((f) => !f)} aria-pressed={freeOnly}>
-                Free agents only ({freeAgents.length})
-              </button>
-            )}
+            <h2 id="active-h" className="mb-3 text-lg font-bold">{heading}</h2>
+            <label htmlFor="member-show" className="mb-2 block text-sm font-bold text-paper-muted">
+              Show
+            </label>
+            <select
+              id="member-show"
+              value={show}
+              onChange={(e) => onShow(e.target.value)}
+              className="field"
+            >
+              <option value="all">All active ({active.length})</option>
+              <option value="free">Free agents ({freeAgents.length})</option>
+              {(swarmsData || []).map((s) => (
+                <option key={s.name} value={`swarm:${s.name}`}>
+                  {s.name} ({swarmCount(s.name)})
+                </option>
+              ))}
+            </select>
             {list.length ? (
-              <ul className="panel">{list.map((m) => <MemberRow key={m.id} m={m} swarm={swarmOf.get(m.name)} onDone={reload} />)}</ul>
-            ) : freeOnly ? (
-              <EmptyState title="No free agents">Every active member is in a swarm.</EmptyState>
+              <ul className="panel mt-3">{list.map((m) => <MemberRow key={m.id} m={m} swarm={swarmOf.get(m.name)} onDone={reload} />)}</ul>
             ) : (
-              <EmptyState title="No active members">
-                A robot or agent asks to join with <code className="hash">python -m cli_agent enroll</code> (or its own
-                client). Its request shows up here for you to approve.
-              </EmptyState>
+              <EmptyState title={emptyTitle}>{emptyBody}</EmptyState>
             )}
           </section>
           {past.length > 0 && (
