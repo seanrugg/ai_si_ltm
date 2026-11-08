@@ -89,7 +89,7 @@ export function RecordDetail({ record }) {
   );
 }
 
-export default function RecordRow({ record, showAgent = true }) {
+export default function RecordRow({ record, showAgent = true, status }) {
   const [open, setOpen] = useState(false);
   return (
     <li className="border-b border-ink-line last:border-b-0">
@@ -118,7 +118,7 @@ export default function RecordRow({ record, showAgent = true }) {
           {record.place && <span className="ml-2 text-paper-faint">{record.place}</span>}
         </span>
         <span className="justify-self-end">
-          <StatusBadge status={record.outcome} />
+          {status ? <StatusBadge status={status} /> : <StatusBadge status={record.outcome} />}
         </span>
         <HashStrip hash={record.hash} label={false} className="hidden justify-self-end md:inline-flex" />
       </button>
