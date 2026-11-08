@@ -30,9 +30,17 @@ const STATUS_STYLES = {
   stuck: "text-warn border-warn/40",
   broken: "text-bad border-bad/50",
   failed: "text-bad border-bad/50",
+  proposed: "text-led border-led/50",
+  in_force: "text-ok border-ok/40",
+  retired: "text-paper-muted border-ink-line",
 };
 
-const STATUS_TEXT = { reflex_stop: "reflex stop" };
+const STATUS_TEXT = {
+  reflex_stop: "reflex stop",
+  proposed: "Proposed",
+  in_force: "In force",
+  retired: "Retired",
+};
 
 export function StatusBadge({ status }) {
   if (!status) return null;

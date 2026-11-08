@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
 from server.models import Record, RecordPayload, RecordProvenance, Swarm
+from server.services import policy_lifecycle
 from server.services.errors import ServiceError
 
 
@@ -220,7 +221,6 @@ async def context_pack(
         ("outcomes", outcomes_q, 10),
         ("comms", comms_q, 5),
         ("lessons", lessons_q, 5),
-        ("policies", policies_q, 5),
     ]
     pack: dict[str, list] = {}
     remaining = CONTEXT_CAP
@@ -233,6 +233,34 @@ async def context_pack(
         payloads = await fetch_payloads(session, rows)
         pack[name] = [to_wire(r, payloads.get(r.id)) for r in rows]
         remaining -= len(rows)
+
+    # --- policies (in force only), then proposals (last in priority) -------
+    pack["policies"] = []
+    pack["proposals"] = []
+    if remaining > 0:
+        all_policies = list(
+            await session.scalars(policies_q.order_by(Record.ts.desc(), Record.id.desc()))
+        )
+        classification = policy_lifecycle.classify(all_policies)
+        in_force = [
+            r for r in all_policies
+            if classification[policy_lifecycle.policy_key(r)]["status"] == "in_force"
+        ]
+        proposals = [r for r in all_policies if policy_lifecycle.is_proposal(r)]
+
+        take = min(5, remaining)
+        pol_rows = in_force[:take]
+        payloads = await fetch_payloads(session, pol_rows)
+        pack["policies"] = [to_wire(r, payloads.get(r.id)) for r in pol_rows]
+        remaining -= len(pol_rows)
+
+        take = min(3, remaining)
+        prop_rows = proposals[:take]
+        payloads = await fetch_payloads(session, prop_rows)
+        pack["proposals"] = [to_wire(r, payloads.get(r.id)) for r in prop_rows]
+        for item in pack["proposals"]:
+            item["status"] = "proposed"
+        remaining -= len(prop_rows)
     pack["count"] = CONTEXT_CAP - remaining
     pack["query"] = {"intent": intent, "target": target, "place": place}
     return pack

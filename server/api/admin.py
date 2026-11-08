@@ -18,7 +18,7 @@ from server.api.schemas import (AdminLogin, ApproveRequest, InviteCreate, McpSet
 from server.models import (AuditLog, EnrollmentSwarmRequest, Member, McpToken, Record, RecordPayload,
                            RecordProvenance, RuntimeSetting, Swarm, SwarmMember)
 from server.services import auth as auth_service
-from server.services import conversation as conversation_service, enrollment, integrity, lrs as lrs_service, mcp_access, recall, runtime_settings, swarms
+from server.services import conversation as conversation_service, enrollment, integrity, lrs as lrs_service, mcp_access, policy_lifecycle, recall, runtime_settings, swarms
 from server.services.errors import ServiceError
 
 router = APIRouter(prefix="/api", tags=["admin"])
@@ -573,6 +573,39 @@ async def lessons(request: Request, limit: int = Query(100, ge=1, le=500), admin
         les = await recall.query_records(session, recall.RecordFilter(type="lesson", limit=limit), recall.Scope())
         pol = await recall.query_records(session, recall.RecordFilter(type="policy", limit=limit), recall.Scope())
         return {"lessons": les, "policies": pol}
+
+
+@router.get("/admin/policies")
+async def admin_policies(
+    request: Request,
+    status: str | None = Query(None, pattern="^(in_force|proposed|retired|all)$"),
+    admin: AdminAuth = ADMIN,
+) -> dict:
+    """Every policy with its lifecycle status; ``?status=`` filters to one bucket.
+
+    Each item gains ``status`` and, for retired policies, ``retired_by`` (the
+    ``"agent:seq"`` of the enacted policy that superseded or revoked it).
+    """
+    async with transaction(request) as session:
+        rows = list(
+            await session.scalars(
+                select(Record).where(Record.type == "policy").order_by(Record.ts.desc(), Record.id.desc())
+            )
+        )
+        payloads = await recall.fetch_payloads(session, rows)
+        classification = policy_lifecycle.classify(rows)
+        items: list[dict] = []
+        for r in rows:
+            key = policy_lifecycle.policy_key(r)
+            info = classification[key]
+            if status and status != "all" and info["status"] != status:
+                continue
+            item = recall.to_wire(r, payloads.get(r.id))
+            item["status"] = info["status"]
+            if info["status"] == "retired":
+                item["retired_by"] = info["retired_by"]
+            items.append(item)
+        return {"policies": items, "count": len(items)}
 
 
 @router.get("/admin/integrity")
