@@ -127,7 +127,7 @@ function EndpointRow({ endpoint, backlog, onReload }) {
   );
 }
 
-function EndpointForm({ initial, onSaved, onCancel, busy }) {
+export function EndpointForm({ initial, onSaved, onCancel, busy }) {
   const [form, setForm] = useState({
     name: initial?.name || "",
     url: initial?.url || "",
@@ -181,7 +181,7 @@ function EndpointForm({ initial, onSaved, onCancel, busy }) {
   return (
     <section className="mb-6 border rounded-md border-ink-line bg-ink p-4" aria-labelledby={`${fid}-h`}>
       <h2 id={`${fid}-h`} className="mb-3 text-lg font-bold">{heading}</h2>
-      <form onSubmit={(e) => { e.preventDefault(); save(); }}
+      <form autoComplete="off" onSubmit={(e) => { e.preventDefault(); save(); }}
             className="mb-4 flex flex-wrap items-end gap-2" aria-label={heading}>
         <label htmlFor={`${fid}-name`} className="block text-sm text-paper-muted">Name</label>
         <input className="field w-48" value={form.name}
@@ -200,11 +200,13 @@ function EndpointForm({ initial, onSaved, onCancel, busy }) {
         <label htmlFor={`${fid}-username`} className="block text-sm text-paper-muted">Username</label>
         <input className="field w-40" value={form.username}
                onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
+               autoComplete="off" name="lrs-username"
                placeholder="admin" id={`${fid}-username`} />
         <div className="flex flex-wrap items-end gap-2">
           <div>
             <label htmlFor={`${fid}-password`} className="block text-sm text-paper-muted">Password (write-only)</label>
             <input className="field w-48 mb-1" type="password" value={form.password}
+                   autoComplete="new-password"
                    onChange={(e) => setForm((f) => ({ ...f, password: e.target.value, clearPassword: false }))}
                    placeholder="leave blank to keep" id={`${fid}-password`} />
             <p className="text-xs text-paper-muted">
