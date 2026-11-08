@@ -142,6 +142,12 @@ class ServerConfig(BaseSettings):
     # closed: an empty "types" list sees nothing. Env: LTMS_MCP_OPEN_SCOPE.
     mcp_open_scope: dict = {"types": [], "swarms": None}
 
+    # When true, the environment (LTMS_MCP_READ_MODE / LTMS_MCP_OPEN_SCOPE) is
+    # authoritative: the dashboard-stored value is ignored, writes return 409
+    # locked, and the Access page shows the settings read-only. For operators
+    # who want config-as-code. Env: LTMS_MCP_SETTINGS_LOCKED.
+    mcp_settings_locked: bool = False
+
     @property
     def resolved_database_url(self) -> str:
         if self.database_url:

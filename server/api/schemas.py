@@ -68,3 +68,9 @@ class InviteCreate(BaseModel):
 class SwarmMode(BaseModel):
     mode: str  # "approval", "invite" or "open"
     open_permissions: list[str] | None = None
+
+
+class McpSettingsUpdate(BaseModel):
+    mode: str  # "off", "token" or "open"
+    open_scope: dict | None = None
+    confirm: str | None = None

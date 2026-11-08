@@ -10,12 +10,15 @@ import httpx
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy import func, Integer, literal, or_, select
 
+from ltms_contract import RECORD_TYPES
+
 from server.api.deps import ADMIN_COOKIE, AdminAuth, client_ip, current_admin, transaction
-from server.api.schemas import (AdminLogin, ApproveRequest, InviteCreate, McpTokenCreate,
-                                PermissionsRequest, ReasonRequest, SwarmMode)
-from server.models import AuditLog, EnrollmentSwarmRequest, Member, McpToken, Record, RecordPayload, RecordProvenance, Swarm, SwarmMember
+from server.api.schemas import (AdminLogin, ApproveRequest, InviteCreate, McpSettingsUpdate,
+                                McpTokenCreate, PermissionsRequest, ReasonRequest, SwarmMode)
+from server.models import (AuditLog, EnrollmentSwarmRequest, Member, McpToken, Record, RecordPayload,
+                           RecordProvenance, RuntimeSetting, Swarm, SwarmMember)
 from server.services import auth as auth_service
-from server.services import enrollment, integrity, lrs as lrs_service, mcp_access, recall, swarms
+from server.services import enrollment, integrity, lrs as lrs_service, mcp_access, recall, runtime_settings, swarms
 from server.services.errors import ServiceError
 
 router = APIRouter(prefix="/api", tags=["admin"])
@@ -624,11 +627,117 @@ async def mcp_settings(request: Request, admin: AdminAuth = ADMIN) -> dict:
     """MCP read mode, open scope and the current tokens (hashes withheld)."""
     cfg = request.app.state.config
     async with transaction(request) as session:
+        effective = await runtime_settings.resolve_mcp_access(session, cfg)
+        row = await runtime_settings.get_setting(session, runtime_settings.MCP_ACCESS_KEY)
         tokens = [
             _mcp_token_to_dict(t)
             for t in await session.scalars(select(McpToken).order_by(McpToken.created_at.desc()))
         ]
-    return {"mode": cfg.mcp_read_mode, "open_scope": cfg.mcp_open_scope, "tokens": tokens}
+    return {
+        "mode": effective["mode"],
+        "open_scope": effective["open_scope"],
+        "source": effective["source"],
+        "locked": cfg.mcp_settings_locked,
+        "updated_at": row.updated_at.isoformat() if row and row.updated_at else None,
+        "updated_by": row.updated_by if row else None,
+        "tokens": tokens,
+    }
+
+
+@router.put("/admin/mcp/settings")
+async def put_mcp_settings(request: Request, body: McpSettingsUpdate, admin: AdminAuth = ADMIN) -> dict:
+    """Update the dashboard-stored MCP read mode and open scope.
+
+    Widening public access (switching to open, or adding types or swarms to the
+    open scope while mode is open) requires ``confirm: "open"``, otherwise 422
+    ``confirm_required``. When the server is locked the environment is
+    authoritative and writes return 409 ``locked``.
+    """
+    cfg = request.app.state.config
+    if await runtime_settings.is_locked(cfg):
+        raise ServiceError(409, "locked", "MCP settings are locked by the server environment")
+
+    mode = body.mode
+    if mode not in ("off", "token", "open"):
+        raise ServiceError(422, "bad_mode", "mode must be 'off', 'token' or 'open'")
+
+    open_scope = dict(body.open_scope or {})
+    # Validate open_scope types against record types.
+    types = open_scope.get("types")
+    if types is not None:
+        if not isinstance(types, list) or not all(isinstance(t, str) for t in types):
+            raise ServiceError(422, "bad_scope", "open_scope.types must be a list of record types")
+        unknown = [t for t in types if t not in RECORD_TYPES]
+        if unknown:
+            raise ServiceError(422, "bad_scope", f"unknown record types: {sorted(unknown)}")
+    # Normalize to the config shape: types default [], swarms default null.
+    open_scope.setdefault("types", [])
+    swarms = open_scope.get("swarms")
+    if swarms is not None and not isinstance(swarms, list):
+        raise ServiceError(422, "bad_scope", "open_scope.swarms must be a list or null")
+    open_scope.setdefault("swarms", None)
+    # Payloads are never part of the open scope.
+    open_scope.pop("payloads", None)
+
+    async with transaction(request) as session:
+        current = await runtime_settings.resolve_mcp_access(session, cfg)
+
+        def _widening(cur: dict, new: dict) -> bool:
+            if new["mode"] == "open" and cur["mode"] != "open":
+                return True
+            if cur["mode"] == "open" or new["mode"] == "open":
+                cur_types = set(cur.get("open_scope", {}).get("types") or [])
+                new_types = set(new.get("open_scope", {}).get("types") or [])
+                if new_types - cur_types:
+                    return True
+                cur_swarms = cur.get("open_scope", {}).get("swarms")
+                new_swarms = new.get("open_scope", {}).get("swarms")
+                if cur_swarms is not None and new_swarms is None:
+                    return True
+                if cur_swarms is not None and new_swarms is not None:
+                    if set(new_swarms) - set(cur_swarms):
+                        return True
+            return False
+
+        if _widening(current, {"mode": mode, "open_scope": open_scope}):
+            if body.confirm != "open":
+                raise ServiceError(422, "confirm_required",
+                                   "widening public access requires confirm: \"open\"")
+
+        old = {"mode": current["mode"], "open_scope": current["open_scope"],
+               "source": current["source"]}
+        await runtime_settings.set_setting(
+            session, runtime_settings.MCP_ACCESS_KEY,
+            {"mode": mode, "open_scope": open_scope},
+            updated_by=f"admin:{admin.username}",
+        )
+        session.add(
+            AuditLog(actor=f"admin:{admin.username}", action="mcp_settings_change",
+                     detail={"old": old, "new": {"mode": mode, "open_scope": open_scope}})
+        )
+
+    return {"mode": mode, "open_scope": open_scope, "source": "dashboard",
+            "locked": cfg.mcp_settings_locked}
+
+
+@router.delete("/admin/mcp/settings")
+async def delete_mcp_settings(request: Request, admin: AdminAuth = ADMIN) -> dict:
+    """Reset the dashboard-stored MCP settings to the environment default."""
+    cfg = request.app.state.config
+    if await runtime_settings.is_locked(cfg):
+        raise ServiceError(409, "locked", "MCP settings are locked by the server environment")
+
+    async with transaction(request) as session:
+        current = await runtime_settings.resolve_mcp_access(session, cfg)
+        old = {"mode": current["mode"], "open_scope": current["open_scope"],
+               "source": current["source"]}
+        await runtime_settings.delete_setting(session, runtime_settings.MCP_ACCESS_KEY)
+        session.add(
+            AuditLog(actor=f"admin:{admin.username}", action="mcp_settings_reset",
+                     detail={"old": old, "new": {"source": "environment"}})
+        )
+
+    return {"ok": True, "source": "environment"}
 
 
 @router.post("/admin/mcp/tokens")

@@ -105,6 +105,12 @@ class AdminClient:
     def post(self, url, **kw):
         return self.request("POST", url, **kw)
 
+    def put(self, url, **kw):
+        return self.request("PUT", url, **kw)
+
+    def delete(self, url, **kw):
+        return self.request("DELETE", url, **kw)
+
     def patch(self, url, **kw):
         return self.request("PATCH", url, **kw)
 

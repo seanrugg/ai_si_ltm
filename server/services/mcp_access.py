@@ -18,6 +18,7 @@ from server.models import AuditLog, McpToken
 from server.services import enrollment
 from server.services.errors import ServiceError
 from server.services.recall import Scope, effective_scope
+from server.services.runtime_settings import resolve_mcp_access
 
 
 def new_token() -> str:
@@ -103,8 +104,17 @@ async def resolve(
     non-revoked, unexpired row grants that token's scope; an invalid token
     denies and never falls back to open. With no token and mode ``open``, the
     open scope applies (payloads always off).
+
+    The effective mode and open scope are read from the database on every call
+    (no cache), so a dashboard change takes effect on the next MCP request
+    without a restart. The database value wins over the environment when a
+    ``mcp_access`` row exists; otherwise the environment applies.
     """
-    if cfg.mcp_read_mode == "off":
+    effective = await resolve_mcp_access(session, cfg)
+    mode = effective["mode"]
+    open_scope = effective["open_scope"]
+
+    if mode == "off":
         return None
 
     if presented is not None:
@@ -126,9 +136,9 @@ async def resolve(
         )
         return _scope_from_dict(row.scope)
 
-    if cfg.mcp_read_mode == "open":
+    if mode == "open":
         # No token: the open scope. Payloads are always off for open access.
-        return effective_scope(["recall:scoped"], cfg.mcp_open_scope)
+        return effective_scope(["recall:scoped"], open_scope)
 
     return None
 
