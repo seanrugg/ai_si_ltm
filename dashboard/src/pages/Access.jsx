@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, Loading, PageHeader, StatusBadge } from "../components/ui.jsx";
@@ -53,6 +53,16 @@ function CopyButton({ text, ariaLabel }) {
   );
 }
 
+/** The settings form's starting values from the server's effective settings. */
+export function settingsFormFrom(data) {
+  const scope = data?.open_scope || {};
+  return {
+    mode: data?.mode ?? "off",
+    types: new Set(scope.types ?? []),
+    swarms: Array.isArray(scope.swarms) ? scope.swarms.filter((s) => s !== null).join(", ") : "",
+  };
+}
+
 export default function Access() {
   const { data, error, loading, reload } = useApi("/admin/mcp");
   // null | "new": whether the "new token" form is open.
@@ -78,6 +88,19 @@ export default function Access() {
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [settingsError, setSettingsError] = useState(null);
   const [settingsMessage, setSettingsMessage] = useState(null);
+  // The settings arrive after the first render (useApi), so sync the form from
+  // the server's effective values whenever they load or change. Without this
+  // the radios start at "off" and a Save would overwrite the real mode.
+  const loadedMode = data?.mode;
+  const loadedScope = JSON.stringify(data?.open_scope ?? null);
+  useEffect(() => {
+    if (loadedMode === undefined) return;
+    const f = settingsFormFrom({ mode: loadedMode, open_scope: JSON.parse(loadedScope) });
+    setSettingsMode(f.mode);
+    setOpenTypes(f.types);
+    setOpenSwarms(f.swarms);
+    setConfirmOpen(false);
+  }, [loadedMode, loadedScope]);
 
   const fid = "access-new-token";
 
@@ -318,7 +341,7 @@ export default function Access() {
       </section>
 
       <p className="mb-4 text-sm text-paper-muted" id="access-mode-desc">
-        Set the default with <code className="hash">LTMS_MCP_READ_MODE</code> and
+        Set the default with <code className="hash">LTMS_MCP_READ_MODE</code> and{" "}
         <code className="hash">LTMS_MCP_OPEN_SCOPE</code>. Dashboard changes take effect on the next
         MCP request — no restart needed — unless the server is locked.
       </p>
