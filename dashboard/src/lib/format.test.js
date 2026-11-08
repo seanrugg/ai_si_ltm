@@ -28,6 +28,9 @@ describe("plural", () => {
     expect(plural(1, "member")).toBe("1 member");
     expect(plural(2, "member")).toBe("2 members");
   });
+  it("keeps thousands separators", () => {
+    expect(plural(1234, "record")).toBe((1234).toLocaleString() + " records");
+  });
   it("uses the supplied plural for irregular words", () => {
     expect(plural(0, "person", "people")).toBe("0 people");
     expect(plural(1, "person", "people")).toBe("1 person");

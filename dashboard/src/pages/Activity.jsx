@@ -459,30 +459,20 @@ function DrillOverTime({ seriesByType, since, bucketSeconds, types }) {
       </g>
     );
   }
-  const labels = [0, 11, 23].map((i) => {
-    const label = localTime(new Date(start + i * bucketSeconds * 1000).toISOString());
-    const first = i === 0;
-    const last = i === 23;
-    // Anchor the first label at the start and the last at the end so neither is
-    // clipped by the plot edge; use the theme's small text size.
-    return (
-      <text
-        key={i}
-        x={first ? 4 : last ? width - 4 : i * colWidth + colWidth / 2}
-        y={height + 20}
-        textAnchor={first ? "start" : last ? "end" : "middle"}
-        fontSize="11"
-        fill="#93A0B8"
-      >
-        {label}
-      </text>
-    );
-  });
+  // Labels are HTML, not SVG text: the SVG scales to the card width, which
+  // inflated SVG font sizes on wide screens and clipped the last label.
+  const labels = [0, 11, 23].map((i) => (
+    <span key={i}>{localTime(new Date(start + i * bucketSeconds * 1000).toISOString())}</span>
+  ));
   return (
-    <svg viewBox={`0 0 ${width} ${height + 30}`} role="img" aria-label="Records over time" className="block w-full">
-      {columns}
-      {labels}
-    </svg>
+    <div>
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Records over time" className="block w-full">
+        {columns}
+      </svg>
+      <div className="mt-1 flex justify-between text-xs text-paper-muted" aria-hidden="true">
+        {labels}
+      </div>
+    </div>
   );
 }
 
