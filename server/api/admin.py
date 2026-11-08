@@ -18,7 +18,7 @@ from server.api.schemas import (AdminLogin, ApproveRequest, InviteCreate, McpSet
 from server.models import (AuditLog, EnrollmentSwarmRequest, Member, McpToken, Record, RecordPayload,
                            RecordProvenance, RuntimeSetting, Swarm, SwarmMember)
 from server.services import auth as auth_service
-from server.services import enrollment, integrity, lrs as lrs_service, mcp_access, recall, runtime_settings, swarms
+from server.services import conversation as conversation_service, enrollment, integrity, lrs as lrs_service, mcp_access, recall, runtime_settings, swarms
 from server.services.errors import ServiceError
 
 router = APIRouter(prefix="/api", tags=["admin"])
@@ -444,24 +444,58 @@ async def revoke_swarm_endpoint(name: str, request: Request, admin: AdminAuth = 
 
 @router.get("/admin/conversation")
 async def conversation(
-    request: Request, member_a: str, member_b: str, limit: int = Query(200, ge=1, le=1000), admin: AdminAuth = ADMIN
+    request: Request,
+    members: str | None = None,
+    member_a: str | None = None,
+    member_b: str | None = None,
+    limit: int = Query(200, ge=1, le=1000),
+    admin: AdminAuth = ADMIN,
 ) -> dict:
-    """Communications between two members, oldest first."""
+    """Communications between members, oldest first.
+
+    ``members=a,b,c`` returns records authored by any listed member whose peers
+    include another listed member (max 16). Otherwise ``member_a`` and
+    ``member_b`` behave exactly as before.
+    """
     async with transaction(request) as session:
-        peers = recall._json_list_contains
-        stmt = (
-            select(Record)
-            .where(Record.type == "communication")
-            .where(or_(
-                (Record.agent == member_a) & peers(session, Record.peers, member_b),
-                (Record.agent == member_b) & peers(session, Record.peers, member_a),
-            ))
-            .order_by(Record.ts.desc(), Record.id.desc())
-            .limit(limit)
-        )
-        rows = list(await session.scalars(stmt))[::-1]
-        payloads = await recall.fetch_payloads(session, rows)
-        return {"records": [recall.to_wire(r, payloads.get(r.id)) for r in rows]}
+        if members is not None:
+            member_list = [m.strip() for m in members.split(",") if m.strip()]
+            records = await conversation_service.group_conversation(session, member_list, limit)
+        elif member_a is not None and member_b is not None:
+            records = await conversation_service.member_conversation(session, member_a, member_b, limit)
+        else:
+            raise ServiceError(422, "missing_members", "provide members= or member_a and member_b")
+        return {"records": records}
+
+
+@router.get("/admin/swarm-conversation")
+async def swarm_conversation(
+    request: Request,
+    swarm: str,
+    limit: int = Query(200, ge=1, le=1000),
+    before: str | None = None,
+    admin: AdminAuth = ADMIN,
+) -> dict:
+    """A swarm's communication timeline, oldest first.
+
+    ``swarm=free`` returns free-agent communications (provenance swarm null).
+    ``before=<ts>,<id>`` pages backward to records older than that point.
+    Each record gains ``from_outside`` and ``relayed_by``.
+    """
+    parsed_before = None
+    if before is not None:
+        try:
+            ts_str, id_str = before.split(",", 1)
+            ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            parsed_before = (ts, int(id_str))
+        except (ValueError, TypeError) as exc:
+            raise ServiceError(422, "bad_before", "before must be <ts>,<id>") from exc
+    async with transaction(request) as session:
+        records = await conversation_service.swarm_conversation(
+            session, swarm=swarm, limit=limit, before=parsed_before)
+        return {"records": records}
 
 
 def _ref_values(refs: dict | None) -> set[str]:
