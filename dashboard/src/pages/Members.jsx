@@ -305,7 +305,6 @@ export default function Members() {
               value={show}
               onChange={(e) => onShow(e.target.value)}
               className="field"
-              aria-label="Show active members, free agents, or members of one swarm"
             >
               <option value="all">All active ({active.length})</option>
               <option value="free">Free agents ({freeAgents.length})</option>
