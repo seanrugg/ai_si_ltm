@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.config import ServerConfig
 from server.models import RuntimeSetting
+from server.models.base import utcnow
 
 MCP_ACCESS_KEY = "mcp_access"
 
@@ -48,6 +49,7 @@ async def set_setting(
     else:
         row.value = value
         row.updated_by = updated_by
+        row.updated_at = utcnow()  # the column default only applies on insert
     await session.flush()
     return row
 

@@ -79,26 +79,17 @@ def test_get_mcp_environment_source(admin):
 # --------------------------------------------------------------------------- #
 # DB row wins over environment
 # --------------------------------------------------------------------------- #
-def test_db_row_wins_over_environment(db_url, admin):
-    cfg = _make_config(db_url, mcp_read_mode="off", mcp_open_scope={"types": [], "swarms": None})
+def test_db_row_wins_over_environment(admin, db_exec):
+    # Write through the app's own session: with SQLite the test database is
+    # in-memory, so a separate engine would see a different, empty database.
+    async def put_row(session):
+        await runtime_settings.set_setting(
+            session, runtime_settings.MCP_ACCESS_KEY,
+            {"mode": "open", "open_scope": {"types": ["thought"], "swarms": None}},
+            updated_by="admin:admin",
+        )
 
-    async def go():
-        engine = create_async_engine(db_url)
-        try:
-            async with engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
-            sm = async_sessionmaker(engine, expire_on_commit=False)
-            async with sm() as session:
-                await runtime_settings.set_setting(
-                    session, runtime_settings.MCP_ACCESS_KEY,
-                    {"mode": "open", "open_scope": {"types": ["thought"], "swarms": None}},
-                    updated_by="admin:admin",
-                )
-                await session.commit()
-        finally:
-            await engine.dispose()
-
-    asyncio.run(go())
+    db_exec(put_row)
 
     g = admin.get("/api/admin/mcp")
     assert g.status_code == 200, g.text
@@ -365,3 +356,25 @@ def test_migration_creates_runtime_settings(db_url):
             await engine.dispose()
 
     assert asyncio.run(table_exists()), "runtime_settings table missing after upgrade to head"
+
+
+def test_updated_at_moves_on_each_change(admin):
+    body = {"mode": "token", "open_scope": {"types": ["thought"], "swarms": None}}
+    assert admin.put("/api/admin/mcp/settings", json=body).status_code == 200
+    first = admin.get("/api/admin/mcp").json()["updated_at"]
+    import time
+    time.sleep(1.1)
+    body["mode"] = "off"
+    assert admin.put("/api/admin/mcp/settings", json=body).status_code == 200
+    second = admin.get("/api/admin/mcp").json()["updated_at"]
+    assert first and second and second > first
+
+
+def test_open_scope_swarms_must_be_names_or_null(admin):
+    for bad in (["ok", 3], [""], ["x" * 65]):
+        r = admin.put("/api/admin/mcp/settings",
+                      json={"mode": "token", "open_scope": {"types": [], "swarms": bad}})
+        assert r.status_code == 422, (bad, r.text)
+    ok = admin.put("/api/admin/mcp/settings",
+                   json={"mode": "token", "open_scope": {"types": [], "swarms": ["echo-base", None]}})
+    assert ok.status_code == 200, ok.text

@@ -675,6 +675,11 @@ async def put_mcp_settings(request: Request, body: McpSettingsUpdate, admin: Adm
     swarms = open_scope.get("swarms")
     if swarms is not None and not isinstance(swarms, list):
         raise ServiceError(422, "bad_scope", "open_scope.swarms must be a list or null")
+    # Each entry is a swarm name, or null for free agents.
+    if swarms is not None and not all(
+        s is None or (isinstance(s, str) and 1 <= len(s) <= 64) for s in swarms
+    ):
+        raise ServiceError(422, "bad_scope", "open_scope.swarms entries must be swarm names (1-64 characters) or null")
     open_scope.setdefault("swarms", None)
     # Payloads are never part of the open scope.
     open_scope.pop("payloads", None)
