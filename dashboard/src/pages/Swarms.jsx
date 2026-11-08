@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
+import { plural } from "../lib/format.js";
 import { EmptyState, ErrorNote, Loading, PageHeader, StatusBadge } from "../components/ui.jsx";
 
 const ROLES = ["member", "observer"];
@@ -118,7 +119,7 @@ function SwarmCard({ swarm, allMembers, onReload }) {
         if (roleMembers.length === 0) return null;
         return (
           <section key={role} className="mb-3">
-            <h4 className="mb-2 text-xs text-paper-muted">{roleMembers.length} {role}{roleMembers.length > 1 ? "s" : ""}</h4>
+            <h4 className="mb-2 text-xs text-paper-muted">{plural(roleMembers.length, role)}</h4>
             <ul className="panel" aria-label={`${role} members of ${swarm.name}`}>
               {roleMembers.map((m) => (
                 <li key={m.name} className="flex items-center justify-between px-3 py-2">

@@ -116,6 +116,12 @@ export default function Conversation() {
     loadConversation(null, false);
   }, [loadConversation]);
 
+  // When there is only one selectable option (just "Free agents") and nothing
+  // is chosen yet, preselect it instead of leaving "Select a swarm".
+  useEffect(() => {
+    if (swarmsData && swarmsData.length === 0 && swarm === "") setSwarm("free");
+  }, [swarmsData, swarm]);
+
   function toggleFilter(name) {
     setMemberFilters((prev) => {
       const next = new Set(prev);
@@ -212,9 +218,10 @@ export default function Conversation() {
           <p className="text-xs text-paper-muted">Select 2–16 members.</p>
           <div className="flex flex-wrap gap-2" aria-label="Select members">
             {memberNames.map((name) => (
-              <label key={name} className="cursor-pointer select-none">
+              <label key={name} className="cursor-pointer select-none flex items-center gap-2">
                 <input
                   type="checkbox"
+                  className="accent-led"
                   checked={selectedMembers.includes(name)}
                   onChange={() => toggleMember(name)}
                 />

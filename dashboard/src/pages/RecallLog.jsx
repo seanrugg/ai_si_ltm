@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client.js";
-import { localTime, relativeTime } from "../lib/format.js";
+import { localTime, plural, relativeTime } from "../lib/format.js";
 import { EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui.jsx";
 
 // The audit log actions the server emits (recall is the default view).
@@ -79,7 +79,7 @@ export default function RecallLog() {
 
   return (
     <>
-      <PageHeader title="Recall log">
+      <PageHeader title="Audit log">
         <button className="btn" onClick={() => load(0)} disabled={loading}>
           {loading ? "Loading…" : "Reload"}
         </button>
@@ -89,7 +89,7 @@ export default function RecallLog() {
         purges — is recorded here with who did it and when.
       </p>
 
-      <form className="mb-4 flex flex-wrap items-end gap-2" aria-label="Filter recall log">
+      <form className="mb-4 flex flex-wrap items-end gap-2" aria-label="Filter audit log">
         <label className="flex flex-col gap-1 text-xs text-paper-muted">
           <span className="sr-only">Action</span>
           <select
@@ -144,7 +144,7 @@ export default function RecallLog() {
                 </span>
                 {e.response_count !== null && (
                   <span className="justify-self-end hidden text-xs text-paper-muted md:block">
-                    {e.response_count} {e.response_count === 1 ? "result" : "results"}
+                    {plural(e.response_count, "result")}
                   </span>
                 )}
               </div>

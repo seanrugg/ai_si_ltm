@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GENESIS, hashColors, relativeTime, shortHash } from "./format.js";
+import { GENESIS, hashColors, plural, relativeTime, shortHash } from "./format.js";
 
 describe("format", () => {
   it("shortens hashes", () => {
@@ -17,5 +17,20 @@ describe("format", () => {
     const now = Date.parse("2026-10-15T12:00:00Z");
     expect(relativeTime("2026-10-15T11:59:00Z", now)).toBe("1 minute ago");
     expect(relativeTime("2026-10-14T12:00:00Z", now)).toBe("yesterday");
+  });
+});
+
+describe("plural", () => {
+  it("pluralizes regular words (0, 1, 2)", () => {
+    expect(plural(0, "record")).toBe("0 records");
+    expect(plural(1, "record")).toBe("1 record");
+    expect(plural(2, "record")).toBe("2 records");
+    expect(plural(1, "member")).toBe("1 member");
+    expect(plural(2, "member")).toBe("2 members");
+  });
+  it("uses the supplied plural for irregular words", () => {
+    expect(plural(0, "person", "people")).toBe("0 people");
+    expect(plural(1, "person", "people")).toBe("1 person");
+    expect(plural(2, "person", "people")).toBe("2 people");
   });
 });
