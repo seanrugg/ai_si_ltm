@@ -8,7 +8,9 @@ from __future__ import annotations
 import base64
 import importlib.util
 import os
+import shutil
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -174,3 +176,62 @@ def test_without_lrs_public_url_no_allowed_origins(tmp_path):
     assert setup_env.main(["--mode", "web", "--public-url", "https://ltms.example.org",
                            "--with-lrs", "--out", str(out)]) == 0
     assert "LRSQL_ALLOWED_ORIGINS" not in _parse_env(out)
+
+
+def test_embedded_template_matches_repo_file():
+    """The embedded template must equal deploy/compose/.env.example byte for
+    byte, so the two can't drift."""
+    repo_text = setup_env.EXAMPLE.read_text(encoding="utf-8")
+    assert setup_env._EMBEDDED_TEMPLATE == repo_text
+
+
+def test_runs_without_repo_template_writes_same_keys(tmp_path, monkeypatch, capsys):
+    """With the repo template hidden (monkeypatched path), the script still runs
+    and writes the same keys as a run with the repo template."""
+    monkeypatch.setattr(setup_env, "EXAMPLE", tmp_path / "does-not-exist" / ".env.example")
+    out = tmp_path / ".env"
+    rc = setup_env.main(["--mode", "local", "--out", str(out)])
+    assert rc == 0
+    assert out.exists()
+    captured = capsys.readouterr()
+    assert "embedded copy" in captured.out
+
+    out_repo = tmp_path / "repo.env"
+    assert setup_env.main(["--mode", "local", "--out", str(out_repo)]) == 0
+    assert set(_parse_env(out)) == set(_parse_env(out_repo))
+
+
+def test_output_has_no_cr(tmp_path):
+    """Output is LF only, with no carriage returns."""
+    out = tmp_path / ".env"
+    setup_env.main(["--mode", "web", "--with-lrs", "--with-mqtt",
+                    "--public-url", "https://ltms.example.org", "--out", str(out)])
+    assert b"\r" not in out.read_bytes()
+
+
+def _make_git_repo(tmp_path) -> Path:
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    # Commit something so the repo is a real work tree (not strictly required).
+    return repo
+
+
+def test_git_warns_when_not_ignored(tmp_path, capsys):
+    if shutil.which("git") is None:
+        pytest.skip("git not available")
+    repo = _make_git_repo(tmp_path)
+    out = repo / ".env"
+    setup_env.main(["--mode", "local", "--out", str(out)])
+    captured = capsys.readouterr()
+    assert "this file holds secrets and is not git-ignored" in captured.err
+
+
+def test_git_no_warn_when_ignored(tmp_path, capsys):
+    if shutil.which("git") is None:
+        pytest.skip("git not available")
+    repo = _make_git_repo(tmp_path)
+    (repo / ".gitignore").write_text(".env\n", encoding="utf-8")
+    out = repo / ".env"
+    setup_env.main(["--mode", "local", "--out", str(out)])
+    captured = capsys.readouterr()
+    assert "this file holds secrets and is not git-ignored" not in captured.err
