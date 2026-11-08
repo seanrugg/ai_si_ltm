@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, HashStrip, Loading, PageHeader, StatusBadge } from "../components/ui.jsx";
-import { localTime, relativeTime } from "../lib/format.js";
+import { localTime, plural, relativeTime } from "../lib/format.js";
 
 const PERMISSIONS = [
   { id: "contribute", help: "Write records under its own name" },
@@ -177,7 +177,7 @@ function MemberRow({ m, swarm, onDone }) {
           {swarm ? ` · in ${swarm.swarm} as ${swarm.role}` : " · free agent"}
         </span>
         <span className="text-sm text-paper-muted" title={localTime(m.last_seen_at)}>
-          {m.last_ack_seq} records{m.last_seen_at ? `, seen ${relativeTime(m.last_seen_at)}` : ""}
+          {plural(m.last_ack_seq, "record")}{m.last_seen_at ? `, seen ${relativeTime(m.last_seen_at)}` : ""}
         </span>
         {m.status === "active" && mode === null && (
           <span className="flex gap-2">

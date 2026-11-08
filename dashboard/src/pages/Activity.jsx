@@ -7,7 +7,7 @@ import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui.jsx";
 import { Sparkline, StackedBar, TypeLegend } from "../components/charts.jsx";
 import { isSurge, trend, typeColor, TYPE_ORDER } from "../lib/activity.js";
-import { localTime } from "../lib/format.js";
+import { localTime, plural } from "../lib/format.js";
 
 const WINDOWS = [
   { label: "1h", hours: 1 },
@@ -233,7 +233,7 @@ export default function Activity() {
                       {key}
                     </button>
                   </h3>
-                  <p className="text-sm text-paper-muted">{g.total.toLocaleString()} records</p>
+                  <p className="text-sm text-paper-muted">{plural(g.total, "record")}</p>
                 </div>
                 <p className="font-mono text-sm">
                   <span aria-hidden="true">{trendArrow(t.direction)} </span>
@@ -314,7 +314,7 @@ function DrillPanel({ group, hours, since, bucketSeconds, activeType, includeTel
       <div className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
         <div>
           <h2 className="text-base font-bold">{key}</h2>
-          <p className="text-sm text-paper-muted">{members.length} members · {total.toLocaleString()} records</p>
+          <p className="text-sm text-paper-muted">{plural(members.length, "member")} · {plural(total, "record")}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           {activeType && (
@@ -361,7 +361,7 @@ function DrillPanel({ group, hours, since, bucketSeconds, activeType, includeTel
                       {m.key}
                     </Link>
                     <p className="text-sm text-paper-muted">
-                      {m.total.toLocaleString()} records · {t.label}
+                      {plural(m.total, "record")} · {t.label}
                     </p>
                   </div>
                   <div className="flex-1">
@@ -454,28 +454,25 @@ function DrillOverTime({ seriesByType, since, bucketSeconds, types }) {
     const bucketEnd = new Date(bucketStart.getTime() + bucketSeconds * 1000);
     columns.push(
       <g key={i} transform={`translate(${i * colWidth},0)`}>
-        <title>{hhmm(bucketStart)}–{hhmm(bucketEnd)}: {totals[i]} records</title>
+        <title>{hhmm(bucketStart)}–{hhmm(bucketEnd)}: {plural(totals[i], "record")}</title>
         {segs}
       </g>
     );
   }
+  // Labels are HTML, not SVG text: the SVG scales to the card width, which
+  // inflated SVG font sizes on wide screens and clipped the last label.
   const labels = [0, 11, 23].map((i) => (
-    <text
-      key={i}
-      x={i * colWidth + colWidth / 2}
-      y={height + 22}
-      textAnchor="middle"
-      fontSize="11"
-      fill="#93A0B8"
-    >
-      {localTime(new Date(start + i * bucketSeconds * 1000).toISOString())}
-    </text>
+    <span key={i}>{localTime(new Date(start + i * bucketSeconds * 1000).toISOString())}</span>
   ));
   return (
-    <svg viewBox={`0 0 ${width} ${height + 30}`} role="img" aria-label="Records over time" className="block w-full">
-      {columns}
-      {labels}
-    </svg>
+    <div>
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Records over time" className="block w-full">
+        {columns}
+      </svg>
+      <div className="mt-1 flex justify-between text-xs text-paper-muted" aria-hidden="true">
+        {labels}
+      </div>
+    </div>
   );
 }
 

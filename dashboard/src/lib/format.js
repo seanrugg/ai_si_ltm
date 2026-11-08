@@ -50,4 +50,11 @@ export function hashColors(hex, bands = 8) {
   return out;
 }
 
+// Pluralize a count: "0 records", "1 record", "1,234 records". `pluralForm`
+// overrides the default "-s" for irregular plurals (person → people).
+export function plural(n, word, pluralForm) {
+  const one = n === 1;
+  return `${Number(n).toLocaleString()} ${one ? word : (pluralForm || `${word}s`)}`;
+}
+
 export const GENESIS = "0".repeat(64);
