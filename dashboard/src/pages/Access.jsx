@@ -4,7 +4,16 @@ import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, Loading, PageHeader, StatusBadge } from "../components/ui.jsx";
 import { localTime } from "../lib/format.js";
 
-const SCOPE_KEYS = ["types", "agents", "swarms"];
+const RECORD_TYPES = [
+  "action", "communication", "decision", "event", "lesson",
+  "perception", "policy", "system", "thought",
+];
+
+const MODE_LABELS = {
+  off: ["Off", "No MCP reads are allowed."],
+  token: ["Token", "Only a presented, valid read token grants access."],
+  open: ["Open", "Anyone can read the open scope (headers only, never payloads)."],
+};
 
 const splitList = (s) => s.split(",").map((x) => x.trim()).filter(Boolean);
 
@@ -12,7 +21,7 @@ const splitList = (s) => s.split(",").map((x) => x.trim()).filter(Boolean);
 function scopeSummary(scope) {
   if (!scope) return "—";
   const parts = [];
-  for (const key of SCOPE_KEYS) {
+  for (const key of ["types", "agents", "swarms"]) {
     if (scope[key]?.length) parts.push(`${key}: ${scope[key].join(", ")}`);
   }
   if (scope.payloads === true) parts.push("payloads");
@@ -59,13 +68,90 @@ export default function Access() {
   const [revokeBusy, setRevokeBusy] = useState(false);
   const [revokeError, setRevokeError] = useState(null);
 
+  // MCP settings form state.
+  const [settingsMode, setSettingsMode] = useState(data?.mode ?? "off");
+  const [openTypes, setOpenTypes] = useState(new Set(data?.open_scope?.types ?? []));
+  const [openSwarms, setOpenSwarms] = useState(
+    Array.isArray(data?.open_scope?.swarms) ? data.open_scope.swarms.join(", ") : "",
+  );
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const [settingsError, setSettingsError] = useState(null);
+  const [settingsMessage, setSettingsMessage] = useState(null);
+
   const fid = "access-new-token";
+
+  function toggleType(type) {
+    setOpenTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type); else next.add(type);
+      return next;
+    });
+  }
+
+  // Whether the proposed settings widen public access vs what's currently in effect.
+  function wouldWiden() {
+    const cur = data?.open_scope ?? { types: [], swarms: null };
+    const curTypes = new Set(cur.types ?? []);
+    const newTypes = openTypes;
+    if (settingsMode === "open" && data?.mode !== "open") return true;
+    if (settingsMode === "open" || data?.mode === "open") {
+      if ([...newTypes].some((t) => !curTypes.has(t))) return true;
+      const curSwarms = cur.swarms;
+      const newSwarms = openSwarms.trim() ? splitList(openSwarms) : null;
+      if (curSwarms !== null && newSwarms === null) return true;
+      if (curSwarms !== null && newSwarms !== null && newSwarms.some((s) => !curSwarms.includes(s)))
+        return true;
+    }
+    return false;
+  }
+
+  const showConfirm = settingsMode === "open" && wouldWiden();
+
+  async function saveSettings() {
+    setSettingsError(null);
+    if (showConfirm && !confirmOpen) {
+      setSettingsError("Confirm that you understand anyone on the internet can read these record summaries.");
+      return;
+    }
+    const newSwarms = openSwarms.trim() ? splitList(openSwarms) : null;
+    const body = {
+      mode: settingsMode,
+      open_scope: { types: [...openTypes], swarms: newSwarms },
+    };
+    if (showConfirm) body.confirm = "open";
+    setSettingsBusy(true);
+    try {
+      await api("/admin/mcp/settings", { method: "PUT", body });
+      setSettingsMessage("MCP settings saved.");
+      setConfirmOpen(false);
+      reload();
+    } catch (err) {
+      setSettingsError(err.message);
+    } finally {
+      setSettingsBusy(false);
+    }
+  }
+
+  async function resetSettings() {
+    setSettingsError(null);
+    setSettingsBusy(true);
+    try {
+      await api("/admin/mcp/settings", { method: "DELETE" });
+      setSettingsMessage("Reset to the environment default.");
+      reload();
+    } catch (err) {
+      setSettingsError(err.message);
+    } finally {
+      setSettingsBusy(false);
+    }
+  }
 
   async function createToken() {
     setFormError(null);
     const scope = {};
     if (form.payloads) scope.payloads = true;
-    for (const key of SCOPE_KEYS) {
+    for (const key of ["types", "agents", "swarms"]) {
       const values = splitList(form[key]);
       if (values.length) scope[key] = values;
     }
@@ -107,31 +193,135 @@ export default function Access() {
 
   if (loading && !data) return <Loading what="Loading MCP access" />;
   if (error) return <ErrorNote error={error} onRetry={reload} />;
+  const locked = Boolean(data.locked);
 
   return (
     <>
       <PageHeader title="MCP read access" />
 
+      {/* ---- MCP mode and open scope ---- */}
       <section className="mb-8 rounded-md border border-ink-line bg-ink p-4" aria-labelledby="access-mode-h">
         <h2 id="access-mode-h" className="mb-3 text-lg font-bold">Mode</h2>
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
-          <dt className="text-paper-muted">Mode</dt>
-          <dd className="font-mono text-base">{data.mode}</dd>
-          <dt className="text-paper-muted">Open scope</dt>
-          <dd>{scopeSummary(data.open_scope)}</dd>
-          <dt className="text-paper-muted">Connection URL</dt>
-          <dd>
-            <div className="flex flex-wrap items-center gap-2">
-              <input className="field h-11 w-64 font-mono text-sm" readOnly
-                     value={`${window.location.origin}/mcp`} aria-label="MCP connection URL" id="access-connect-url" />
-              <CopyButton text={`${window.location.origin}/mcp`} ariaLabel="Copy the MCP connection URL" />
+
+        {locked && (
+          <p className="mb-4 text-sm text-paper-muted">
+            Locked by the server environment (<code className="hash">LTMS_MCP_SETTINGS_LOCKED</code>). The dashboard
+            shows the effective settings but cannot change them; edit the environment and redeploy instead.
+          </p>
+        )}
+
+        <fieldset disabled={locked}>
+          <legend className="mb-2 text-sm font-bold text-paper-muted">Read mode</legend>
+          <div className="space-y-2">
+            {Object.entries(MODE_LABELS).map(([key, [label, desc]]) => {
+              const checked = settingsMode === key;
+              return (
+                <label key={key} className="flex items-start gap-3 cursor-pointer">
+                  <input type="radio" name="access-mode" value={key} checked={checked}
+                         onChange={() => setSettingsMode(key)}
+                         className="accent-led mt-0.5" />
+                  <div>
+                    <span className={`font-semibold ${locked ? "text-paper-muted" : ""}`}>{label}</span>{" "}
+                    <span className="text-xs text-paper-muted">{desc}</span>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
+
+        {settingsMode === "open" && (
+          <fieldset disabled={locked}>
+            <legend className="mt-6 mb-2 text-sm font-bold text-paper-muted">Open scope (headers only, never payloads)</legend>
+            <div className="space-y-3">
+              <div>
+                <p className="mb-2 text-sm text-paper-muted">Record types</p>
+                <div className="grid grid-cols-3 gap-2 text-sm">
+                  {RECORD_TYPES.map((type) => {
+                    const selected = openTypes.has(type);
+                    return (
+                      <label key={type} className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={selected}
+                               onChange={() => toggleType(type)}
+                               className="accent-led h-5 w-5" />
+                        {type}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm text-paper-muted mb-1">Swarms (comma-separated, empty = all)</label>
+                <input className="field h-11 w-64" value={openSwarms}
+                       onChange={(e) => setOpenSwarms(e.target.value)}
+                       placeholder="echo-base, alpha" disabled={locked} />
+                <p className="mt-1 text-xs text-paper-muted">
+                  Leave empty to include every swarm. List swarms to restrict open reads to them.
+                </p>
+              </div>
             </div>
-            <p className="mt-1 text-xs text-paper-muted">
-              Set with <code className="hash">LTMS_MCP_READ_MODE</code> and <code className="hash">LTMS_MCP_OPEN_SCOPE</code>.
-            </p>
+          </fieldset>
+        )}
+
+        {showConfirm && (
+          <fieldset disabled={locked}>
+            <legend className="mt-6 mb-2 text-sm font-bold text-paper-muted">Confirm</legend>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input type="checkbox" checked={confirmOpen}
+                     onChange={(e) => setConfirmOpen(e.target.checked)}
+                     className="accent-led mt-0.5 h-5 w-5" disabled={locked} />
+              <div>
+                <span className="font-semibold">I understand anyone on the internet can read these record summaries.</span>
+                <p className="mt-1 text-xs text-paper-muted">
+                  Payloads are never part of the open scope. Headers only.
+                </p>
+              </div>
+            </label>
+          </fieldset>
+        )}
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          {!locked && (
+            <>
+              <button type="button" className="btn btn-primary h-11" disabled={settingsBusy}
+                      onClick={saveSettings}>
+                Save settings
+              </button>
+              <button type="button" className="btn h-11" disabled={settingsBusy}
+                      onClick={resetSettings}>
+                Reset to environment default
+              </button>
+              {settingsMessage && (
+                <span className="mt-3 text-xs text-ok">{settingsMessage}</span>
+              )}
+            </>
+          )}
+          {settingsError && <ErrorNote error={settingsError} />}
+        </div>
+
+        <dl className="mt-5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-paper-muted">
+          <dt>Source</dt>
+          <dd className="font-mono">{data.source}</dd>
+          <dt>Last changed</dt>
+          <dd>
+            {data.updated_by && data.updated_at
+              ? `by ${data.updated_by} at ${localTime(data.updated_at)}`
+              : "— (environment default)"}
           </dd>
+          {locked && (
+            <>
+              <dt>Locked</dt>
+              <dd>Yes — by the server environment</dd>
+            </>
+          )}
         </dl>
       </section>
+
+      <p className="mb-4 text-sm text-paper-muted" id="access-mode-desc">
+        Set the default with <code className="hash">LTMS_MCP_READ_MODE</code> and
+        <code className="hash">LTMS_MCP_OPEN_SCOPE</code>. Dashboard changes take effect on the next
+        MCP request — no restart needed — unless the server is locked.
+      </p>
 
       <section className="mb-8" aria-labelledby="access-tokens-h">
         <h2 id="access-tokens-h" className="mb-3 text-lg font-bold">Tokens</h2>

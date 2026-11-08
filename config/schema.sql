@@ -81,6 +81,14 @@ CREATE TABLE members (
 	UNIQUE (name)
 );
 
+CREATE TABLE runtime_settings (
+	key VARCHAR(64) NOT NULL, 
+	value JSONB NOT NULL, 
+	updated_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	updated_by VARCHAR(64), 
+	PRIMARY KEY (key)
+);
+
 CREATE TABLE swarms (
 	id VARCHAR(64) NOT NULL, 
 	name VARCHAR(64) NOT NULL, 

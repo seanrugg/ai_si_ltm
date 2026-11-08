@@ -7,6 +7,7 @@ from server.models.lrs import LrsEndpoint
 from server.models.member import Member
 from server.models.mcp_token import McpToken
 from server.models.record import Record, RecordPayload
+from server.models.runtime_setting import RuntimeSetting
 from server.models.swarm import RecordProvenance, Swarm, SwarmMember
 
 __all__ = [
@@ -23,6 +24,7 @@ __all__ = [
     "Record",
     "RecordPayload",
     "RecordProvenance",
+    "RuntimeSetting",
     "Swarm",
     "SwarmMember",
     "Token",
