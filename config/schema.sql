@@ -48,6 +48,9 @@ CREATE TABLE mcp_tokens (
 	expires_at TIMESTAMP WITH TIME ZONE, 
 	revoked_at TIMESTAMP WITH TIME ZONE, 
 	last_used_at TIMESTAMP WITH TIME ZONE, 
+	owner VARCHAR(128), 
+	purpose VARCHAR(500), 
+	use_count INTEGER DEFAULT '0' NOT NULL, 
 	PRIMARY KEY (id), 
 	CONSTRAINT uq_mcp_tokens_name UNIQUE (name), 
 	CONSTRAINT uq_mcp_tokens_token_hash UNIQUE (token_hash)

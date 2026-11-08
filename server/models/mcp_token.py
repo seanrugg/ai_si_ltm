@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Uuid, UniqueConstraint
+from sqlalchemy import Integer, String, Uuid, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from server.models.base import Base, JSONType, UTCDateTime, utcnow
@@ -31,3 +31,6 @@ class McpToken(Base):
     expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    owner: Mapped[str | None] = mapped_column(String(128))
+    purpose: Mapped[str | None] = mapped_column(String(500))
+    use_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")

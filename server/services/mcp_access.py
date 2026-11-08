@@ -10,7 +10,7 @@ import hmac
 import secrets
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.config import ServerConfig
@@ -51,11 +51,17 @@ async def create(
     scope: dict | None,
     expires_at: datetime | None,
     actor: str,
+    owner: str | None = None,
+    purpose: str | None = None,
 ) -> tuple[McpToken, str]:
     """Create a token, store only its hash, return (row, plaintext)."""
     scope = _validate_mcp_scope(scope)
     if not name or len(name) > 64:
         raise ServiceError(422, "bad_name", "name must be 1-64 characters")
+    if owner is not None and len(owner) > 128:
+        raise ServiceError(422, "bad_token", "owner must be at most 128 characters")
+    if purpose is not None and len(purpose) > 500:
+        raise ServiceError(422, "bad_token", "purpose must be at most 500 characters")
     if await session.scalar(select(McpToken.id).where(McpToken.name == name)) is not None:
         raise ServiceError(409, "name_taken", "a token with that name already exists")
     plaintext = new_token()
@@ -64,12 +70,14 @@ async def create(
         token_hash=_token_hash(plaintext),
         scope=scope,
         expires_at=expires_at,
+        owner=owner,
+        purpose=purpose,
     )
     session.add(row)
     await session.flush()
     session.add(
         AuditLog(actor=actor, action="mcp_token_create",
-                 detail={"name": name, "scope": scope})
+                 detail={"name": name, "scope": scope, "owner": owner, "purpose": purpose})
     )
     return row, plaintext
 
@@ -110,7 +118,12 @@ async def resolve(
             return None
         if row.expires_at is not None and row.expires_at <= datetime.now(timezone.utc):
             return None
-        row.last_used_at = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc)
+        await session.execute(
+            update(McpToken)
+            .where(McpToken.id == row.id)
+            .values(last_used_at=now, use_count=McpToken.use_count + 1)
+        )
         return _scope_from_dict(row.scope)
 
     if cfg.mcp_read_mode == "open":
