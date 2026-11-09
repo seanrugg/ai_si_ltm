@@ -4,6 +4,7 @@ import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, HashStrip, Loading, PageHeader, StatusBadge } from "../components/ui.jsx";
 import { localTime, plural, relativeTime } from "../lib/format.js";
+import { describeChange, HUB_WARNING, membershipChange } from "../lib/membership.js";
 
 const PERMISSIONS = [
   { id: "contribute", help: "Write records under its own name" },
@@ -154,7 +155,86 @@ function PendingCard({ m, selected, onToggle, onDone }) {
   );
 }
 
-function MemberRow({ m, swarm, onDone }) {
+// Join, move, change role or leave in one step (issue #160). An Apply button,
+// not change-on-select, so keyboard and screen-reader users can browse the
+// options without triggering anything (WCAG 3.2.2).
+export function MembershipForm({ name, current, swarms, onDone }) {
+  const isHub = current?.role === "hub";
+  const [swarm, setSwarm] = useState(current?.swarm ?? "");
+  const [role, setRole] = useState(current?.role ?? "member");
+  const [hubOk, setHubOk] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const target = { swarm: swarm || null, role };
+  const { kind, hubWarning } = membershipChange(current ?? null, target);
+  const hubSelectable = isHub && swarm === current.swarm;
+  const options = (swarms || []).filter((s) => s.status === "active" || s.name === current?.swarm);
+  const id = `membership-${name}`;
+
+  function pickSwarm(value) {
+    setSwarm(value);
+    if (role === "hub" && value !== current?.swarm) setRole("member"); // hub is only "no change"
+  }
+
+  async function apply(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      if (kind === "leave") {
+        await api(`/admin/swarms/members/${encodeURIComponent(name)}`, { method: "DELETE" });
+      } else {
+        await api(`/admin/swarms/${encodeURIComponent(swarm)}/members`, { method: "POST", body: { member: name, role } });
+      }
+      setHubOk(false);
+      onDone();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={apply} className="mt-2 text-sm" aria-label={`Swarm and role for ${name}`}>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="flex flex-col gap-1 text-xs text-paper-muted" htmlFor={`${id}-swarm`}>
+          Swarm
+          <select id={`${id}-swarm`} className="field" value={swarm} onChange={(e) => pickSwarm(e.target.value)}
+                  aria-label={`Swarm for ${name}`}>
+            <option value="">Free agent</option>
+            {options.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-paper-muted" htmlFor={`${id}-role`}>
+          Role
+          <select id={`${id}-role`} className="field" value={swarm ? role : ""} disabled={!swarm}
+                  onChange={(e) => setRole(e.target.value)} aria-label={`Role for ${name}`}>
+            {!swarm && <option value="">—</option>}
+            {isHub && <option value="hub" disabled={!hubSelectable}>hub</option>}
+            <option value="member">member</option>
+            <option value="observer">observer</option>
+          </select>
+        </label>
+        <button className="btn" disabled={busy || kind === "none" || (hubWarning && !hubOk)}>Apply</button>
+      </div>
+      <p className="mt-1 min-h-4 text-xs text-paper-muted" aria-live="polite">{describeChange(current ?? null, target)}</p>
+      {hubWarning && (
+        <div className="mt-1 rounded-md border border-warn/50 p-2 text-xs" role="note">
+          <p className="mb-1"><span className="font-bold">Hub:</span> {HUB_WARNING}</p>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" className="accent-led" checked={hubOk} onChange={(e) => setHubOk(e.target.checked)} />
+            I understand {name} will stop relaying for {current.swarm}
+          </label>
+        </div>
+      )}
+      <ErrorNote error={error} />
+    </form>
+  );
+}
+
+function MemberRow({ m, swarm, swarms, onDone }) {
   const [mode, setMode] = useState(null); // null | "edit" | "revoke"
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -195,6 +275,10 @@ function MemberRow({ m, swarm, onDone }) {
         )}
       </div>
       <ErrorNote error={error} />
+      {m.status === "active" && mode === null && (
+        <MembershipForm key={`${swarm?.swarm ?? ""}:${swarm?.role ?? ""}`} name={m.name} current={swarm ?? null}
+                        swarms={swarms} onDone={onDone} />
+      )}
       {mode === "edit" && (
         <PermissionEditor initial={m.permissions} initialScope={m.scope} saveLabel="Save permissions" busy={busy}
                           onCancel={() => setMode(null)}
@@ -448,7 +532,7 @@ export default function Members() {
               ))}
             </select>
             {list.length ? (
-              <ul className="panel mt-3">{list.map((m) => <MemberRow key={m.id} m={m} swarm={swarmOf.get(m.name)} onDone={reload} />)}</ul>
+              <ul className="panel mt-3">{list.map((m) => <MemberRow key={m.id} m={m} swarm={swarmOf.get(m.name)} swarms={swarmsData} onDone={reload} />)}</ul>
             ) : (
               <EmptyState title={emptyTitle}>{emptyBody}</EmptyState>
             )}
