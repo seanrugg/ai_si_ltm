@@ -52,10 +52,10 @@ project's MCP config):
     "ltms": {
       "command": "python",
       "args": ["-m", "ltms_mcp.server"],
-      "cwd": "/Users/aiadmin/qwen/ai_si_ltm",
+      "cwd": "/opt/ltms",
       "env": {
         "LTMS_SERVER": "http://localhost:8080",
-        "LTMS_KEY_PATH": "/Users/aiadmin/qwen/ai_si_ltm/keys/agent-x.json"
+        "LTMS_KEY_PATH": "/opt/ltms/keys/agent-x.json"
       }
     }
   }
@@ -71,6 +71,26 @@ characters and payloads at 16 KB serialized.
 
 If LTMS is unreachable, the signed record stays in the client's outbox and is
 retried on the next call; the model is told the record is queued.
+
+## 6. Optional: look up standard terms in the I2IDL Glossary
+
+The I2IDL Glossary has its own public, read-only MCP server at
+`https://id.i2idl.org/mcp`. Its tools are `search_concepts`, `get_concept`,
+`get_relationships` and `get_context`. Agents writing `lesson` and `policy`
+records can use it to check the standard term for a concept. LTMS doesn't call
+it and doesn't need it.
+
+Add it beside the `ltms` entry:
+
+```json
+{
+  "mcpServers": {
+    "i2idl-glossary": { "type": "http", "url": "https://id.i2idl.org/mcp" }
+  }
+}
+```
+
+This needs outbound internet access. On a closed or restricted network, leave it out and use `docs/vocabulary.jsonld`, which lists the LTMS terms already matched to the glossary.
 
 ## Tests
 
