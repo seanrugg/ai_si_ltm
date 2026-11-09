@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, Loading, PageHeader, StatusBadge } from "../components/ui.jsx";
-import { localTime } from "../lib/format.js";
+import { localTime, plural } from "../lib/format.js";
 
 const RECORD_TYPES = [
   "action", "communication", "decision", "event", "lesson",
@@ -16,6 +16,12 @@ const MODE_LABELS = {
 };
 
 const splitList = (s) => s.split(",").map((x) => x.trim()).filter(Boolean);
+
+const POLICY_LABELS = {
+  manual: ["Manual", "Requests wait for an admin to approve or reject."],
+  auto_deny: ["Auto-deny", "New requests are refused at once (403 enrollment_closed)."],
+  auto_approve: ["Auto-approve", "Free-agent requests are approved at once with recall only."],
+};
 
 // A human readable summary of a token scope, e.g. "types: event, thought · payloads".
 function scopeSummary(scope) {
@@ -65,6 +71,7 @@ export function settingsFormFrom(data) {
 
 export default function Access() {
   const { data, error, loading, reload } = useApi("/admin/mcp");
+  const { data: policyData, error: policyApiError, loading: policyLoading, reload: reloadPolicy } = useApi("/admin/enrollment/policy");
   // null | "new": whether the "new token" form is open.
   const [mode, setMode] = useState(null);
   const [form, setForm] = useState({ name: "", types: "", agents: "", swarms: "", payloads: false, expires: "", owner: "", purpose: "" });
@@ -93,6 +100,13 @@ export default function Access() {
   // the radios start at "off" and a Save would overwrite the real mode.
   const loadedMode = data?.mode;
   const loadedScope = JSON.stringify(data?.open_scope ?? null);
+
+  // Enrollment policy form state, synced from the server's effective policy below.
+  const [policy, setPolicy] = useState(policyData?.policy ?? "manual");
+  const [policyConfirmOpen, setPolicyConfirmOpen] = useState(false);
+  const [policyBusy, setPolicyBusy] = useState(false);
+  const [policyError, setPolicyError] = useState(null);
+  const [policyMessage, setPolicyMessage] = useState(null);
   useEffect(() => {
     if (loadedMode === undefined) return;
     const f = settingsFormFrom({ mode: loadedMode, open_scope: JSON.parse(loadedScope) });
@@ -101,6 +115,17 @@ export default function Access() {
     setOpenSwarms(f.swarms);
     setConfirmOpen(false);
   }, [loadedMode, loadedScope]);
+
+  // Sync the enrollment-policy form from the server's effective policy whenever it
+  // loads or changes, so a Save never overwrites the real policy (the #127 bug).
+  const loadedPolicy = policyData?.policy;
+  useEffect(() => {
+    if (loadedPolicy === undefined) return;
+    setPolicy(loadedPolicy);
+    setPolicyConfirmOpen(false);
+    setPolicyError(null);
+    setPolicyMessage(null);
+  }, [loadedPolicy]);
 
   const fid = "access-new-token";
 
@@ -167,6 +192,28 @@ export default function Access() {
       setSettingsError(err.message);
     } finally {
       setSettingsBusy(false);
+    }
+  }
+
+  async function savePolicy() {
+    setPolicyError(null);
+    setPolicyMessage(null);
+    if (policy === "auto_approve" && !policyConfirmOpen) {
+      setPolicyError('Confirm that you understand anyone on the internet can join and read.');
+      return;
+    }
+    const body = { policy };
+    if (policy === "auto_approve") body.confirm = "auto_approve";
+    setPolicyBusy(true);
+    try {
+      await api("/admin/enrollment/policy", { method: "PUT", body });
+      setPolicyMessage("Enrollment policy saved.");
+      setPolicyConfirmOpen(false);
+      reloadPolicy();
+    } catch (err) {
+      setPolicyError(err.message);
+    } finally {
+      setPolicyBusy(false);
     }
   }
 
@@ -338,6 +385,105 @@ export default function Access() {
             </>
           )}
         </dl>
+      </section>
+
+      {/* ---- Enrollment policy ---- */}
+      <section className="mb-8 rounded-md border border-ink-line bg-ink p-4" aria-labelledby="enrollment-policy-h">
+        <h2 id="enrollment-policy-h" className="mb-3 text-lg font-bold">Enrollment policy</h2>
+
+        {policyLoading && !policyData && <Loading what="Loading enrollment policy" />}
+        {policyApiError && <ErrorNote error={policyApiError} onRetry={reloadPolicy} />}
+        {policyData && (
+          <>
+            {policyData.locked && (
+              <p className="mb-4 text-sm text-paper-muted">
+                Locked by the server environment (<code className="hash">LTMS_ENROLLMENT_POLICY_LOCKED</code>). The dashboard
+                shows the effective policy but cannot change it; edit the environment and redeploy instead.
+              </p>
+            )}
+            {policyData.policy === "auto_approve" && (
+              <p className="mb-4 text-sm text-bad">
+                Warning: Anyone on the internet can join and read.
+              </p>
+            )}
+
+            <fieldset disabled={policyData.locked}>
+              <legend className="mb-2 text-sm font-bold text-paper-muted">Policy</legend>
+              <div className="space-y-2">
+                {Object.entries(POLICY_LABELS).map(([key, [label, desc]]) => {
+                  const checked = policy === key;
+                  return (
+                    <label key={key} className="flex items-start gap-3 cursor-pointer">
+                      <input type="radio" name="enrollment-policy" value={key} checked={checked}
+                             onChange={() => setPolicy(key)}
+                             className="accent-led mt-0.5" />
+                      <div>
+                        <span className={`font-semibold ${policyData.locked ? "text-paper-muted" : ""}`}>{label}</span>{" "}
+                        <span className="text-xs text-paper-muted">{desc}</span>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
+
+            {policy === "auto_approve" && (
+              <fieldset disabled={policyData.locked}>
+                <legend className="mt-6 mb-2 text-sm font-bold text-paper-muted">Confirm</legend>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input type="checkbox" checked={policyConfirmOpen}
+                         onChange={(e) => setPolicyConfirmOpen(e.target.checked)}
+                         className="accent-led mt-0.5 h-5 w-5" disabled={policyData.locked} />
+                  <div>
+                    <span className="font-semibold">I understand anyone on the internet can join and read.</span>
+                    <p className="mt-1 text-xs text-paper-muted">
+                      Free-agent requests are approved at once with recall only; they cannot write records or relay.
+                    </p>
+                  </div>
+                </label>
+              </fieldset>
+            )}
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              {!policyData.locked && (
+                <>
+                  <button type="button" className="btn btn-primary h-11" disabled={policyBusy}
+                          onClick={savePolicy}>
+                    Save policy
+                  </button>
+                  {policyMessage && (
+                    <span className="mt-3 text-xs text-ok">{policyMessage}</span>
+                  )}
+                </>
+              )}
+              {policyError && <ErrorNote error={policyError} />}
+            </div>
+
+            <dl className="mt-5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-paper-muted">
+              <dt>Source</dt>
+              <dd className="font-mono">{policyData.source}</dd>
+              <dt>Last changed</dt>
+              <dd>
+                {policyData.updated_by && policyData.updated_at
+                  ? `by ${policyData.updated_by} at ${localTime(policyData.updated_at)}`
+                  : "— (environment default)"}
+              </dd>
+              {policyData.locked && (
+                <>
+                  <dt>Locked</dt>
+                  <dd>Yes — by the server environment</dd>
+                </>
+              )}
+            </dl>
+
+            {policyData.policy === "auto_deny" && (
+              <p className="mt-4 text-sm text-paper-muted" id="enrollment-refusals">
+                {plural(policyData.refusals.count, "request")} refused since{" "}
+                {policyData.refusals.since ? localTime(policyData.refusals.since) : "—"}
+              </p>
+            )}
+          </>
+        )}
       </section>
 
       <p className="mb-4 text-sm text-paper-muted" id="access-mode-desc">
