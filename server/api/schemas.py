@@ -81,12 +81,12 @@ class EnrollmentPolicyUpdate(BaseModel):
     confirm: str | None = None
 
 
-class RetentionUpdate(BaseModel):
-    payload_rules: list[dict]  # each validated as server.config.PayloadRule (422 bad_retention)
-    audit_days: int | None = None  # None keeps the audit log forever; otherwise at least 30
-
-
 class BulkMembersRequest(BaseModel):
     action: str  # "approve" or "reject"
     ids: list[str] = Field(..., max_length=100)
     reason: str | None = Field(None, max_length=500)
+
+
+class RetentionUpdate(BaseModel):
+    payload_rules: list[dict]  # each validated as server.config.PayloadRule (422 bad_retention)
+    audit_days: int | None = None  # None keeps the audit log forever; otherwise at least 30

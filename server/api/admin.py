@@ -8,21 +8,19 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, Query, Request, Response
-from pydantic import ValidationError
 from sqlalchemy import func, Integer, literal, or_, select
 
 from ltms_contract import RECORD_TYPES
 
 from server.api.deps import ADMIN_COOKIE, AdminAuth, client_ip, current_admin, transaction
+from server.api.schemas import RetentionUpdate  # noqa: I001  (own line: keeps parallel PRs mergeable)
 from server.api.schemas import (AdminLogin, ApproveRequest, BulkMembersRequest,
                                 EnrollmentPolicyUpdate, InviteCreate, McpSettingsUpdate,
-                                McpTokenCreate, PermissionsRequest, ReasonRequest, RetentionUpdate,
-                                SwarmMode)
+                                McpTokenCreate, PermissionsRequest, ReasonRequest, SwarmMode)
 from server.models import (AuditLog, EnrollmentSwarmRequest, Member, McpToken, Record, RecordPayload,
                            RecordProvenance, RuntimeSetting, Swarm, SwarmMember)
 from server.services import auth as auth_service
 from server.services import conversation as conversation_service, enrollment, integrity, lrs as lrs_service, mcp_access, policy_lifecycle, recall, runtime_settings, swarms
-from server.config import PayloadRule
 from server.services.errors import ServiceError
 
 router = APIRouter(prefix="/api", tags=["admin"])
@@ -893,9 +891,6 @@ async def enrollment_policy_put(request: Request, body: EnrollmentPolicyUpdate, 
             "locked": cfg.enrollment_policy_locked}
 
 
-MIN_AUDIT_DAYS = 30
-
-
 def _retention_out(effective: dict, row, cfg) -> dict:
     return {
         "payload_rules": effective["payload_rules"],
@@ -924,17 +919,7 @@ async def retention_put(request: Request, body: RetentionUpdate, admin: AdminAut
     cfg = request.app.state.config
     if runtime_settings.is_retention_locked(cfg):
         raise ServiceError(409, "locked", "data retention is locked by the server environment")
-    rules = []
-    for i, raw in enumerate(body.payload_rules):
-        try:
-            rules.append(PayloadRule(**raw).model_dump())
-        except (ValidationError, TypeError) as exc:
-            msg = exc.errors()[0]["msg"] if isinstance(exc, ValidationError) else str(exc)
-            raise ServiceError(422, "bad_retention", f"rule {i + 1}: {msg}") from None
-    if body.audit_days is not None and body.audit_days < MIN_AUDIT_DAYS:
-        raise ServiceError(422, "bad_retention",
-                           f"audit_days must be null (keep forever) or at least {MIN_AUDIT_DAYS}")
-    new = {"payload_rules": rules, "audit_days": body.audit_days}
+    new = runtime_settings.validate_retention(body.payload_rules, body.audit_days)
     actor = f"admin:{admin.username}"
     async with transaction(request) as session:
         current = await runtime_settings.resolve_retention(session, cfg)

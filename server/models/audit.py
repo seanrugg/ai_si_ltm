@@ -22,7 +22,6 @@ AUDIT_ACTIONS = (
     "token_denied",
     "ingest_reject",
     "retention_purge",
-    "retention_change",
     "lrs_create",
     "lrs_update",
     "lrs_delete",
@@ -30,6 +29,7 @@ AUDIT_ACTIONS = (
     "mcp_token_revoke",
     "mcp_settings_change",
     "mcp_settings_reset",
+    "retention_change",
 )
 
 

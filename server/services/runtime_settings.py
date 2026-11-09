@@ -172,3 +172,30 @@ async def resolve_retention(session: AsyncSession, cfg: ServerConfig) -> dict[st
             "source": "dashboard",
         }
     return {**env, "source": "environment"}
+
+
+MIN_AUDIT_DAYS = 30
+
+
+def validate_retention(payload_rules: list, audit_days: int | None) -> dict[str, Any]:
+    """Check a data retention change; ServiceError 422 ``bad_retention`` if invalid.
+
+    Each rule must be a valid ``PayloadRule`` (so policy/system payloads and the
+    ``keep`` tag stay protected); ``audit_days`` is None (keep forever) or >= 30.
+    """
+    from pydantic import ValidationError
+
+    from server.config import PayloadRule
+    from server.services.errors import ServiceError
+
+    rules = []
+    for i, raw in enumerate(payload_rules):
+        try:
+            rules.append(PayloadRule(**raw).model_dump())
+        except (ValidationError, TypeError) as exc:
+            msg = exc.errors()[0]["msg"] if isinstance(exc, ValidationError) else str(exc)
+            raise ServiceError(422, "bad_retention", f"rule {i + 1}: {msg}") from None
+    if audit_days is not None and audit_days < MIN_AUDIT_DAYS:
+        raise ServiceError(422, "bad_retention",
+                           f"audit_days must be null (keep forever) or at least {MIN_AUDIT_DAYS}")
+    return {"payload_rules": rules, "audit_days": audit_days}
