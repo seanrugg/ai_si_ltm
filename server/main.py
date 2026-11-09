@@ -27,6 +27,14 @@ from server.services.auth import ensure_admin
 
 from mcp.server.streamable_http import TransportSecuritySettings
 
+# The dashboard handles swarm root keys in the browser (issue #122), so it gets
+# a strict CSP: only its own bundled scripts run. Vite inlines small font files
+# as data: URIs, hence font-src. React style props go through the CSSOM, which
+# style-src doesn't restrict, so no 'unsafe-inline' is needed.
+DASHBOARD_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self' data:; "
+                 "img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; "
+                 "form-action 'self'; frame-ancestors 'none'")
+
 
 class _McpNoSlash:
     """Serve ``/mcp`` as ``/mcp/`` without a redirect.
@@ -110,6 +118,9 @@ def create_app(config: ServerConfig | None = None, *, create_tables: bool = True
         response.headers["x-content-type-options"] = "nosniff"
         response.headers["x-frame-options"] = "DENY"
         response.headers["referrer-policy"] = "no-referrer"
+        path = request.url.path
+        if not (path.startswith("/api") or path == "/mcp" or path.startswith("/mcp/")):
+            response.headers["content-security-policy"] = DASHBOARD_CSP
         return response
 
     @app.get("/api/health", include_in_schema=False)
