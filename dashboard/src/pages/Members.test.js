@@ -139,6 +139,7 @@ describe("pending bulk actions", () => {
     fireEvent.change(screen.getByLabelText(/Reason \(optional\)/), { target: { value: "unknown device" } });
     fireEvent.click(screen.getByText(/Reject \(2\)/));
     await screen.findByText(/dora: rejected/);
+    // Results stay visible even when no pending requests remain to show the section.
     const eve = await screen.findByText(/eve: not changed/);
     expect(eve.textContent).toBe("eve: not changed (bad_state)");
     expect(eve.innerHTML).not.toContain("&lt;span");

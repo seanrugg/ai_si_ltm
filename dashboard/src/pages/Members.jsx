@@ -346,6 +346,20 @@ export default function Members() {
       <ErrorNote error={error} onRetry={reload} />
       {data && (
         <>
+          {bulkResults && (
+            <div className="mb-6 text-sm" role="status">
+              <p className="mb-1 font-bold text-paper-muted">Results</p>
+              <ul>
+                {bulkResults.rows.map((r) => (
+                  <li key={r.id}>
+                    {r.name}: {r.ok
+                      ? (bulkResults.action === "approve" ? "approved" : "rejected")
+                      : <>not changed (<span className="font-mono">{r.error}</span>)</>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {pending.length > 0 && (
             <section className="mb-8" aria-labelledby="pending-h">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -410,20 +424,6 @@ export default function Members() {
                     <button className="btn h-11" type="button" onClick={cancelBulk}>Cancel</button>
                   </div>
                   {bulkError && <ErrorNote error={bulkError} />}
-                </div>
-              )}
-              {bulkResults && (
-                <div className="mt-3 text-sm" role="status">
-                  <p className="mb-1 font-bold text-paper-muted">Results</p>
-                  <ul>
-                    {bulkResults.rows.map((r) => (
-                      <li key={r.id}>
-                        {r.name}: {r.ok
-                          ? (bulkResults.action === "approve" ? "approved" : "rejected")
-                          : <>not changed (<span className="font-mono">{r.error}</span>)</>}
-                      </li>
-                    ))}
-                  </ul>
                 </div>
               )}
             </section>
