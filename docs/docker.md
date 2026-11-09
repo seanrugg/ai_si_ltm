@@ -131,6 +131,7 @@ editing `.env`. `LTMS_PUBLIC_BASE_URL` must match the public host, because
 
 - All configuration comes from `.env`; no secrets or site values are baked
   into the image (AGENTS.md rule 10).
+- Scale and volume tests run on a disposable stack: see [testing-at-scale.md](testing-at-scale.md).
 
 ## Upgrades and migrations
 
