@@ -74,7 +74,7 @@ export function RecordDetail({ record }) {
         <h3 className="mb-2 text-sm font-bold text-paper-muted">Payload</h3>
         {record.payload_purged ? (
           <p className="text-sm text-paper-muted">
-            Purged by retention. The header and its payload_hash are kept, so the chain still verifies.
+            Payload purged. The header and its payload_hash are kept, so the chain still verifies.
           </p>
         ) : (
           <pre className="max-h-80 overflow-auto rounded-md bg-ink p-3 font-mono text-xs leading-relaxed">
