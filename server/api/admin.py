@@ -13,7 +13,8 @@ from sqlalchemy import func, Integer, literal, or_, select
 from ltms_contract import RECORD_TYPES
 
 from server.api.deps import ADMIN_COOKIE, AdminAuth, client_ip, current_admin, transaction
-from server.api.schemas import (AdminLogin, ApproveRequest, InviteCreate, McpSettingsUpdate,
+from server.api.schemas import (AdminLogin, ApproveRequest, BulkMembersRequest,
+                                EnrollmentPolicyUpdate, InviteCreate, McpSettingsUpdate,
                                 McpTokenCreate, PermissionsRequest, ReasonRequest, SwarmMode)
 from server.models import (AuditLog, EnrollmentSwarmRequest, Member, McpToken, Record, RecordPayload,
                            RecordProvenance, RuntimeSetting, Swarm, SwarmMember)
@@ -128,6 +129,28 @@ async def set_permissions(member_id: str, body: PermissionsRequest, request: Req
         m = await enrollment.set_permissions(session, _uuid(member_id), admin=admin.username,
                                              permissions=body.permissions, scope=body.scope)
         return enrollment.member_to_dict(m)
+
+
+@router.post("/admin/members/bulk")
+async def bulk_members(request: Request, body: BulkMembersRequest, admin: AdminAuth = ADMIN) -> dict:
+    """Approve or reject several members at once, one try/except per id, one
+    commit at the end. Bulk approve grants each request's own requested
+    permissions and never widens them."""
+    if body.action not in ("approve", "reject"):
+        raise ServiceError(422, "bad_action", "action must be 'approve' or 'reject'")
+    results: list[dict] = []
+    async with transaction(request) as session:
+        for id_str in body.ids:
+            try:
+                member_id = _uuid(id_str)
+                if body.action == "approve":
+                    m = await enrollment.approve(session, member_id, admin=admin.username)
+                else:
+                    m = await enrollment.reject(session, member_id, admin=admin.username, reason=body.reason)
+                results.append({"id": id_str, "ok": True})
+            except ServiceError as exc:
+                results.append({"id": id_str, "error": exc.code})
+    return {"results": results}
 
 
 # --------------------------------------------------------------------------- #
@@ -810,6 +833,61 @@ async def delete_mcp_settings(request: Request, admin: AdminAuth = ADMIN) -> dic
         )
 
     return {"ok": True, "source": "environment"}
+
+
+# --------------------------------------------------------------------------- #
+# Enrollment policy (issue #129)
+# --------------------------------------------------------------------------- #
+@router.get("/admin/enrollment/policy")
+async def enrollment_policy_get(request: Request, admin: AdminAuth = ADMIN) -> dict:
+    """Effective enrollment policy, its source, the lock flag and the refusal
+    counter (N refused since <time>)."""
+    cfg = request.app.state.config
+    async with transaction(request) as session:
+        effective = await runtime_settings.resolve_enrollment_policy(session, cfg)
+        row = await runtime_settings.get_setting(session, runtime_settings.ENROLLMENT_POLICY_KEY)
+    refusals = enrollment.refusal_counter()
+    return {
+        "policy": effective["policy"],
+        "source": effective["source"],
+        "locked": cfg.enrollment_policy_locked,
+        "updated_at": row.updated_at.isoformat() if row and row.updated_at else None,
+        "updated_by": row.updated_by if row else None,
+        "refusals": {
+            "count": refusals["count"],
+            "since": refusals["since"].isoformat() if refusals["since"] else None,
+        },
+    }
+
+
+@router.put("/admin/enrollment/policy")
+async def enrollment_policy_put(request: Request, body: EnrollmentPolicyUpdate, admin: AdminAuth = ADMIN) -> dict:
+    """Change the enrollment policy. Switching to auto_approve requires
+    ``confirm: "auto_approve"`` (422 confirm_required). When locked, 409 locked."""
+    cfg = request.app.state.config
+    if await runtime_settings.is_enrollment_policy_locked(cfg):
+        raise ServiceError(409, "locked", "enrollment policy is locked by the server environment")
+
+    policy = body.policy
+    if policy not in ("manual", "auto_deny", "auto_approve"):
+        raise ServiceError(422, "bad_policy", "policy must be 'manual', 'auto_deny' or 'auto_approve'")
+    if policy == "auto_approve" and body.confirm != "auto_approve":
+        raise ServiceError(422, "confirm_required",
+                           'switching to auto_approve requires confirm: "auto_approve"')
+
+    async with transaction(request) as session:
+        current = await runtime_settings.resolve_enrollment_policy(session, cfg)
+        await runtime_settings.set_setting(
+            session, runtime_settings.ENROLLMENT_POLICY_KEY,
+            {"policy": policy}, updated_by=f"admin:{admin.username}")
+        session.add(
+            AuditLog(actor=f"admin:{admin.username}", action="enrollment_policy_change",
+                     detail={"old": {"policy": current["policy"], "source": current["source"]},
+                             "new": {"policy": policy, "source": "dashboard"}})
+        )
+
+    return {"policy": policy, "source": "dashboard",
+            "locked": cfg.enrollment_policy_locked}
 
 
 @router.post("/admin/mcp/tokens")

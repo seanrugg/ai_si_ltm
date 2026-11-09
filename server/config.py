@@ -148,6 +148,30 @@ class ServerConfig(BaseSettings):
     # who want config-as-code. Env: LTMS_MCP_SETTINGS_LOCKED.
     mcp_settings_locked: bool = False
 
+    # Enrollment request policy (issue #129):
+    #   manual      - requests wait for an admin (default).
+    #   auto_deny   - new requests are refused at once (403 enrollment_closed),
+    #                 except a valid invite for an invite-mode swarm.
+    #   auto_approve- free-agent requests are approved at once with recall only.
+    # Env: LTMS_ENROLLMENT_POLICY.
+    enrollment_policy: str = "manual"
+
+    @field_validator("enrollment_policy")
+    @classmethod
+    def _check_enrollment_policy(cls, v: str) -> str:
+        if v not in ("manual", "auto_deny", "auto_approve"):
+            raise ValueError("enrollment_policy must be 'manual', 'auto_deny' or 'auto_approve'")
+        return v
+
+    # When true, the environment (LTMS_ENROLLMENT_POLICY) is authoritative: the
+    # dashboard-stored value is ignored, writes return 409 locked. Env:
+    # LTMS_ENROLLMENT_POLICY_LOCKED.
+    enrollment_policy_locked: bool = False
+
+    # Pending enrollment requests older than this many days are expired by the
+    # hourly scheduler job. Env: LTMS_PENDING_ENROLLMENT_TTL_DAYS.
+    pending_enrollment_ttl_days: int = 14
+
     @property
     def resolved_database_url(self) -> str:
         if self.database_url:

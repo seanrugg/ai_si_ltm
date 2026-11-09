@@ -6,7 +6,7 @@ import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from server.services import lrs, retention
+from server.services import enrollment, lrs, retention
 
 log = logging.getLogger("ltms.tasks")
 
@@ -36,5 +36,12 @@ def start_scheduler(app) -> AsyncIOScheduler:
         sched.add_job(run, "interval", seconds=cfg.lrs_forward_seconds,
                       args=("lrs_forward", lrs.forward_once, cfg, http))
         app.state.lrs_forward_http = http
+    # Hourly maintenance: aggregate auto_denied refusions into one audit row,
+    # and expire pending enrollments older than the TTL.
+    sched.add_job(run, "interval", hours=1,
+                  args=("enroll_auto_denied", enrollment.enroll_auto_denied))
+    sched.add_job(run, "interval", hours=1,
+                  args=("enroll_expire_pending", enrollment.enroll_expire_pending,
+                        cfg.pending_enrollment_ttl_days))
     sched.start()
     return sched

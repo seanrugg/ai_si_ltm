@@ -11,6 +11,7 @@ from server.api.deps import client_ip, transaction
 from server.api.schemas import ChallengeRequest, EnrollRequest, TokenRequest
 from server.services import auth as auth_service
 from server.services import enrollment
+from server.services import runtime_settings
 from server.services.errors import ServiceError
 
 router = APIRouter(prefix="/api/auth", tags=["public"])
@@ -28,6 +29,7 @@ async def enroll(body: EnrollRequest, request: Request) -> dict:
     _limit(request, "enroll")
     cfg = request.app.state.config
     async with transaction(request) as session:
+        effective = await runtime_settings.resolve_enrollment_policy(session, cfg)
         member = await enrollment.request_enrollment(
             session,
             name=body.name,
@@ -40,6 +42,7 @@ async def enroll(body: EnrollRequest, request: Request) -> dict:
             max_pending=cfg.max_pending_enrollments,
             swarm=body.swarm,
             invite=body.invite,
+            enrollment_policy=effective["policy"],
         )
         return {"id": str(member.id), "name": member.name, "status": member.status}
 
