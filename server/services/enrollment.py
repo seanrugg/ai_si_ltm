@@ -177,7 +177,7 @@ async def request_enrollment(
             _record_refusal(now)
             raise ServiceError(403, "enrollment_closed", "enrollment is closed")
         swarm_row = await swarms.get_swarm(session, swarm)  # 404 no_swarm propagates
-        if swarm_row.enrollment_mode != "invite":
+        if swarm_row.status != "active" or swarm_row.enrollment_mode != "invite":
             _record_refusal(now)
             raise ServiceError(403, "enrollment_closed", "enrollment is closed")
         auto = True

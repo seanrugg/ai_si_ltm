@@ -157,6 +157,14 @@ def test_auto_deny_invite_swarm_still_succeeds(db_url):
         assert r.json()["status"] == "active"
         assert _member_row(app, http, "invited-one") is not None
 
+        # A revoked swarm's invite no longer opens a closed instance.
+        second = admin.post("/api/admin/swarms/deny-swarm/invites", json={"uses": 1}).json()["code"]
+        assert admin.post("/api/admin/swarms/deny-swarm/revoke", json={}).status_code == 200
+        r = _enroll(http, "invited-after-revoke", swarm="deny-swarm", invite=second)
+        assert r.status_code == 403
+        assert r.json()["error"]["code"] == "enrollment_closed"
+        assert _member_row(app, http, "invited-after-revoke") is None
+
 
 def test_auto_deny_bad_invite_still_403(db_url):
     app = _make_app(db_url, enrollment_policy="auto_deny")

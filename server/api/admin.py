@@ -144,9 +144,9 @@ async def bulk_members(request: Request, body: BulkMembersRequest, admin: AdminA
             try:
                 member_id = _uuid(id_str)
                 if body.action == "approve":
-                    m = await enrollment.approve(session, member_id, admin=admin.username)
+                    await enrollment.approve(session, member_id, admin=admin.username)
                 else:
-                    m = await enrollment.reject(session, member_id, admin=admin.username, reason=body.reason)
+                    await enrollment.reject(session, member_id, admin=admin.username, reason=body.reason)
                 results.append({"id": id_str, "ok": True})
             except ServiceError as exc:
                 results.append({"id": id_str, "error": exc.code})
