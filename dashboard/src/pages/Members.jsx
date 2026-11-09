@@ -82,7 +82,7 @@ function PermissionEditor({ initial, initialScope, onSave, saveLabel, onCancel, 
   );
 }
 
-function PendingCard({ m, onDone }) {
+function PendingCard({ m, selected, onToggle, onDone }) {
   const [mode, setMode] = useState(null); // null | "approve" | "reject"
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -103,10 +103,18 @@ function PendingCard({ m, onDone }) {
   return (
     <li className="panel p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <p>
-          <span className="text-lg font-bold">{m.name}</span>
-          <span className="ml-2 text-sm text-paper-muted">{m.kind}{m.operator ? `, run by ${m.operator}` : ""}</span>
-        </p>
+        <div className="flex items-start gap-2">
+          <label className="flex items-center gap-1.5 cursor-pointer self-start">
+            <input type="checkbox" checked={selected} onChange={() => onToggle(m.id)}
+                   className="accent-led mt-0.5 h-5 w-5" aria-label={`Select ${m.name}`} />
+          </label>
+          <div>
+            <p>
+              <span className="text-lg font-bold">{m.name}</span>
+              <span className="ml-2 text-sm text-paper-muted">{m.kind}{m.operator ? `, run by ${m.operator}` : ""}</span>
+            </p>
+          </div>
+        </div>
         <span className="text-xs text-paper-muted" title={localTime(m.created_at)}>
           asked {relativeTime(m.created_at)}
         </span>
@@ -234,6 +242,12 @@ export default function Members() {
   const { data: swarmsData } = useApi("/admin/swarms");
   const [showPast, setShowPast] = useState(false);
   const [params, setParams] = useSearchParams();
+  const [selected, setSelected] = useState(new Set());
+  const [bulkMode, setBulkMode] = useState(null); // null | "approve" | "reject"
+  const [rejectReason, setRejectReason] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkError, setBulkError] = useState(null);
+  const [bulkResults, setBulkResults] = useState(null);
 
   const members = data?.members || [];
   const swarmOf = new Map();
@@ -244,6 +258,9 @@ export default function Members() {
   const active = members.filter((m) => m.status === "active");
   const past = members.filter((m) => m.status === "revoked" || m.status === "rejected");
   const freeAgents = active.filter((m) => !swarmOf.has(m.name));
+  const pendingById = new Map(pending.map((m) => [m.id, m]));
+  // Only ids still pending count: a card approved on its own drops out.
+  const selectedIds = [...selected].filter((id) => pendingById.has(id));
 
   const show = params.get("show") || "all";
   const list = filterMembers(active, swarmOf, show);
@@ -280,6 +297,48 @@ export default function Members() {
     setParams({ show: value });
   }
 
+  function toggleSelection(id) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    const all = pending.length > 0 && pending.every((m) => selected.has(m.id));
+    setSelected(all ? new Set() : new Set(pending.map((m) => m.id)));
+  }
+
+  function cancelBulk() {
+    setBulkMode(null);
+    setBulkError(null);
+    setRejectReason("");
+  }
+
+  async function doBulk() {
+    setBulkError(null);
+    const ids = selectedIds;
+    // Names captured now: after the reload these members are no longer pending.
+    const names = new Map(ids.map((id) => [id, pendingById.get(id)?.name ?? id]));
+    setBulkBusy(true);
+    try {
+      const { results } = await api("/admin/members/bulk", {
+        method: "POST",
+        body: { action: bulkMode, ids, reason: bulkMode === "reject" ? (rejectReason.trim() || null) : null },
+      });
+      setBulkResults({ action: bulkMode, rows: results.map((r) => ({ ...r, name: names.get(r.id) })) });
+      setSelected(new Set());
+      setBulkMode(null);
+      setRejectReason("");
+      reload();
+    } catch (err) {
+      setBulkError(err);
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   return (
     <>
       <PageHeader title="Members" />
@@ -287,12 +346,86 @@ export default function Members() {
       <ErrorNote error={error} onRetry={reload} />
       {data && (
         <>
+          {bulkResults && (
+            <div className="mb-6 text-sm" role="status">
+              <p className="mb-1 font-bold text-paper-muted">Results</p>
+              <ul>
+                {bulkResults.rows.map((r) => (
+                  <li key={r.id}>
+                    {r.name}: {r.ok
+                      ? (bulkResults.action === "approve" ? "approved" : "rejected")
+                      : <>not changed (<span className="font-mono">{r.error}</span>)</>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {pending.length > 0 && (
             <section className="mb-8" aria-labelledby="pending-h">
-              <h2 id="pending-h" className="mb-3 text-lg font-bold">Waiting for approval ({pending.length})</h2>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <h2 id="pending-h" className="mb-0 text-lg font-bold">Waiting for approval ({pending.length})</h2>
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                    <input type="checkbox"
+                           checked={selectedIds.length === pending.length && pending.length > 0}
+                           onChange={toggleAll} className="accent-led" />
+                    Select all
+                  </label>
+                  {bulkMode === null && selectedIds.length > 0 && (
+                    <>
+                      <button className="btn btn-primary" onClick={() => setBulkMode("approve")}>
+                        Approve selected ({selectedIds.length})
+                      </button>
+                      <button className="btn btn-danger" onClick={() => setBulkMode("reject")}>
+                        Reject selected ({selectedIds.length})
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
               <ul className="grid gap-3 xl:grid-cols-2">
-                {pending.map((m) => <PendingCard key={m.id} m={m} onDone={reload} />)}
+                {pending.map((m) => <PendingCard key={m.id} m={m} selected={selected.has(m.id)}
+                  onToggle={toggleSelection} onDone={reload} />)}
               </ul>
+              {bulkMode && (
+                <div className="mt-4 rounded-md border border-ink-line bg-ink p-4" role="group"
+                     aria-labelledby="bulk-confirm-h">
+                  <p id="bulk-confirm-h" className="mb-2 text-sm font-bold">
+                    {bulkMode === "approve"
+                      ? "Approve these members? Each gets exactly the permissions it asked for."
+                      : "Reject these members?"}
+                  </p>
+                  <p className="mb-2 text-xs text-paper-muted">Check each fingerprint against the device&apos;s key file.</p>
+                  <ul className="mb-3 text-sm space-y-1">
+                    {selectedIds.map((id) => {
+                      const m = pendingById.get(id);
+                      return (
+                        <li key={id} className="flex flex-wrap items-center gap-2">
+                          <span className="font-bold">{m.name}</span>
+                          <HashStrip hash={m.public_key} label={m.public_key.slice(0, 16)} />
+                          <span className="text-xs text-paper-muted">asks for {m.requested_permissions?.join(", ") || "nothing"}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {bulkMode === "reject" && (
+                    <div className="mb-3">
+                      <label htmlFor="bulk-reason" className="block text-sm text-paper-muted mb-1">Reason (optional)</label>
+                      <input id="bulk-reason" className="field h-11 w-full" value={rejectReason} maxLength={500}
+                             onChange={(e) => setRejectReason(e.target.value)}
+                             placeholder="Why are you rejecting these requests?" />
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <button className={`btn ${bulkMode === "approve" ? "btn-primary" : "btn-danger"} h-11`}
+                            disabled={bulkBusy} onClick={doBulk}>
+                      {bulkMode === "approve" ? "Approve" : "Reject"} ({selectedIds.length})
+                    </button>
+                    <button className="btn h-11" type="button" onClick={cancelBulk}>Cancel</button>
+                  </div>
+                  {bulkError && <ErrorNote error={bulkError} />}
+                </div>
+              )}
             </section>
           )}
           <section aria-labelledby="active-h">
