@@ -56,6 +56,31 @@ def _validate_scope(scope: dict | None) -> dict | None:
 
 INVITE_PREFIX = "ltms_inv_"
 
+# In-memory refusal counter for auto_deny requests (one uvicorn worker, so a
+# module-level counter is fine). Count plus a since-timestamp; exposed on the
+# policy GET and aggregated into one hourly audit row by the scheduler.
+_ENROLL_REFUSALS = {"count": 0, "since": None}
+
+
+def _record_refusal(now) -> None:
+    if _ENROLL_REFUSALS["count"] == 0:
+        _ENROLL_REFUSALS["since"] = now
+    _ENROLL_REFUSALS["count"] += 1
+
+
+def refusal_counter() -> dict:
+    """Snapshot of the in-memory refusal counter (count + since)."""
+    return {"count": _ENROLL_REFUSALS["count"], "since": _ENROLL_REFUSALS["since"]}
+
+
+def take_refusals() -> tuple:
+    """Read and reset the refusal counter: (count, since)."""
+    count = _ENROLL_REFUSALS["count"]
+    since = _ENROLL_REFUSALS["since"]
+    _ENROLL_REFUSALS["count"] = 0
+    _ENROLL_REFUSALS["since"] = None
+    return count, since
+
 
 def _invite_hash(code: str) -> str:
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
@@ -122,6 +147,7 @@ async def request_enrollment(
     max_pending: int,
     swarm: str | None = None,
     invite: str | None = None,
+    enrollment_policy: str = "manual",
 ) -> Member:
     if not NAME_RE.match(name or ""):
         raise ServiceError(422, "bad_name", "name must match ^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -136,23 +162,67 @@ async def request_enrollment(
         raise ServiceError(422, "bad_public_key", "public_key must be 64 hex chars (Ed25519)") from None
     requested = _validate_permissions(permissions)
 
+    now = datetime.now(timezone.utc)
+    swarm_row = None
+
+    # --- Enrollment policy: applied after validation and before the
+    # --- existing-member lookup, so a closed instance doesn't reveal which
+    # --- names or keys exist.
+    auto = False
+    if enrollment_policy == "auto_deny":
+        if invite is None:
+            _record_refusal(now)
+            raise ServiceError(403, "enrollment_closed", "enrollment is closed")
+        if swarm is None:
+            _record_refusal(now)
+            raise ServiceError(403, "enrollment_closed", "enrollment is closed")
+        swarm_row = await swarms.get_swarm(session, swarm)  # 404 no_swarm propagates
+        if swarm_row.status != "active" or swarm_row.enrollment_mode != "invite":
+            _record_refusal(now)
+            raise ServiceError(403, "enrollment_closed", "enrollment is closed")
+        auto = True
+    elif enrollment_policy == "auto_approve":
+        if swarm is None:
+            # Free agent: approve at once with recall only, whatever was asked.
+            # Flood guard: at most 20 policy auto-approvals per hour,
+            # instance-wide; above that the request degrades to pending.
+            since = now - timedelta(hours=1)
+            count = await session.scalar(
+                select(func.count()).select_from(AuditLog).where(
+                    AuditLog.action == "enroll_auto_policy", AuditLog.ts >= since))
+            if count < 20:
+                existing = await session.scalar(select(Member).where(
+                    or_(Member.name == name, Member.public_key == pk)))
+                if existing is not None:
+                    raise ServiceError(409, "already_exists", "a member with this name or key already exists")
+                member = Member(
+                    name=name, kind=kind, public_key=pk, operator=operator, note=note,
+                    requested_permissions=requested, permissions=["recall"],
+                    status="active", request_ip=remote_ip, enrolled_at=now,
+                )
+                session.add(member)
+                await session.flush()
+                session.add(AuditLog(member_id=member.id, actor=name, action="enroll_auto_policy",
+                                     detail={"kind": kind, "requested": requested, "granted": ["recall"],
+                                             "swarm": None, "ip": remote_ip}))
+                return member
+            # flood exceeded: fall through to the pending path below
+        # names a swarm: that swarm's own mode applies (approval stays pending)
+
     existing = await session.scalar(select(Member).where(or_(Member.name == name, Member.public_key == pk)))
     if existing is not None:
         raise ServiceError(409, "already_exists", "a member with this name or key already exists")
 
-    swarm_row = None
-    if swarm is not None:
-        # Resolve before creating the member; let get_swarm's 404 no_swarm propagate.
+    if swarm_row is None and swarm is not None:
+        # Resolve now (manual, auto_approve naming a swarm, or auto_deny with
+        # an invite already resolved above).
         swarm_row = await swarms.get_swarm(session, swarm)
         if swarm_row.status != "active":
             raise ServiceError(422, "bad_swarm", "swarm is not active")
 
-    # Free agents (no swarm) always use approval. A swarm's enrollment_mode
-    # decides: approval = pending as today; invite/open make the member
-    # active at once ("enroll_auto", audited with the mode).
     mode = swarm_row.enrollment_mode if swarm_row is not None else "approval"
-    auto = mode in ("invite", "open")
-    now = datetime.now(timezone.utc)
+    if not auto:
+        auto = mode in ("invite", "open")
 
     granted = list(requested)
     if auto:
@@ -319,3 +389,32 @@ def member_to_dict(m: Member) -> dict:
         "last_seen_at": m.last_seen_at.isoformat() if m.last_seen_at else None,
         "created_at": m.created_at.isoformat() if m.created_at else None,
     }
+
+
+async def enroll_auto_denied(session: AsyncSession) -> dict:
+    """Hourly scheduler job: write one aggregated audit row for the auto_denied
+    refusals since the last run, then reset the in-memory counter. Only writes
+    when the count is > 0; no per-request audit rows are written in the request
+    path.
+    """
+    count, since = take_refusals()
+    if count > 0:
+        session.add(AuditLog(actor="scheduler", action="enroll_auto_denied",
+                             detail={"count": count,
+                                     "since": since.isoformat() if since else None}))
+    return {"enroll_auto_denied": count}
+
+
+async def enroll_expire_pending(session: AsyncSession, ttl_days: int) -> dict:
+    """Hourly scheduler job: reject pending members older than ``ttl_days`` with
+    reason ``expired``, using ``enrollment.reject`` so the audit row matches a
+    manual reject.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=ttl_days)
+    result = await session.scalars(
+        select(Member).where(Member.status == "pending", Member.created_at < cutoff))
+    rejected = 0
+    for member in result.all():
+        await reject(session, member.id, admin="scheduler", reason="expired")
+        rejected += 1
+    return {"enroll_expire_pending": rejected}

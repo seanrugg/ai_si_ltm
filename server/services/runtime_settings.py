@@ -22,11 +22,13 @@ from server.models import RuntimeSetting
 from server.models.base import utcnow
 
 MCP_ACCESS_KEY = "mcp_access"
+ENROLLMENT_POLICY_KEY = "enrollment_policy"
 
 # Defaults mirror the config defaults so a fresh install behaves identically
 # whether or not a row exists.
 DEFAULT_MODE = "off"
 DEFAULT_OPEN_SCOPE = {"types": [], "swarms": None}
+DEFAULT_ENROLLMENT_POLICY = "manual"
 
 
 def _default_mcp_access() -> dict[str, Any]:
@@ -97,3 +99,40 @@ async def resolve_mcp_access(
 async def is_locked(cfg: ServerConfig) -> bool:
     """True when ``LTMS_MCP_SETTINGS_LOCKED`` makes the environment authoritative."""
     return bool(cfg.mcp_settings_locked)
+
+
+def _default_enrollment_policy() -> dict[str, Any]:
+    return {"policy": DEFAULT_ENROLLMENT_POLICY}
+
+
+def _env_enrollment_policy(cfg: ServerConfig) -> dict[str, Any]:
+    """The environment-provided enrollment policy (the default source)."""
+    return {"policy": cfg.enrollment_policy}
+
+
+async def resolve_enrollment_policy(
+    session: AsyncSession, cfg: ServerConfig
+) -> dict[str, Any]:
+    """The effective enrollment policy for this request.
+
+    Returns a dict with ``policy`` and ``source``: ``"dashboard"`` when a DB row
+    for ``enrollment_policy`` exists and the server is not locked, otherwise
+    ``"environment"``. The DB row wins when present and unlocked; the
+    environment is the default and is authoritative when locked. Reads the DB on
+    every call (no cache).
+    """
+    if await is_enrollment_policy_locked(cfg):
+        return {**_env_enrollment_policy(cfg), "source": "environment"}
+    row = await get_setting(session, ENROLLMENT_POLICY_KEY)
+    if row is not None:
+        value = dict(row.value or {})
+        return {
+            "policy": value.get("policy", _env_enrollment_policy(cfg)["policy"]),
+            "source": "dashboard",
+        }
+    return {**_env_enrollment_policy(cfg), "source": "environment"}
+
+
+async def is_enrollment_policy_locked(cfg: ServerConfig) -> bool:
+    """True when ``LTMS_ENROLLMENT_POLICY_LOCKED`` makes the environment authoritative."""
+    return bool(cfg.enrollment_policy_locked)

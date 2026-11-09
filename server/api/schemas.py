@@ -74,3 +74,14 @@ class McpSettingsUpdate(BaseModel):
     mode: str  # "off", "token" or "open"
     open_scope: dict | None = None
     confirm: str | None = None
+
+
+class EnrollmentPolicyUpdate(BaseModel):
+    policy: str  # "manual", "auto_deny" or "auto_approve"
+    confirm: str | None = None
+
+
+class BulkMembersRequest(BaseModel):
+    action: str  # "approve" or "reject"
+    ids: list[str] = Field(..., max_length=100)
+    reason: str | None = Field(None, max_length=500)
