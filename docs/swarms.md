@@ -17,7 +17,7 @@ member can claim one.
 |---|---|---|
 | Each member's key | on that member (UNO Q, the hub host, Pi Zero, …) | signing its own records, logging in |
 | `hub-host`'s key | on the hub host | the hub's own records, and logging in to relay |
-| **Swarm root key** | **offline, with you** (USB stick or password manager, plus a backup) | appointing the hub. Its fingerprint is the swarm ID |
+| **Swarm root key** | **offline, with you** (password manager or USB stick, plus a backup). Made in the dashboard or with `scripts/swarm_key.py` | appointing the hub. Its fingerprint is the swarm ID |
 
 The root key never goes on the hub host or the server. Replacing the hub host
 doesn't change the swarm: appoint the new hub, and the old one loses relay
@@ -35,6 +35,28 @@ Roles don't grant anything except the hub's `relay`. Permissions are still set
 per member when you approve it, and only permissions are enforced.
 
 ## Setting up echo-base
+
+### In the dashboard (any machine)
+
+1. **Swarms → Create a swarm:** enter the name, tick "home swarm" if it is one,
+   then **Generate root key**. The browser makes the key and sends only the
+   public key. The key is shown **once**, as
+   `ltms-swarm-key-v1:<base64url seed>:<8-hex checksum>`: copy it into your
+   password manager or download the `.txt`, then tick "I've saved the key".
+   LTMS never stores it and can't show it again.
+2. **Add members** on the swarm's card.
+3. **Appoint hub:** choose the hub from the swarm's members, paste the root key
+   (the dashboard string or the CLI's JSON key file both work) and **Sign and
+   appoint**. The browser checks the key belongs to this swarm, signs the
+   appointment, and sends only the statement and signature. The key field is
+   cleared straight away.
+
+The dashboard is served with a strict Content-Security-Policy (only its own
+bundled scripts run) because root keys pass through it. Keys made in the
+browser and with the CLI are interchangeable; `server/tests/test_swarm_key_vectors.py`
+and `dashboard/src/lib/swarmKey.test.js` pin the exact bytes both produce.
+
+### With the command line
 
 On the **Mac** (keep the key file on the USB stick):
 

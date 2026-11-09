@@ -1,36 +1,146 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import { plural } from "../lib/format.js";
+import { generateRootKey, signAppointment, SwarmKeyError } from "../lib/swarmKey.js";
 import { EmptyState, ErrorNote, Loading, PageHeader, StatusBadge } from "../components/ui.jsx";
 
 const ROLES = ["member", "observer"];
 
+// The one-time panel for a new root key. It traps focus and can't be dismissed
+// until the admin confirms the key is saved; then the key string is dropped.
+export function KeyOnceDialog({ swarmName, swarmId, keyString, onDone }) {
+  const ref = useRef(null);
+  const [saved, setSaved] = useState(false);
+  const [copyStatus, setCopyStatus] = useState("");
+
+  useEffect(() => {
+    const node = ref.current;
+    node?.querySelector("[data-autofocus]")?.focus();
+    function onKey(e) {
+      if (e.key === "Escape") {
+        e.preventDefault(); // closing needs the confirmation
+        return;
+      }
+      if (e.key !== "Tab" || !node) return;
+      const items = [...node.querySelectorAll("button:not([disabled]), input:not([disabled]), [tabindex='0']")];
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+    function onUnload(e) {
+      e.preventDefault();
+      e.returnValue = ""; // the key can't be shown again
+    }
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("beforeunload", onUnload);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("beforeunload", onUnload);
+    };
+  }, []);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(keyString);
+      setCopyStatus("Copied to the clipboard.");
+    } catch {
+      setCopyStatus("Copy didn't work in this browser. Select the key and copy it by hand.");
+    }
+  }
+
+  function download() {
+    const text = `${keyString}\n\nswarm: ${swarmName}\nswarm id: ${swarmId}\n` +
+      "This is the swarm's root key. Keep it offline or in a password manager.\n";
+    const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${swarmName}.swarm-key.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setCopyStatus(`Downloaded ${swarmName}.swarm-key.txt.`);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/80 p-4">
+      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby="key-once-h" aria-describedby="key-once-d"
+           className="panel w-full max-w-xl p-5">
+        <h2 id="key-once-h" className="mb-2 text-lg font-bold" tabIndex={-1} data-autofocus>
+          Root key for {swarmName}
+        </h2>
+        <p id="key-once-d" className="mb-3 text-sm text-paper-muted">
+          This is the swarm&apos;s root key. LTMS does not keep it and cannot show it again. Store it in your
+          password manager. Anyone with it can appoint this swarm&apos;s hub.
+        </p>
+        <p className="mb-3 break-all rounded-md border border-led/50 bg-ink p-3 font-mono text-sm select-all"
+           aria-label="Root key">
+          {keyString}
+        </p>
+        <div className="mb-2 flex flex-wrap gap-2">
+          <button type="button" className="btn btn-primary" onClick={copy}>Copy</button>
+          <button type="button" className="btn" onClick={download}>Download (.txt)</button>
+        </div>
+        <p className="mb-3 min-h-5 text-sm text-ok" role="status" aria-live="polite">{copyStatus}</p>
+        <label className="mb-3 flex items-center gap-2 text-sm cursor-pointer">
+          <input type="checkbox" className="accent-led" checked={saved} onChange={(e) => setSaved(e.target.checked)} />
+          I&apos;ve saved the key
+        </label>
+        <button type="button" className="btn" disabled={!saved} onClick={onDone}>Done</button>
+      </div>
+    </div>
+  );
+}
+
 function CreateSwarm({ onCreated }) {
+  const [mode, setMode] = useState("generate"); // "generate" | "existing"
   const [name, setName] = useState("");
   const [publicKey, setPublicKey] = useState("");
   const [description, setDescription] = useState("");
   const [home, setHome] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [shown, setShown] = useState(null); // {swarmName, swarmId, keyString}, while the one-time panel is open
 
-  async function create(e) {
+  function reset() {
+    setName("");
+    setPublicKey("");
+    setDescription("");
+    setHome(false);
+  }
+
+  async function register(pub) {
+    return api("/admin/swarms", {
+      method: "POST",
+      body: { name: name.trim(), public_key: pub, description: description.trim() || null, home },
+    });
+  }
+
+  async function submit(e) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      await api("/admin/swarms", {
-        method: "POST",
-        body: { name: name.trim(), public_key: publicKey.trim(), description: description.trim() || null, home },
-      });
-      setName("");
-      setPublicKey("");
-      setDescription("");
-      setHome(false);
-      onCreated();
+      if (mode === "generate") {
+        const key = generateRootKey();
+        const keyString = key.keyString;
+        key.seed.fill(0);
+        const created = await register(key.publicKey);
+        setShown({ swarmName: created.name, swarmId: created.id, keyString });
+      } else {
+        await register(publicKey.trim());
+        onCreated();
+      }
+      reset();
     } catch (err) {
-      setError(err);
+      setError(err); // a key generated for a failed registration is simply dropped
     } finally {
       setBusy(false);
     }
@@ -38,26 +148,129 @@ function CreateSwarm({ onCreated }) {
 
   return (
     <section className="mb-8" aria-labelledby="create-h">
-      <h2 id="create-h" className="mb-3 text-lg font-bold">Register a swarm</h2>
+      <h2 id="create-h" className="mb-3 text-lg font-bold">Create a swarm</h2>
       <p className="mb-3 text-sm text-paper-muted">
-        The swarm's root key stays offline with you. Here you only register its name and public
-        key (the fingerprint shown by `python -m scripts.swarm_key show`).
+        {mode === "generate"
+          ? "Your browser creates the swarm's root key and shows it to you once. Only its public key is sent to LTMS."
+          : "Register a swarm whose root key you made with the command line. Only its public key is sent."}
       </p>
-      <form onSubmit={create} className="mb-4 flex flex-wrap items-end gap-2" aria-label="Register swarm">
+      <form onSubmit={submit} className="mb-2 flex flex-wrap items-end gap-2" aria-label="Create swarm"
+            autoComplete="off">
         <input className="field w-40" value={name} onChange={(e) => setName(e.target.value)}
                placeholder="Swarm name (echo-base)" aria-label="Swarm name" required />
-        <input className="field w-64" value={publicKey} onChange={(e) => setPublicKey(e.target.value)}
-               placeholder="Root public key, 64 hex" aria-label="Public key" required />
+        {mode === "existing" && (
+          <input className="field w-64" value={publicKey} onChange={(e) => setPublicKey(e.target.value)}
+                 placeholder="Root public key, 64 hex" aria-label="Public key" required />
+        )}
         <input className="field w-64" value={description} onChange={(e) => setDescription(e.target.value)}
                placeholder="Description" aria-label="Description" />
         <label className="flex items-center gap-2 text-sm text-paper-muted cursor-pointer">
           <input type="checkbox" checked={home} onChange={(e) => setHome(e.target.checked)} className="accent-led" />
           Make this the home swarm (only one active home at a time)
         </label>
-        <button className="btn btn-primary" disabled={busy}>Register</button>
+        <button className="btn btn-primary" disabled={busy}>
+          {mode === "generate" ? "Generate root key" : "Register"}
+        </button>
       </form>
+      <button type="button" className="mb-2 text-sm text-paper-muted underline"
+              onClick={() => setMode(mode === "generate" ? "existing" : "generate")}>
+        {mode === "generate" ? "Already have a key? Register its public key" : "Generate a new key in the browser instead"}
+      </button>
       <ErrorNote error={error} />
+      {shown && (
+        <KeyOnceDialog {...shown} onDone={() => { setShown(null); onCreated(); }} />
+      )}
     </section>
+  );
+}
+
+// Sign a hub appointment in the browser with a pasted root key. Only
+// {statement, sig} is sent; the key input is cleared after submit or cancel.
+function AppointHub({ swarm, allMembers, busy, act }) {
+  const candidates = (swarm.members || [])
+    .filter((m) => m.role === "member")
+    .map((m) => allMembers.find((a) => a.name === m.name))
+    .filter(Boolean);
+  const currentHub = (swarm.members || []).find((m) => m.role === "hub");
+  const [hub, setHub] = useState("");
+  const [keyText, setKeyText] = useState("");
+  const [localError, setLocalError] = useState(null);
+  const [signedJson, setSignedJson] = useState("");
+
+  function clear() {
+    setKeyText("");
+    setLocalError(null);
+  }
+
+  async function sign(e) {
+    e.preventDefault();
+    setLocalError(null);
+    const member = candidates.find((m) => m.name === hub);
+    let body;
+    try {
+      body = signAppointment(keyText, { swarm, hub, hubKey: member?.public_key });
+    } catch (err) {
+      setKeyText("");
+      setLocalError(err instanceof SwarmKeyError ? err : new Error("Couldn't sign the appointment."));
+      return;
+    }
+    setKeyText("");
+    await act(() => api(`/admin/swarms/${encodeURIComponent(swarm.name)}/hub`, { method: "POST", body }));
+    setHub("");
+  }
+
+  return (
+    <div className="mb-4">
+      <h3 className="mb-2 text-sm font-bold text-paper-muted">Appoint hub</h3>
+      {currentHub && <p className="mb-2 text-xs text-paper-muted">Current hub: {currentHub.name}.</p>}
+      {candidates.length === 0 ? (
+        <p className="mb-2 text-xs text-paper-muted">
+          {currentHub
+            ? "To change the hub, add the new hub to this swarm as a member first."
+            : "Add a member to this swarm first; the hub is chosen from its members."}
+        </p>
+      ) : (
+        <form onSubmit={sign} className="mb-2 flex flex-wrap items-end gap-2" autoComplete="off"
+              aria-label={`Appoint hub for ${swarm.name}`}>
+          <label className="flex flex-col gap-1 text-xs text-paper-muted">
+            Hub
+            <select className="field" value={hub} onChange={(e) => setHub(e.target.value)} required>
+              <option value="">Choose a member</option>
+              {candidates.map((m) => <option key={m.name} value={m.name}>{m.name}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-paper-muted">
+            Root key (signed here; never sent)
+            <input className="field w-72 font-mono" type="password" name="swarm-root-key"
+                   autoComplete="new-password" spellCheck={false} data-1p-ignore data-lpignore="true"
+                   value={keyText} onChange={(e) => setKeyText(e.target.value)}
+                   placeholder="ltms-swarm-key-v1:…" required />
+          </label>
+          <button className="btn btn-primary" disabled={busy || !hub || !keyText}>Sign and appoint</button>
+          <button type="button" className="btn" onClick={clear} disabled={!keyText && !localError}>Cancel</button>
+        </form>
+      )}
+      {localError && <p className="mb-2 text-sm text-bad" role="alert">{localError.message}</p>}
+      <details className="text-xs text-paper-muted">
+        <summary className="cursor-pointer">Have an appointment signed with the command line?</summary>
+        <textarea className="field mt-2 w-full mb-2" value={signedJson} onChange={(e) => setSignedJson(e.target.value)}
+                  placeholder="Paste the JSON from python -m scripts.swarm_key appoint-hub" rows={4}
+                  aria-label="Signed hub appointment" />
+        <button className="btn" disabled={busy || !signedJson.trim()}
+                onClick={() => act(async () => {
+                  let body;
+                  try {
+                    body = JSON.parse(signedJson);
+                  } catch {
+                    throw new Error("That isn't valid JSON.");
+                  }
+                  await api(`/admin/swarms/${encodeURIComponent(swarm.name)}/hub`, { method: "POST", body });
+                  setSignedJson("");
+                })}>
+          Appoint hub
+        </button>
+      </details>
+    </div>
   );
 }
 
@@ -67,7 +280,6 @@ function SwarmCard({ swarm, allMembers, onReload }) {
   const eligible = allMembers.filter((m) => m.status === "active" && !members.some((s) => s.name === m.name));
   const [addName, setAddName] = useState("");
   const [addRole, setAddRole] = useState("member");
-  const [appt, setAppt] = useState("");
   const [confirmRevoke, setConfirmRevoke] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -93,12 +305,6 @@ function SwarmCard({ swarm, allMembers, onReload }) {
 
   async function removeMember(memberName) {
     return api(`/admin/swarms/members/${encodeURIComponent(memberName)}`, { method: "DELETE" });
-  }
-
-  async function appointHub() {
-    return api(`/admin/swarms/${encodeURIComponent(swarm.name)}/hub`, {
-      method: "POST", body: JSON.parse(appt),
-    });
   }
 
   async function revokeSwarm() {
@@ -155,17 +361,7 @@ function SwarmCard({ swarm, allMembers, onReload }) {
             <button className="btn btn-primary" disabled={busy || !addName}>Add</button>
           </form>
 
-          <div className="mb-4">
-            <h3 className="mb-2 text-sm font-bold text-paper-muted">Appoint hub</h3>
-            <p className="mb-2 text-xs text-paper-muted">
-              Paste the appointment signed by the swarm's root key (from `python -m scripts.swarm_key appoint-hub`).
-            </p>
-            <textarea className="field w-full mb-2" value={appt} onChange={(e) => setAppt(e.target.value)}
-                      placeholder="Paste the appointment JSON here" rows={4} aria-label="Hub appointment" />
-            <button className="btn" onClick={() => act(appointHub)} disabled={busy || !appt.trim()}>
-              Appoint hub
-            </button>
-          </div>
+          <AppointHub swarm={swarm} allMembers={allMembers} busy={busy} act={act} />
 
           <div className="rounded-md border border-bad/40 bg-bad/5 p-3">
             <h3 className="mb-2 text-sm font-bold text-paper-muted">Revoke swarm</h3>
@@ -201,9 +397,9 @@ export default function Swarms() {
       <PageHeader title="Swarms" />
       {swarms.length === 0 && (
         <EmptyState title="No swarms yet">
-          Register a swarm to start. Its root key is created offline with
-          <code className="hash">python -m scripts.swarm_key create</code> and a hub is appointed with a signed
-          <code className="hash">appoint-hub</code> statement.
+          Create a swarm to start. Your browser generates its root key and shows it once; keep it offline. A
+          hub is then appointed by signing with that key, here or with{" "}
+          <code className="hash">python -m scripts.swarm_key appoint-hub</code>.
         </EmptyState>
       )}
       <CreateSwarm onCreated={reload} />

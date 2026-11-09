@@ -70,3 +70,7 @@ def test_serves_built_dashboard_when_configured(config, tmp_path):
         assert page.headers["x-frame-options"] == "DENY"
         assert client.get("/api/health").json()["ok"] is True
         assert client.get("/api/admin/me").status_code == 401  # API still wins over static files
+        # Strict CSP on the dashboard (issue #122), not on the API.
+        csp = page.headers["content-security-policy"]
+        assert "script-src 'self'" in csp and "frame-ancestors 'none'" in csp and "unsafe" not in csp
+        assert "content-security-policy" not in client.get("/api/health").headers
