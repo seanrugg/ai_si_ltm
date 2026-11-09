@@ -19,6 +19,7 @@ import Timeline from "./pages/Timeline.jsx";
 import Activity from "./pages/Activity.jsx";
 import Lrs from "./pages/Lrs.jsx";
 import Access from "./pages/Access.jsx";
+import Retention from "./pages/Retention.jsx";
 
 const AdminContext = createContext(null);
 export const useAdmin = () => useContext(AdminContext);
@@ -82,6 +83,7 @@ const router = createHashRouter([
       { path: "/lessons", element: <Lessons /> },
       { path: "/audit-log", element: <RecallLog /> },
       { path: "/recall-log", element: <Navigate to="/audit-log" replace /> },
+      { path: "/retention", element: <Retention /> },
       { path: "/settings", element: <Settings /> },
       { path: "*", element: <Navigate to="/" replace /> },
     ],
