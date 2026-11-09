@@ -85,7 +85,7 @@ export default function RecallLog() {
         </button>
       </PageHeader>
       <p className="mb-4 max-w-prose text-sm text-paper-muted">
-        The admin audit log. Every action a member takes on the server — recalls, enrollment, revokes, retention
+        The admin audit log. Every action a member takes on the server — recalls, enrollment, revokes, data retention
         purges — is recorded here with who did it and when.
       </p>
 
