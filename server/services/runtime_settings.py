@@ -23,6 +23,7 @@ from server.models.base import utcnow
 
 MCP_ACCESS_KEY = "mcp_access"
 ENROLLMENT_POLICY_KEY = "enrollment_policy"
+RETENTION_KEY = "retention"
 
 # Defaults mirror the config defaults so a fresh install behaves identically
 # whether or not a row exists.
@@ -136,3 +137,38 @@ async def resolve_enrollment_policy(
 async def is_enrollment_policy_locked(cfg: ServerConfig) -> bool:
     """True when ``LTMS_ENROLLMENT_POLICY_LOCKED`` makes the environment authoritative."""
     return bool(cfg.enrollment_policy_locked)
+
+
+# ---- data retention (issue #155) ---------------------------------------------
+
+def _env_retention(cfg: ServerConfig) -> dict[str, Any]:
+    return {
+        "payload_rules": [r.model_dump() for r in cfg.retention_payload_rules],
+        "audit_days": cfg.retention_audit_days,
+    }
+
+
+def is_retention_locked(cfg: ServerConfig) -> bool:
+    """True when ``LTMS_RETENTION_LOCKED`` makes the environment authoritative."""
+    return bool(cfg.retention_locked)
+
+
+async def resolve_retention(session: AsyncSession, cfg: ServerConfig) -> dict[str, Any]:
+    """The effective data retention settings, read on every call (no cache).
+
+    ``payload_rules`` is a list of ``PayloadRule`` dicts; an empty list means no
+    payload ever expires. ``audit_days`` of None means the audit log is never
+    pruned. The dashboard row wins unless the server is locked.
+    """
+    env = _env_retention(cfg)
+    if is_retention_locked(cfg):
+        return {**env, "source": "environment"}
+    row = await get_setting(session, RETENTION_KEY)
+    if row is not None:
+        value = dict(row.value or {})
+        return {
+            "payload_rules": list(value.get("payload_rules", env["payload_rules"])),
+            "audit_days": value.get("audit_days", env["audit_days"]),
+            "source": "dashboard",
+        }
+    return {**env, "source": "environment"}

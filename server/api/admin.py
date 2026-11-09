@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, Query, Request, Response
+from pydantic import ValidationError
 from sqlalchemy import func, Integer, literal, or_, select
 
 from ltms_contract import RECORD_TYPES
@@ -15,11 +16,13 @@ from ltms_contract import RECORD_TYPES
 from server.api.deps import ADMIN_COOKIE, AdminAuth, client_ip, current_admin, transaction
 from server.api.schemas import (AdminLogin, ApproveRequest, BulkMembersRequest,
                                 EnrollmentPolicyUpdate, InviteCreate, McpSettingsUpdate,
-                                McpTokenCreate, PermissionsRequest, ReasonRequest, SwarmMode)
+                                McpTokenCreate, PermissionsRequest, ReasonRequest, RetentionUpdate,
+                                SwarmMode)
 from server.models import (AuditLog, EnrollmentSwarmRequest, Member, McpToken, Record, RecordPayload,
                            RecordProvenance, RuntimeSetting, Swarm, SwarmMember)
 from server.services import auth as auth_service
 from server.services import conversation as conversation_service, enrollment, integrity, lrs as lrs_service, mcp_access, policy_lifecycle, recall, runtime_settings, swarms
+from server.config import PayloadRule
 from server.services.errors import ServiceError
 
 router = APIRouter(prefix="/api", tags=["admin"])
@@ -888,6 +891,61 @@ async def enrollment_policy_put(request: Request, body: EnrollmentPolicyUpdate, 
 
     return {"policy": policy, "source": "dashboard",
             "locked": cfg.enrollment_policy_locked}
+
+
+MIN_AUDIT_DAYS = 30
+
+
+def _retention_out(effective: dict, row, cfg) -> dict:
+    return {
+        "payload_rules": effective["payload_rules"],
+        "audit_days": effective["audit_days"],
+        "source": effective["source"],
+        "locked": runtime_settings.is_retention_locked(cfg),
+        "updated_at": row.updated_at.isoformat() if row and row.updated_at else None,
+        "updated_by": row.updated_by if row else None,
+    }
+
+
+@router.get("/admin/retention")
+async def retention_get(request: Request, admin: AdminAuth = ADMIN) -> dict:
+    """Effective data retention settings, their source and the lock flag (issue #155)."""
+    cfg = request.app.state.config
+    async with transaction(request) as session:
+        effective = await runtime_settings.resolve_retention(session, cfg)
+        row = await runtime_settings.get_setting(session, runtime_settings.RETENTION_KEY)
+    return _retention_out(effective, row, cfg)
+
+
+@router.put("/admin/retention")
+async def retention_put(request: Request, body: RetentionUpdate, admin: AdminAuth = ADMIN) -> dict:
+    """Change data retention. Empty ``payload_rules`` keeps every payload;
+    ``audit_days: null`` keeps the audit log forever. Locked → 409."""
+    cfg = request.app.state.config
+    if runtime_settings.is_retention_locked(cfg):
+        raise ServiceError(409, "locked", "data retention is locked by the server environment")
+    rules = []
+    for i, raw in enumerate(body.payload_rules):
+        try:
+            rules.append(PayloadRule(**raw).model_dump())
+        except (ValidationError, TypeError) as exc:
+            msg = exc.errors()[0]["msg"] if isinstance(exc, ValidationError) else str(exc)
+            raise ServiceError(422, "bad_retention", f"rule {i + 1}: {msg}") from None
+    if body.audit_days is not None and body.audit_days < MIN_AUDIT_DAYS:
+        raise ServiceError(422, "bad_retention",
+                           f"audit_days must be null (keep forever) or at least {MIN_AUDIT_DAYS}")
+    new = {"payload_rules": rules, "audit_days": body.audit_days}
+    actor = f"admin:{admin.username}"
+    async with transaction(request) as session:
+        current = await runtime_settings.resolve_retention(session, cfg)
+        row = await runtime_settings.set_setting(session, runtime_settings.RETENTION_KEY, new, updated_by=actor)
+        session.add(AuditLog(actor=actor, action="retention_change", detail={
+            "old": {"payload_rules": current["payload_rules"], "audit_days": current["audit_days"],
+                    "source": current["source"]},
+            "new": {**new, "source": "dashboard"},
+        }))
+        effective = await runtime_settings.resolve_retention(session, cfg)
+    return _retention_out(effective, row, cfg)
 
 
 @router.post("/admin/mcp/tokens")
