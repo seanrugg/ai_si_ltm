@@ -5,17 +5,20 @@ No network: the LRS is stubbed with httpx.MockTransport.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 
 import httpx
 import pytest
 from cryptography.fernet import Fernet
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
+from ltms_contract.canonical import canonicalize
 from server.config import load_config
-from server.models import AuditLog, LrsEndpoint, Record
+from server.models import AuditLog, LrsEndpoint, Record, RecordPayload
 from server.services import lrs as lrs_service
 from server.tests.conftest import ADMIN_PASS, ADMIN_USER
+from server.xapi.translate import EXT
 
 
 @pytest.fixture
@@ -338,3 +341,37 @@ def test_one_run_catches_up_in_several_batches_up_to_the_cap(admin, mesh, http, 
     assert _forward(app, http, handler) == {"forwarded": 2}
     assert _forward(app, http, handler) == {"forwarded": 1}
     assert sizes == [2, 2, 1]
+
+
+def test_every_payload_and_the_signed_header_are_sent(admin, mesh, http, app, db_exec):
+    """Issue #150: anything LTMS receives, the LRS receives, and it can be re-verified."""
+    app.state.config.lrs_max_batches_per_run = 20  # fixture batch size is 2
+    _endpoint(admin, "lrs-all", scope={"types": ["thought", "decision", "communication"]})
+    z3 = mesh.member("z3-r0")
+    z3.append("thought", summary="maybe left", payload={"reasoning": "the left path is shorter"})
+    z3.append("decision", summary="go left", payload={"choice": "left", "confidence": 0.8})
+    z3.append("communication", summary="told the hub", payload={"text": "going left"})
+    z3.flush()
+    ids = _record_ids(db_exec)
+
+    async def purge_third(session):
+        await session.execute(delete(RecordPayload).where(RecordPayload.record_id == ids[2]))
+        await session.commit()
+    db_exec(purge_third)
+
+    sent = []
+    assert _forward(app, http, lambda req: sent.extend(json.loads(req.content)) or httpx.Response(200)) == {"forwarded": 3}
+    ext = [s["context"]["extensions"] for s in sent]
+    assert ext[0][EXT + "holocron/payload"] == {"reasoning": "the left path is shorter"}
+    assert ext[1][EXT + "holocron/payload"] == {"choice": "left", "confidence": 0.8}
+    # A purged payload is flagged and the statement is still sent.
+    assert ext[2][EXT + "holocron/payload-purged"] is True
+    assert EXT + "holocron/payload" not in ext[2]
+
+    for e in ext:
+        header = e[EXT + "holocron/header"]
+        assert isinstance(header, str)
+        assert hashlib.sha256(header.encode("utf-8")).hexdigest() == e[EXT + "holocron/hash"]
+        assert json.loads(header)["payload_hash"] == e[EXT + "holocron/payload-hash"]
+    for e in ext[:2]:
+        assert hashlib.sha256(canonicalize(e[EXT + "holocron/payload"])).hexdigest() == e[EXT + "holocron/payload-hash"]

@@ -401,11 +401,9 @@ async def _forward_endpoint(
         m.id: m.name for m in await session.scalars(select(Member).where(Member.id.in_(list(relay_ids))))
     } if relay_ids else {}
 
-    # Payloads only for perception records tagged telemetry; other payloads are
-    # never loaded and never sent.
-    telemetry_ids = {r.id for r in records
-                     if r.type == "perception" and "telemetry" in (r.tags or [])}
-    payloads = await fetch_payloads(session, [r for r in records if r.id in telemetry_ids])
+    # Every payload goes to the LRS (Sean, 9 Nov); the endpoint's scope still
+    # narrows which records are sent.
+    payloads = await fetch_payloads(session, records)
 
     statements = []
     for r in records:
@@ -417,10 +415,9 @@ async def _forward_endpoint(
         rec["relay"] = relay_names.get(prov.relay_member_id) if prov is not None and prov.relay_member_id is not None else None
         rec["agent_kind"] = member_by_id[r.member_id].kind
         rec["received_at"] = r.received_at.isoformat()
-        payload = None
-        if r.id in telemetry_ids:
-            row = payloads.get(r.id)
-            payload = json.loads(row.payload_raw) if row is not None else None
+        rec["header_raw"] = r.header_raw.decode("utf-8")
+        row = payloads.get(r.id)
+        payload = json.loads(row.payload_raw) if row is not None else None
         statements.append(record_to_statement(
             rec, base=cfg.public_base_url, xapi_version=endpoint.xapi_version, payload=payload))
 
