@@ -110,7 +110,7 @@ export default function Export() {
           </p>
         ) : (
           <a className="btn btn-primary inline-block" href={href} download>
-            Download {format === "jsonl" ? "JSONL" : "CSV"} file of {agent || "all members"}&apos;s records
+            Download {format === "jsonl" ? "JSONL" : "CSV"} file of records from {agent || "all members"}
           </a>
         )}
       </form>
