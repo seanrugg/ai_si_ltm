@@ -126,8 +126,24 @@ describe("pending bulk actions", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: /Select eve/i }));
     fireEvent.click(screen.getByText(/Approve selected \(2\)/));
     fireEvent.click(screen.getByText(/Approve \(2\)/));
-    await screen.findByText(/dora — approved/);
-    await screen.findByText(/eve — approved/);
+    await screen.findByText(/dora: approved/);
+    await screen.findByText(/eve: approved/);
     expect(screen.getByRole("checkbox", { name: /Select all/i }).checked).toBe(false);
+  });
+
+  it("reports a per-id failure as text, with the code, not as raw markup", async () => {
+    vi.mocked(api).mockResolvedValueOnce({ results: [{ id: "4", ok: true }, { id: "5", error: "bad_state" }] });
+    renderMembers();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Select all/i }));
+    fireEvent.click(screen.getByText(/Reject selected \(2\)/));
+    fireEvent.change(screen.getByLabelText(/Reason \(optional\)/), { target: { value: "unknown device" } });
+    fireEvent.click(screen.getByText(/Reject \(2\)/));
+    await screen.findByText(/dora: rejected/);
+    const eve = await screen.findByText(/eve: not changed/);
+    expect(eve.textContent).toBe("eve: not changed (bad_state)");
+    expect(eve.innerHTML).not.toContain("&lt;span");
+    expect(api).toHaveBeenLastCalledWith("/admin/members/bulk", expect.objectContaining({
+      body: expect.objectContaining({ action: "reject", reason: "unknown device" }),
+    }));
   });
 });

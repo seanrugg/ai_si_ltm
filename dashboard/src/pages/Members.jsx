@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, HashStrip, Loading, PageHeader, StatusBadge } from "../components/ui.jsx";
-import { localTime, plural, relativeTime, shortHash } from "../lib/format.js";
+import { localTime, plural, relativeTime } from "../lib/format.js";
 
 const PERMISSIONS = [
   { id: "contribute", help: "Write records under its own name" },
@@ -259,6 +259,8 @@ export default function Members() {
   const past = members.filter((m) => m.status === "revoked" || m.status === "rejected");
   const freeAgents = active.filter((m) => !swarmOf.has(m.name));
   const pendingById = new Map(pending.map((m) => [m.id, m]));
+  // Only ids still pending count: a card approved on its own drops out.
+  const selectedIds = [...selected].filter((id) => pendingById.has(id));
 
   const show = params.get("show") || "all";
   const list = filterMembers(active, swarmOf, show);
@@ -304,7 +306,7 @@ export default function Members() {
   }
 
   function toggleAll() {
-    const all = pending.length > 0 && [...pending].every((m) => selected.has(m.id));
+    const all = pending.length > 0 && pending.every((m) => selected.has(m.id));
     setSelected(all ? new Set() : new Set(pending.map((m) => m.id)));
   }
 
@@ -316,20 +318,22 @@ export default function Members() {
 
   async function doBulk() {
     setBulkError(null);
-    const ids = [...selected];
+    const ids = selectedIds;
+    // Names captured now: after the reload these members are no longer pending.
+    const names = new Map(ids.map((id) => [id, pendingById.get(id)?.name ?? id]));
     setBulkBusy(true);
     try {
       const { results } = await api("/admin/members/bulk", {
         method: "POST",
-        body: { action: bulkMode, ids, reason: bulkMode === "reject" ? (rejectReason || null) : null },
+        body: { action: bulkMode, ids, reason: bulkMode === "reject" ? (rejectReason.trim() || null) : null },
       });
-      setBulkResults(results);
+      setBulkResults({ action: bulkMode, rows: results.map((r) => ({ ...r, name: names.get(r.id) })) });
       setSelected(new Set());
       setBulkMode(null);
       setRejectReason("");
       reload();
     } catch (err) {
-      setBulkError(err.message);
+      setBulkError(err);
     } finally {
       setBulkBusy(false);
     }
@@ -349,17 +353,17 @@ export default function Members() {
                 <div className="flex flex-wrap items-center gap-2">
                   <label className="flex items-center gap-1.5 text-sm cursor-pointer">
                     <input type="checkbox"
-                           checked={selected.size === pending.length && selected.size > 0}
-                           onChange={toggleAll} />
+                           checked={selectedIds.length === pending.length && pending.length > 0}
+                           onChange={toggleAll} className="accent-led" />
                     Select all
                   </label>
-                  {bulkMode === null && selected.size > 0 && (
+                  {bulkMode === null && selectedIds.length > 0 && (
                     <>
                       <button className="btn btn-primary" onClick={() => setBulkMode("approve")}>
-                        Approve selected ({selected.size})
+                        Approve selected ({selectedIds.length})
                       </button>
                       <button className="btn btn-danger" onClick={() => setBulkMode("reject")}>
-                        Reject selected ({selected.size})
+                        Reject selected ({selectedIds.length})
                       </button>
                     </>
                   )}
@@ -370,27 +374,30 @@ export default function Members() {
                   onToggle={toggleSelection} onDone={reload} />)}
               </ul>
               {bulkMode && (
-                <div className="mt-4 rounded-md border border-ink-line bg-ink p-4">
-                  <p className="mb-2 text-sm font-bold">
-                    {bulkMode === "approve" ? "Approve these members?" : "Reject these members?"}
+                <div className="mt-4 rounded-md border border-ink-line bg-ink p-4" role="group"
+                     aria-labelledby="bulk-confirm-h">
+                  <p id="bulk-confirm-h" className="mb-2 text-sm font-bold">
+                    {bulkMode === "approve"
+                      ? "Approve these members? Each gets exactly the permissions it asked for."
+                      : "Reject these members?"}
                   </p>
+                  <p className="mb-2 text-xs text-paper-muted">Check each fingerprint against the device&apos;s key file.</p>
                   <ul className="mb-3 text-sm space-y-1">
-                    {[...selected].map((id) => {
+                    {selectedIds.map((id) => {
                       const m = pendingById.get(id);
                       return (
-                        <li key={id} className="flex gap-2">
-                          <span className="font-bold">{m?.name}</span>
-                          <span className="text-xs text-paper-muted font-mono" title={m?.public_key ?? ""}>
-                            {shortHash(m?.public_key ?? "")}
-                          </span>
+                        <li key={id} className="flex flex-wrap items-center gap-2">
+                          <span className="font-bold">{m.name}</span>
+                          <HashStrip hash={m.public_key} label={m.public_key.slice(0, 16)} />
+                          <span className="text-xs text-paper-muted">asks for {m.requested_permissions?.join(", ") || "nothing"}</span>
                         </li>
                       );
                     })}
                   </ul>
                   {bulkMode === "reject" && (
                     <div className="mb-3">
-                      <label className="block text-sm text-paper-muted mb-1">Reason (optional)</label>
-                      <input className="field h-11 w-full" value={rejectReason}
+                      <label htmlFor="bulk-reason" className="block text-sm text-paper-muted mb-1">Reason (optional)</label>
+                      <input id="bulk-reason" className="field h-11 w-full" value={rejectReason} maxLength={500}
                              onChange={(e) => setRejectReason(e.target.value)}
                              placeholder="Why are you rejecting these requests?" />
                     </div>
@@ -398,7 +405,7 @@ export default function Members() {
                   <div className="flex flex-wrap gap-2">
                     <button className={`btn ${bulkMode === "approve" ? "btn-primary" : "btn-danger"} h-11`}
                             disabled={bulkBusy} onClick={doBulk}>
-                      {bulkMode === "approve" ? "Approve" : "Reject"} ({selected.size})
+                      {bulkMode === "approve" ? "Approve" : "Reject"} ({selectedIds.length})
                     </button>
                     <button className="btn h-11" type="button" onClick={cancelBulk}>Cancel</button>
                   </div>
@@ -406,17 +413,17 @@ export default function Members() {
                 </div>
               )}
               {bulkResults && (
-                <div className="mt-3 text-sm">
-                  <p className="mb-1 text-paper-muted font-bold">Results:</p>
-                  {bulkResults.map((r) => {
-                    const m = pendingById.get(r.id);
-                    const name = m?.name ?? r.id;
-                    return (
-                      <p key={r.id}>
-                        {name} — {r.ok ? "approved" : `rejected (<span className="font-mono">${r.error}</span>)`}
-                      </p>
-                    );
-                  })}
+                <div className="mt-3 text-sm" role="status">
+                  <p className="mb-1 font-bold text-paper-muted">Results</p>
+                  <ul>
+                    {bulkResults.rows.map((r) => (
+                      <li key={r.id}>
+                        {r.name}: {r.ok
+                          ? (bulkResults.action === "approve" ? "approved" : "rejected")
+                          : <>not changed (<span className="font-mono">{r.error}</span>)</>}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </section>

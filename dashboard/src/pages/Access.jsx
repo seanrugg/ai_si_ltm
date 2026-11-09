@@ -159,7 +159,7 @@ export default function Access() {
   async function saveSettings() {
     setSettingsError(null);
     if (showConfirm && !confirmOpen) {
-      setSettingsError("Confirm that you understand anyone on the internet can read these record summaries.");
+      setSettingsError(new Error("Confirm that you understand anyone on the internet can read these record summaries."));
       return;
     }
     const newSwarms = openSwarms.trim() ? splitList(openSwarms) : null;
@@ -175,7 +175,7 @@ export default function Access() {
       setConfirmOpen(false);
       reload();
     } catch (err) {
-      setSettingsError(err.message);
+      setSettingsError(err);
     } finally {
       setSettingsBusy(false);
     }
@@ -189,7 +189,7 @@ export default function Access() {
       setSettingsMessage("Reset to the environment default.");
       reload();
     } catch (err) {
-      setSettingsError(err.message);
+      setSettingsError(err);
     } finally {
       setSettingsBusy(false);
     }
@@ -199,7 +199,7 @@ export default function Access() {
     setPolicyError(null);
     setPolicyMessage(null);
     if (policy === "auto_approve" && !policyConfirmOpen) {
-      setPolicyError('Confirm that you understand anyone on the internet can join and read.');
+      setPolicyError(new Error("Tick the confirmation first: anyone on the internet will be able to join and read."));
       return;
     }
     const body = { policy };
@@ -211,7 +211,7 @@ export default function Access() {
       setPolicyConfirmOpen(false);
       reloadPolicy();
     } catch (err) {
-      setPolicyError(err.message);
+      setPolicyError(err);
     } finally {
       setPolicyBusy(false);
     }
@@ -226,7 +226,7 @@ export default function Access() {
       if (values.length) scope[key] = values;
     }
     const body = { name: form.name.trim(), scope, expires_at: form.expires || null, owner: form.owner.trim() || null, purpose: form.purpose.trim() || null };
-    if (!body.name) { setFormError("Give the token a name"); return; }
+    if (!body.name) { setFormError(new Error("Give the token a name")); return; }
     setBusy(true);
     try {
       const created = await api("/admin/mcp/tokens", { method: "POST", body });
@@ -387,6 +387,12 @@ export default function Access() {
         </dl>
       </section>
 
+      <p className="mb-4 text-sm text-paper-muted" id="access-mode-desc">
+        Set the default with <code className="hash">LTMS_MCP_READ_MODE</code> and{" "}
+        <code className="hash">LTMS_MCP_OPEN_SCOPE</code>. Dashboard changes take effect on the next
+        MCP request — no restart needed — unless the server is locked.
+      </p>
+
       {/* ---- Enrollment policy ---- */}
       <section className="mb-8 rounded-md border border-ink-line bg-ink p-4" aria-labelledby="enrollment-policy-h">
         <h2 id="enrollment-policy-h" className="mb-3 text-lg font-bold">Enrollment policy</h2>
@@ -451,9 +457,7 @@ export default function Access() {
                           onClick={savePolicy}>
                     Save policy
                   </button>
-                  {policyMessage && (
-                    <span className="mt-3 text-xs text-ok">{policyMessage}</span>
-                  )}
+                  <span className="mt-3 text-xs text-ok" role="status">{policyMessage}</span>
                 </>
               )}
               {policyError && <ErrorNote error={policyError} />}
@@ -478,19 +482,15 @@ export default function Access() {
 
             {policyData.policy === "auto_deny" && (
               <p className="mt-4 text-sm text-paper-muted" id="enrollment-refusals">
-                {plural(policyData.refusals.count, "request")} refused since{" "}
-                {policyData.refusals.since ? localTime(policyData.refusals.since) : "—"}
+                {policyData.refusals.count > 0 && policyData.refusals.since
+                  ? `${plural(policyData.refusals.count, "request")} refused since ${localTime(policyData.refusals.since)}.`
+                  : "No requests refused in the last hour."}{" "}
+                Hourly totals go to the audit log.
               </p>
             )}
           </>
         )}
       </section>
-
-      <p className="mb-4 text-sm text-paper-muted" id="access-mode-desc">
-        Set the default with <code className="hash">LTMS_MCP_READ_MODE</code> and{" "}
-        <code className="hash">LTMS_MCP_OPEN_SCOPE</code>. Dashboard changes take effect on the next
-        MCP request — no restart needed — unless the server is locked.
-      </p>
 
       <section className="mb-8" aria-labelledby="access-tokens-h">
         <h2 id="access-tokens-h" className="mb-3 text-lg font-bold">Tokens</h2>
