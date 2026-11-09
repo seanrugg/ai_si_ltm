@@ -290,6 +290,32 @@ async def backlog(session: AsyncSession, endpoint: LrsEndpoint) -> int:
     return int((await session.execute(stmt)).scalar() or 0)
 
 
+async def resume_endpoint(
+    session: AsyncSession, endpoint_id: uuid.UUID | str, *, actor: str, backlog_mode: str
+) -> LrsEndpoint:
+    """Turn a paused endpoint back on, skipping or sending what was written meanwhile.
+
+    The only way to move a cursor by hand, and it only moves forward.
+    """
+    if backlog_mode not in ("skip", "send"):
+        raise ServiceError(422, "bad_backlog_mode", 'backlog must be "skip" or "send"')
+    endpoint = await get_endpoint(session, endpoint_id)
+    if endpoint.enabled:
+        raise ServiceError(409, "already_enabled", f"endpoint {endpoint.name!r} is already sending")
+    pending = await backlog(session, endpoint)
+    old_cursor = endpoint.cursor
+    if backlog_mode == "skip":
+        newest = (await session.execute(select(func.max(Record.id)))).scalar()
+        if newest is not None and newest > (old_cursor or 0):
+            endpoint.cursor = newest
+    endpoint.enabled = True
+    session.add(AuditLog(actor=actor, action="lrs_resume", detail={
+        "endpoint_id": str(endpoint.id), "endpoint": endpoint.name, "backlog_mode": backlog_mode,
+        "pending": pending, "old_cursor": old_cursor, "new_cursor": endpoint.cursor,
+    }))
+    return endpoint
+
+
 async def forward_once(session: AsyncSession, cfg: ServerConfig, http: httpx.AsyncClient) -> dict:
     """Send each enabled endpoint its next batch of in-scope xAPI statements.
 
