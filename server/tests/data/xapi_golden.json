@@ -63,6 +63,13 @@
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/learning-record",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
       }
      ],
      "grouping": [
@@ -115,6 +122,22 @@
       },
       "relevantTypes": [
        "https://w3id.org/xapi-ai/activity-type/relay-role"
+      ]
+     }
+    ],
+    "contextGroups": [
+     {
+      "objectType": "contextGroup",
+      "group": {
+       "objectType": "Group",
+       "name": "example-swarm",
+       "account": {
+        "homePage": "https://ltms.example.org",
+        "name": "example-swarm"
+       }
+      },
+      "relevantTypes": [
+       "https://w3id.org/xapi-ai/activity-type/swarm"
       ]
      }
     ]
@@ -179,6 +202,13 @@
        "id": "https://w3id.org/xapi-ai/profile/0.10.0",
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
+       }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/learning-record",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
        }
       }
      ]
@@ -265,6 +295,20 @@
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/learning-record",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/social-learning",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
       }
      ],
      "grouping": [
@@ -329,6 +373,22 @@
       },
       "relevantTypes": [
        "https://w3id.org/xapi-ai/activity-type/relay-role"
+      ]
+     }
+    ],
+    "contextGroups": [
+     {
+      "objectType": "contextGroup",
+      "group": {
+       "objectType": "Group",
+       "name": "example-swarm",
+       "account": {
+        "homePage": "https://ltms.example.org",
+        "name": "example-swarm"
+       }
+      },
+      "relevantTypes": [
+       "https://w3id.org/xapi-ai/activity-type/swarm"
       ]
      }
     ]
@@ -396,6 +456,20 @@
        "id": "https://w3id.org/xapi-ai/profile/0.10.0",
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
+       }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/learning-record",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/social-learning",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
        }
       }
      ],
@@ -502,6 +576,20 @@
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/learning-record",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/sensor",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
       }
      ]
     },
@@ -606,6 +694,20 @@
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/learning-record",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/sensor",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
       }
      ]
     },
@@ -700,6 +802,20 @@
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/learning-record",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/sensor",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
       }
      ]
     },
@@ -779,6 +895,20 @@
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/learning-record",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/sensor",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
       }
      ]
     },
@@ -857,6 +987,20 @@
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/learning-record",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/experiential-learning",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
       }
      ]
     },
@@ -934,6 +1078,20 @@
        "id": "https://w3id.org/xapi-ai/profile/0.10.0",
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
+       }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/learning-record",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/learning-event",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
        }
       }
      ]
