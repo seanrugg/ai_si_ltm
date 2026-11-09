@@ -9,6 +9,7 @@ import Integrity from "./pages/Integrity.jsx";
 import Lessons from "./pages/Lessons.jsx";
 import Volume from "./pages/Volume.jsx";
 import Swarms from "./pages/Swarms.jsx";
+import Retention from "./pages/Retention.jsx";
 import Login from "./pages/Login.jsx";
 import Members from "./pages/Members.jsx";
 import Outcomes from "./pages/Outcomes.jsx";
@@ -19,7 +20,6 @@ import Timeline from "./pages/Timeline.jsx";
 import Activity from "./pages/Activity.jsx";
 import Lrs from "./pages/Lrs.jsx";
 import Access from "./pages/Access.jsx";
-import Retention from "./pages/Retention.jsx";
 
 const AdminContext = createContext(null);
 export const useAdmin = () => useContext(AdminContext);
@@ -74,6 +74,7 @@ const router = createHashRouter([
       { path: "/access", element: <Access /> },
       { path: "/members", element: <Members /> },
       { path: "/integrity", element: <Integrity /> },
+      { path: "/retention", element: <Retention /> },
       { path: "/volume", element: <Volume /> },
       { path: "/swarms", element: <Swarms /> },
       { path: "/record/:agent/:seq", element: <RecordPage /> },
@@ -83,7 +84,6 @@ const router = createHashRouter([
       { path: "/lessons", element: <Lessons /> },
       { path: "/audit-log", element: <RecallLog /> },
       { path: "/recall-log", element: <Navigate to="/audit-log" replace /> },
-      { path: "/retention", element: <Retention /> },
       { path: "/settings", element: <Settings /> },
       { path: "*", element: <Navigate to="/" replace /> },
     ],

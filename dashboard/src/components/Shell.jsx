@@ -16,8 +16,8 @@ const NAV = [
   { to: "/outcomes", label: "Outcomes" },
   { to: "/lessons", label: "Lessons" },
   { to: "/audit-log", label: "Audit log" },
-  { to: "/retention", label: "Data retention" },
   { to: "/settings", label: "Settings" },
+  { to: "/retention", label: "Data retention" },
 ];
 
 function Nav({ pending, onPick }) {
