@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import HelpTip from "../components/HelpTip.jsx";
-import { SWARM_ROLE } from "../lib/help.js";
+import { SWARM_ROLE, MEMORY_WIPE, WIPE_VS_DELETE } from "../lib/help.js";
 import { Link } from "react-router-dom";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
@@ -301,6 +301,9 @@ function RoleControl({ swarm, member, busy, act }) {
 function SwarmCard({ swarm, swarms, allMembers, onReload }) {
   const members = swarm.members || [];
   const revoked = swarm.status === "revoked";
+  // allMembers is already filtered to active, so this counts who the wipe would reach.
+  const activeNames = new Set(allMembers.map((m) => m.name));
+  const wipeCount = members.filter((m) => activeNames.has(m.name)).length;
   // Where each member is now, so "Add a member" can say it's a move and leave
   // other swarms' hubs out (a hub moves from its member row, with a warning).
   const placement = new Map();
@@ -313,6 +316,8 @@ function SwarmCard({ swarm, swarms, allMembers, onReload }) {
   const [addName, setAddName] = useState("");
   const [addRole, setAddRole] = useState("member");
   const [confirmRevoke, setConfirmRevoke] = useState("");
+  const [wipeMode, setWipeMode] = useState(null); // null | "confirm"
+  const [confirmWipe, setConfirmWipe] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -341,6 +346,12 @@ function SwarmCard({ swarm, swarms, allMembers, onReload }) {
 
   async function revokeSwarm() {
     return api(`/admin/swarms/${encodeURIComponent(swarm.name)}/revoke`, { method: "POST" });
+  }
+
+  async function wipeSwarmMemory() {
+    return api(`/admin/swarms/${encodeURIComponent(swarm.name)}/wipe`, {
+      method: "POST", body: { confirm: swarm.name },
+    });
   }
 
   return (
@@ -421,6 +432,35 @@ function SwarmCard({ swarm, swarms, allMembers, onReload }) {
               Revoke {swarm.name}
             </button>
           </div>
+
+          <button className="btn btn-danger mt-2" onClick={() => setWipeMode("confirm")}>
+            Wipe swarm memory
+          </button>
+          <HelpTip id={`wipe-swarm-help-${swarm.name}`} label="About wiping swarm memory">{MEMORY_WIPE}</HelpTip>
+          {wipeMode === "confirm" && (
+            <div className="mt-3 rounded-md border border-bad/40 bg-bad/5 p-3 text-sm">
+              <p>
+                <strong>Clean slate. This can't be undone.</strong> These droids stop recalling everything from before
+                now, including what other droids recorded. They keep their names and keep writing to their chains.
+                Policies still apply. The record log and anything already sent to an LRS are kept.
+              </p>
+              <p className="mb-2 text-xs text-paper-muted">
+                Wipes memory for {plural(wipeCount, "active member")}
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <input className="field w-40 mb-2" value={confirmWipe}
+                       onChange={(e) => setConfirmWipe(e.target.value)}
+                       placeholder={swarm.name} aria-label={`Confirm by typing ${swarm.name}`} />
+                <HelpTip id={`wipe-swarm-vs-delete-${swarm.name}`} label="Wipe vs delete">{WIPE_VS_DELETE}</HelpTip>
+                <button className="btn btn-danger" disabled={busy || confirmWipe !== swarm.name}
+                        onClick={() => act(() => wipeSwarmMemory().then(() => setWipeMode(null)))}>
+                  Wipe {plural(wipeCount, "active member")}
+                </button>
+                <button className="btn" onClick={() => setWipeMode(null)}>Cancel</button>
+              </div>
+              <p className="mt-2 text-xs text-paper-muted">To keep a copy first, use Export.</p>
+            </div>
+          )}
         </>
       )}
 
