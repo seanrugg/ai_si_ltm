@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import { plural } from "../lib/format.js";
+import { membershipChange } from "../lib/membership.js";
 import { generateRootKey, signAppointment, SwarmKeyError } from "../lib/swarmKey.js";
 import { EmptyState, ErrorNote, Loading, PageHeader, StatusBadge } from "../components/ui.jsx";
 
@@ -274,10 +275,39 @@ function AppointHub({ swarm, allMembers, busy, act }) {
   );
 }
 
-function SwarmCard({ swarm, allMembers, onReload }) {
+// A member or observer's role, changed in one step with Apply (issue #160).
+function RoleControl({ swarm, member, busy, act }) {
+  const [role, setRole] = useState(member.role);
+  const { kind } = membershipChange({ swarm: swarm.name, role: member.role }, { swarm: swarm.name, role });
+  return (
+    <form className="flex items-center gap-2" aria-label={`Change role for ${member.name}`}
+          onSubmit={(e) => {
+            e.preventDefault();
+            act(() => api(`/admin/swarms/${encodeURIComponent(swarm.name)}/members`,
+              { method: "POST", body: { member: member.name, role } }));
+          }}>
+      <select className="field text-xs" value={role} onChange={(e) => setRole(e.target.value)}
+              aria-label={`Role for ${member.name}`}>
+        <option value="member">member</option>
+        <option value="observer">observer</option>
+      </select>
+      <button className="btn text-xs" disabled={busy || kind === "none"}>Apply</button>
+    </form>
+  );
+}
+
+function SwarmCard({ swarm, swarms, allMembers, onReload }) {
   const members = swarm.members || [];
   const revoked = swarm.status === "revoked";
-  const eligible = allMembers.filter((m) => m.status === "active" && !members.some((s) => s.name === m.name));
+  // Where each member is now, so "Add a member" can say it's a move and leave
+  // other swarms' hubs out (a hub moves from its member row, with a warning).
+  const placement = new Map();
+  for (const s of swarms || []) {
+    if (s.name === swarm.name) continue;
+    for (const m of s.members || []) placement.set(m.name, { swarm: s.name, role: m.role });
+  }
+  const eligible = allMembers.filter((m) => m.status === "active" && !members.some((s) => s.name === m.name)
+    && placement.get(m.name)?.role !== "hub");
   const [addName, setAddName] = useState("");
   const [addRole, setAddRole] = useState("member");
   const [confirmRevoke, setConfirmRevoke] = useState("");
@@ -331,12 +361,18 @@ function SwarmCard({ swarm, allMembers, onReload }) {
             <h4 className="mb-2 text-xs text-paper-muted">{plural(roleMembers.length, role)}</h4>
             <ul className="panel" aria-label={`${role} members of ${swarm.name}`}>
               {roleMembers.map((m) => (
-                <li key={m.name} className="flex items-center justify-between px-3 py-2">
+                <li key={m.name} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
                   <span className="text-sm">{m.name}</span>
                   {!revoked && (
-                    <button className="btn btn-danger text-xs" onClick={() => act(() => removeMember(m.name))}>
-                      Remove
-                    </button>
+                    <span className="flex flex-wrap items-center gap-2">
+                      {m.role !== "hub" && (
+                        <RoleControl key={m.role} swarm={swarm} member={m} busy={busy} act={act} />
+                      )}
+                      <button className="btn btn-danger text-xs" onClick={() => act(() => removeMember(m.name))}
+                              aria-label={`Remove ${m.name}`}>
+                        Remove
+                      </button>
+                    </span>
                   )}
                 </li>
               ))}
@@ -352,7 +388,14 @@ function SwarmCard({ swarm, allMembers, onReload }) {
             <select className="field" value={addName} onChange={(e) => setAddName(e.target.value)}
                     aria-label="Member">
               <option value="">Add a member</option>
-              {eligible.map((m) => <option key={m.name} value={m.name}>{m.name}</option>)}
+              {eligible.map((m) => {
+                const from = placement.get(m.name);
+                return (
+                  <option key={m.name} value={m.name}>
+                    {from ? `${m.name} (moves from ${from.swarm})` : m.name}
+                  </option>
+                );
+              })}
             </select>
             <select className="field w-24" value={addRole} onChange={(e) => setAddRole(e.target.value)}
                     aria-label="Role">
@@ -404,7 +447,7 @@ export default function Swarms() {
       )}
       <CreateSwarm onCreated={reload} />
       <ul className="panel" aria-label="Swarms">
-        {swarms.map((s) => <SwarmCard key={s.id} swarm={s} allMembers={allMembers} onReload={reload} />)}
+        {swarms.map((s) => <SwarmCard key={s.id} swarm={s} swarms={swarms} allMembers={allMembers} onReload={reload} />)}
       </ul>
     </>
   );
