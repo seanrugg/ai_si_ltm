@@ -16,8 +16,7 @@ function scopeFromForm(form) {
 }
 
 export function EndpointRow({ endpoint, backlog, onReload }) {
-  const [mode, setMode] = useState(null); // null | "edit" | "delete" | "test" | "resume"
-  const [backlogChoice, setBacklogChoice] = useState("skip");
+  const [mode, setMode] = useState(null); // null | "edit" | "delete" | "test"
   const [testResult, setTestResult] = useState(null);
   const [testBusy, setTestBusy] = useState(false);
   const [confirmName, setConfirmName] = useState("");
@@ -39,19 +38,7 @@ export function EndpointRow({ endpoint, backlog, onReload }) {
   }
 
   function toggleEnabled() {
-    // Turning on with records written during the pause asks whether to send
-    // them (issue #151). An unknown backlog asks too, to be safe.
-    if (!endpoint.enabled && backlog !== 0) {
-      setBacklogChoice("skip");
-      setMode("resume");
-      return;
-    }
     act("PATCH", `/admin/lrs/${endpoint.id}`, { enabled: !endpoint.enabled });
-  }
-
-  function resume(e) {
-    e.preventDefault();
-    act("POST", `/admin/lrs/${endpoint.id}/resume`, { backlog: backlogChoice });
   }
 
   function testConnection() {
@@ -77,10 +64,15 @@ export function EndpointRow({ endpoint, backlog, onReload }) {
           <dd>
             <label className="flex items-center gap-2 cursor-pointer">
               <input type="checkbox" className="accent-led" checked={endpoint.enabled}
-                     onChange={toggleEnabled} disabled={busy || mode === "resume"}
+                     onChange={toggleEnabled} disabled={busy}
                      aria-label={`Send to ${endpoint.name}`} />
               {endpoint.enabled ? "Sending" : "Paused"}
             </label>
+            {!endpoint.enabled && (
+              <p className="mt-1 text-xs text-paper-muted">
+                While paused, new records aren&apos;t sent to this LRS, now or later.
+              </p>
+            )}
           </dd>
           <dt className="text-paper-muted">Backlog</dt>
           <dd>{backlog === null ? "—" : String(backlog ?? 0)}</dd>
@@ -118,41 +110,6 @@ export function EndpointRow({ endpoint, backlog, onReload }) {
       </div>
 
       <ErrorNote error={error} />
-
-      {mode === "resume" && (
-        <form onSubmit={resume} className="mt-3 rounded-md border border-ink-line p-3 text-sm"
-              aria-labelledby={`lrs-${endpoint.name}-resume-h`}>
-          <p id={`lrs-${endpoint.name}-resume-h`} className="mb-2 font-bold">
-            {backlog == null
-              ? "Records may have been written while sending was off."
-              : `${backlog.toLocaleString()} ${backlog === 1 ? "record was" : "records were"} written while sending was off.`}
-          </p>
-          <fieldset className="mb-3">
-            <legend className="mb-1 text-paper-muted">What should happen to them?</legend>
-            <label className="mb-1 flex items-start gap-2 cursor-pointer">
-              <input type="radio" name={`backlog-${endpoint.id}`} value="skip" className="accent-led mt-1"
-                     checked={backlogChoice === "skip"} onChange={() => setBacklogChoice("skip")}
-                     aria-describedby={`backlog-skip-${endpoint.id}`} />
-              <span>
-                <span className="font-bold">Skip them</span>
-                <span id={`backlog-skip-${endpoint.id}`} className="block text-xs text-paper-muted">
-                  These records won&apos;t be sent. Other than deleting and re-adding this endpoint, there&apos;s no
-                  way to send them later. This includes records from real members.
-                </span>
-              </span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="radio" name={`backlog-${endpoint.id}`} value="send" className="accent-led"
-                     checked={backlogChoice === "send"} onChange={() => setBacklogChoice("send")} />
-              <span className="font-bold">Send them to the LRS</span>
-            </label>
-          </fieldset>
-          <div className="flex gap-2">
-            <button className="btn btn-primary" disabled={busy}>Resume</button>
-            <button type="button" className="btn" onClick={() => setMode(null)} disabled={busy}>Cancel</button>
-          </div>
-        </form>
-      )}
 
       {mode === "edit" && (
         <EndpointForm initial={endpoint} onSaved={() => { setMode(null); onReload(); }} onCancel={() => setMode(null)} busy={busy} />
