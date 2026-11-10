@@ -27,7 +27,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ltms_contract import ContractError, parse_ts, verify_record
-from server.models import AuditLog, Member, Record, RecordPayload, RecordProvenance
+from server.models import AuditLog, Member, Record, RecordPayload, RecordProvenance, RecordTombstone
 from server.services import swarms
 
 MEMBER_FORBIDDEN_TYPES = {"system"}  # written only by the server itself
@@ -94,6 +94,11 @@ async def _check_one(session: AsyncSession, member: Member, record: dict, now: d
         stored = await session.scalar(
             select(Record.hash).where(Record.member_id == member.id, Record.seq == seq)
         )
+        if stored is None:
+            # Deleted by an admin (#173): the same record re-sent is a duplicate,
+            # so the device stops retrying and the record doesn't come back.
+            stored = await session.scalar(select(RecordTombstone.hash).where(
+                RecordTombstone.member_id == member.id, RecordTombstone.seq == seq))
         if stored == verified.hash:
             return "duplicate", None
         raise IngestRejected("conflict", f"seq {seq} is already stored with a different hash")

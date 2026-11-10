@@ -24,6 +24,7 @@ from server.models import (AuditLog, EnrollmentSwarmRequest, Member, McpToken, R
 from server.services import auth as auth_service
 from server.services import conversation as conversation_service, enrollment, integrity, lrs as lrs_service, mcp_access, policy_lifecycle, recall, runtime_settings, swarms
 from server.services import export as export_service
+from server.services import records as records_service
 from server.services.errors import ServiceError
 
 router = APIRouter(prefix="/api", tags=["admin"])
@@ -362,6 +363,9 @@ async def record_detail(agent: str, seq: int, request: Request, admin: AdminAuth
     async with transaction(request) as session:
         rec = await session.scalar(select(Record).where(Record.agent == agent, Record.seq == seq))
         if rec is None:
+            tomb = await records_service.get_tombstone(session, agent, seq)
+            if tomb is not None:  # deleted by an admin (#173): refs to it resolve to this
+                return records_service.tombstone_to_dict(tomb)
             raise ServiceError(404, "not_found", "record not found")
         payloads = await recall.fetch_payloads(session, [rec])
         out = recall.to_wire(rec, payloads.get(rec.id))
@@ -381,6 +385,26 @@ async def record_detail(agent: str, seq: int, request: Request, admin: AdminAuth
         else:
             out["provenance"] = {"swarm": None, "relay": None, "received_at": None}
         return out
+
+
+@router.get("/admin/records/{agent}/{seq}/delete-preview")
+async def record_delete_preview(agent: str, seq: int, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    """What deleting this record affects: who refers to it, and any policy change (#173)."""
+    async with transaction(request) as session:
+        return await records_service.delete_preview(session, agent, seq)
+
+
+@router.delete("/admin/records/{agent}/{seq}")
+async def record_delete(agent: str, seq: int, request: Request, admin: AdminAuth = ADMIN,
+                        body: dict | None = None) -> dict:
+    """Delete one record, leaving a tombstone so the chain stays valid (#173)."""
+    reason = (body or {}).get("reason")
+    if reason is not None and not isinstance(reason, str):
+        raise ServiceError(422, "bad_reason", "reason must be a string")
+    async with transaction(request) as session:
+        tomb = await records_service.delete_record(session, agent, seq, admin=f"admin:{admin.username}",
+                                                   reason=reason)
+        return records_service.tombstone_to_dict(tomb)
 
 
 # --------------------------------------------------------------------------- #

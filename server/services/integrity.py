@@ -6,6 +6,8 @@ For each record, in seq order:
   * prev_hash links to the previous record's hash (genesis for seq 1)
   * the queryable columns agree with header_raw (catches edits that bypass the trigger)
   * if the payload is still stored, SHA-256(payload_raw) == payload_hash
+  * a deleted record's tombstone is a valid link: its prev_hash must link to
+    the previous hash, and the chain continues from its hash (issue #173)
 Finally the member's chain head (last_ack_seq / last_hash) must match the last record.
 """
 from __future__ import annotations
@@ -16,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ltms_contract import GENESIS_HASH, record_signing_message, sha256, verify_signature
-from server.models import Member, Record, RecordPayload
+from server.models import Member, Record, RecordPayload, RecordTombstone
 
 _COLUMN_FIELDS = ("agent", "seq", "type", "prev_hash", "payload_hash", "summary", "place", "outcome")
 
@@ -29,6 +31,7 @@ async def verify_member(session: AsyncSession, member: Member, *, batch: int = 5
         "records": 0,
         "payloads_present": 0,
         "payloads_purged": 0,
+        "deleted": 0,
         "head_seq": member.last_ack_seq,
         "error": None,
     }
@@ -37,6 +40,18 @@ async def verify_member(session: AsyncSession, member: Member, *, batch: int = 5
         report["status"] = "broken"
         report["error"] = {"seq": seq, "code": code, "message": message}
         return report
+
+    tombs = {t.seq: t for t in await session.scalars(
+        select(RecordTombstone).where(RecordTombstone.member_id == member.id))}
+
+    def through_tombstones(seq: int, prev_hash: str) -> tuple[int, str] | dict:
+        while seq in tombs:
+            t = tombs[seq]
+            if t.prev_hash != prev_hash:
+                return fail(seq, "chain", "deleted record's prev_hash does not link to the previous record")
+            report["deleted"] += 1
+            seq, prev_hash = seq + 1, t.hash
+        return seq, prev_hash
 
     expected_seq, prev = 1, GENESIS_HASH
     while True:
@@ -52,6 +67,10 @@ async def verify_member(session: AsyncSession, member: Member, *, batch: int = 5
         if not rows:
             break
         for rec, payload in rows:
+            step = through_tombstones(expected_seq, prev)
+            if isinstance(step, dict):
+                return step
+            expected_seq, prev = step
             if rec.seq != expected_seq:
                 return fail(expected_seq, "gap", f"missing seq {expected_seq} (next stored is {rec.seq})")
             if sha256(rec.header_raw).hex() != rec.hash:
@@ -76,7 +95,11 @@ async def verify_member(session: AsyncSession, member: Member, *, batch: int = 5
         if len(rows) < batch:
             break
 
-    if report["records"] == 0:
+    step = through_tombstones(expected_seq, prev)  # deleted records at the end of the chain
+    if isinstance(step, dict):
+        return step
+    expected_seq, prev = step
+    if report["records"] == 0 and report["deleted"] == 0:
         report["status"] = "empty"
     if member.last_ack_seq != expected_seq - 1 or member.last_hash != prev:
         return fail(member.last_ack_seq, "head", "member chain head does not match the last stored record")
