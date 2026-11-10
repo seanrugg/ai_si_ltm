@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, Loading, PageHeader, StatusBadge } from "../components/ui.jsx";
+import { plural } from "../lib/format.js";
 
 const EXPLAIN = {
   gap: "A record is missing from the chain.",
@@ -26,7 +27,8 @@ export default function Integrity() {
       </PageHeader>
       <p className="mb-4 max-w-prose text-sm text-paper-muted">
         Re-verifies every member's chain from the stored, signed bytes: each hash, each signature, each link. Purged
-        payloads are expected and don't count against the chain.
+        payloads are expected and don't count against the chain. Neither do records an admin deleted: each leaves a
+        tombstone that keeps the chain linked.
       </p>
       {loading && !data && <Loading what="Verifying every chain" />}
       <ErrorNote error={error} onRetry={reload} />
@@ -47,6 +49,7 @@ export default function Integrity() {
                   <span className="text-sm text-paper-muted">
                     {r.records} records verified
                     {r.payloads_purged > 0 && `, ${r.payloads_purged} payloads purged`}
+                    {r.deleted > 0 && `, ${plural(r.deleted, "record")} deleted (tombstones kept)`}
                   </span>
                 </div>
                 {r.error && (
