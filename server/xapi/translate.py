@@ -21,6 +21,17 @@ TELEMETRY_MAX_BYTES = 16 * 1024
 
 VALID_XAPI_VERSIONS = ("2.0.0", "1.0.3")
 
+GLOSSARY = "https://id.i2idl.org/concepts/"
+SKOS_CONCEPT = "http://www.w3.org/2004/02/skos/core#Concept"
+# record type -> glossary concept; every statement also gets learning-record
+RECORD_CONCEPTS = {
+    "perception": "sensor",
+    "thought": "metacognition",
+    "communication": "social-learning",
+    "event": "learning-event",
+    "lesson": "experiential-learning",
+}
+
 # record type -> (verb IRI, display)
 VERBS = {
     "perception": (AI + "/verbs/perceived", "perceived"),
@@ -94,6 +105,11 @@ def record_to_statement(
             "definition": {"type": "http://adlnet.gov/expapi/activities/profile"},
         }
     ]
+    for concept in ("learning-record", RECORD_CONCEPTS.get(rtype)):
+        if concept:
+            category.append(
+                {"objectType": "Activity", "id": GLOSSARY + concept, "definition": {"type": SKOS_CONCEPT}}
+            )
     grouping: list[dict] = []
     swarm = rec.get("swarm")
     if swarm:
@@ -131,6 +147,13 @@ def record_to_statement(
             )
     if context_agents:
         context["contextAgents"] = context_agents
+    if xapi_version == "2.0.0" and swarm:
+        context["contextGroups"] = [{
+            "objectType": "contextGroup",
+            "group": {"objectType": "Group", "name": swarm,
+                      "account": {"homePage": base, "name": swarm}},
+            "relevantTypes": [AI + "/activity-type/swarm"],
+        }]
 
     extensions = {
         EXT + "holocron/seq": rec["seq"],
