@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, Integer, literal, or_, select
 
 from ltms_contract import RECORD_TYPES
@@ -21,6 +22,7 @@ from server.models import (AuditLog, EnrollmentSwarmRequest, Member, McpToken, R
                            RecordProvenance, RuntimeSetting, Swarm, SwarmMember)
 from server.services import auth as auth_service
 from server.services import conversation as conversation_service, enrollment, integrity, lrs as lrs_service, mcp_access, policy_lifecycle, recall, runtime_settings, swarms
+from server.services import export as export_service
 from server.services.errors import ServiceError
 
 router = APIRouter(prefix="/api", tags=["admin"])
@@ -839,6 +841,26 @@ async def delete_mcp_settings(request: Request, admin: AdminAuth = ADMIN) -> dic
 # --------------------------------------------------------------------------- #
 # Enrollment policy (issue #129)
 # --------------------------------------------------------------------------- #
+@router.get("/admin/export")
+async def export_records(
+    request: Request, admin: AdminAuth = ADMIN,
+    format: str = "jsonl", agent: str | None = None, swarm: str | None = None,
+    type: str | None = None, since: str | None = None, until: str | None = None,
+) -> StreamingResponse:
+    """Download records as JSONL (complete and verifiable) or CSV (issue #153)."""
+    f = export_service.parse_filter(fmt=format, agent=agent, swarm=swarm, type_=type, since=since, until=until)
+    exported_at = datetime.now(timezone.utc)
+    async with transaction(request) as session:  # audit before streaming; filters only, never content
+        session.add(AuditLog(actor=f"admin:{admin.username}", action="record_export",
+                             detail={"format": format, "filters": f.as_dict()}))
+    maker = request.app.state.sessionmaker
+    body = (export_service.stream_jsonl(maker, f, exported_at) if format == "jsonl"
+            else export_service.stream_csv(maker, f))
+    filename = f"ltms-export-{exported_at:%Y%m%d}.{format}"
+    return StreamingResponse(body, media_type=export_service.FORMATS[format],
+                             headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
 @router.get("/admin/enrollment/policy")
 async def enrollment_policy_get(request: Request, admin: AdminAuth = ADMIN) -> dict:
     """Effective enrollment policy, its source, the lock flag and the refusal
