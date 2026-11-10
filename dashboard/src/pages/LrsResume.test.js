@@ -15,55 +15,29 @@ beforeEach(() => {
 });
 
 function row(props) {
-  const onReload = vi.fn();
   render(React.createElement("ul", null,
-    React.createElement(EndpointRow, { endpoint: paused, backlog: 3, onReload, ...props })));
-  return onReload;
+    React.createElement(EndpointRow, { endpoint: paused, backlog: 3, onReload: vi.fn(), ...props })));
 }
 
-describe("resuming a paused LRS endpoint (issue #151)", () => {
-  it("labels the toggle Sending / Paused", () => {
+describe("pausing and resuming an LRS endpoint (issue #175)", () => {
+  it("says paused records are never sent", () => {
     row();
     expect(screen.getByText("Paused", { selector: "label" })).toBeTruthy();
+    expect(screen.getByText(/new records aren.t sent to this LRS, now or later/)).toBeTruthy();
   });
 
-  it("asks before resuming with a backlog, with Skip preselected", () => {
+  it("resuming is a plain PATCH, with no backlog question", async () => {
     row();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Send to lrs-one" }));
-    expect(api).not.toHaveBeenCalled();
-    expect(screen.getByText("3 records were written while sending was off.")).toBeTruthy();
-    expect(screen.getByRole("radio", { name: /Skip them/ }).checked).toBe(true);
-    expect(screen.getByText(/includes records from real members/)).toBeTruthy();
-    expect(screen.getByRole("group", { name: /What should happen/ })).toBeTruthy();
-  });
-
-  it("sends the chosen mode to the resume endpoint", async () => {
-    const onReload = row();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Send to lrs-one" }));
-    fireEvent.click(screen.getByRole("radio", { name: /Send them to the LRS/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
-    await vi.waitFor(() => expect(onReload).toHaveBeenCalled());
-    expect(api).toHaveBeenCalledWith("/admin/lrs/ep1/resume", { method: "POST", body: { backlog: "send" } });
-  });
-
-  it("Cancel closes the panel without a request", () => {
-    row();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Send to lrs-one" }));
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByText(/written while sending was off/)).toBeNull();
-    expect(api).not.toHaveBeenCalled();
-  });
-
-  it("with no backlog, turning on is a plain PATCH", async () => {
-    row({ backlog: 0 });
     fireEvent.click(screen.getByRole("checkbox", { name: "Send to lrs-one" }));
     await vi.waitFor(() => expect(api).toHaveBeenCalled());
     expect(api).toHaveBeenCalledWith("/admin/lrs/ep1", { method: "PATCH", body: { enabled: true } });
+    expect(screen.queryByText(/written while sending was off/)).toBeNull();
   });
 
-  it("turning off is a plain PATCH", async () => {
+  it("pausing is a plain PATCH", async () => {
     row({ endpoint: { ...paused, enabled: true } });
     expect(screen.getByText("Sending", { selector: "label" })).toBeTruthy();
+    expect(screen.queryByText(/now or later/)).toBeNull();
     fireEvent.click(screen.getByRole("checkbox", { name: "Send to lrs-one" }));
     await vi.waitFor(() => expect(api).toHaveBeenCalled());
     expect(api).toHaveBeenCalledWith("/admin/lrs/ep1", { method: "PATCH", body: { enabled: false } });
