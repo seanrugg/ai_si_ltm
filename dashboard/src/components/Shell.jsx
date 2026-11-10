@@ -16,6 +16,7 @@ const NAV = [
   { to: "/outcomes", label: "Outcomes" },
   { to: "/lessons", label: "Lessons" },
   { to: "/audit-log", label: "Audit log" },
+  { to: "/export", label: "Export" },
   { to: "/settings", label: "Settings" },
 ];
 
