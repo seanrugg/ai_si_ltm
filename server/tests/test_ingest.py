@@ -24,7 +24,8 @@ def test_single_and_batch(mesh):
         z3.append("event", summary=f"tick {i}")
     res = z3.flush()[0]
     assert res["ok"] and res["accepted"] == 5 and res["last_ack_seq"] == 6
-    assert z3.sync_head() == {"name": "z3-r0", "last_ack_seq": 6, "last_hash": z3.last_hash}
+    assert z3.sync_head() == {"name": "z3-r0", "last_ack_seq": 6, "last_hash": z3.last_hash,
+                              "memory_generation": 0}
 
 
 def test_wrong_agent_rejected(mesh):
