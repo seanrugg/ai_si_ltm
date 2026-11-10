@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from server.models import AdminSession, AuditLog, AuthChallenge, Record, RecordPayload, Token
 
 KEEP_TAG = "keep"  # records with this tag are never purged
+KEEP_AUDIT_ACTIONS = ("memory_wipe",)  # audit rows prune_audit_log never deletes
 
 
 async def purge_payloads(session: AsyncSession, rules, now: datetime | None = None) -> int:
@@ -58,7 +59,10 @@ async def purge_expired_auth(session: AsyncSession, now: datetime | None = None)
 
 async def prune_audit_log(session: AsyncSession, days: int, now: datetime | None = None) -> int:
     now = now or datetime.now(timezone.utc)
-    result = await session.execute(delete(AuditLog).where(AuditLog.ts < now - timedelta(days=days)))
+    # A wipe's audit row is the only record of when a member's memory was cut
+    # off, so it is never pruned (issue #157).
+    result = await session.execute(delete(AuditLog).where(
+        AuditLog.ts < now - timedelta(days=days), AuditLog.action.not_in(KEEP_AUDIT_ACTIONS)))
     return result.rowcount or 0
 
 

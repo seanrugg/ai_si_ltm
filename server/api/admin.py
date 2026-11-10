@@ -25,6 +25,7 @@ from server.services import auth as auth_service
 from server.services import conversation as conversation_service, enrollment, integrity, lrs as lrs_service, mcp_access, policy_lifecycle, recall, runtime_settings, swarms
 from server.services import export as export_service
 from server.services import records as records_service
+from server.services import memory_wipe
 from server.services.errors import ServiceError
 
 router = APIRouter(prefix="/api", tags=["admin"])
@@ -125,6 +126,15 @@ async def reject(member_id: str, body: ReasonRequest, request: Request, admin: A
 async def revoke(member_id: str, body: ReasonRequest, request: Request, admin: AdminAuth = ADMIN) -> dict:
     async with transaction(request) as session:
         m = await enrollment.revoke(session, _uuid(member_id), admin=admin.username, reason=body.reason)
+        return enrollment.member_to_dict(m)
+
+
+@router.post("/admin/members/{member_id}/wipe")
+async def wipe_member(member_id: str, request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    """Memory wipe (issue #157): the member stops recalling anything before now. No undo."""
+    async with transaction(request) as session:
+        m = await memory_wipe.wipe_member(session, _uuid(member_id), admin=admin.username,
+                                          confirm=body.get("confirm"))
         return enrollment.member_to_dict(m)
 
 
@@ -491,6 +501,13 @@ async def revoke_swarm_endpoint(name: str, request: Request, admin: AdminAuth = 
         swarm = await swarms.get_swarm(session, name)
         released = await swarms.revoke_swarm(session, swarm, actor=f"admin:{admin.username}")
         return {"swarm": swarm.name, "revoked": True, "members_released": released}
+
+
+@router.post("/admin/swarms/{name}/wipe")
+async def wipe_swarm(name: str, request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    """Memory wipe for every active member of a swarm (issue #157). No undo."""
+    async with transaction(request) as session:
+        return await memory_wipe.wipe_swarm(session, name, admin=admin.username, confirm=body.get("confirm"))
 
 
 @router.get("/admin/conversation")
