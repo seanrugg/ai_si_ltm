@@ -74,6 +74,8 @@ CREATE TABLE members (
 	last_seen_at TIMESTAMP WITH TIME ZONE, 
 	last_ack_seq BIGINT NOT NULL, 
 	last_hash VARCHAR(64) NOT NULL, 
+	recall_floor_id BIGINT DEFAULT '0' NOT NULL, 
+	memory_generation INTEGER DEFAULT '0' NOT NULL, 
 	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
 	PRIMARY KEY (id), 
 	CONSTRAINT ck_members_kind CHECK (kind IN ('robot', 'agent', 'assistant', 'relay')), 

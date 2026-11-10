@@ -1,6 +1,7 @@
 """Member endpoints (``Authorization: Bearer <token>``)."""
 from __future__ import annotations
 
+import dataclasses
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -58,9 +59,11 @@ async def chain_head(request: Request, agent: str | None = None,
 async def _member_scope(session, auth: MemberAuth) -> recall.Scope:
     member = await session.get(Member, auth.member_id)
     try:
-        return recall.effective_scope(auth.permissions, member.scope)
+        scope = recall.effective_scope(auth.permissions, member.scope)
     except recall.RecallDenied as exc:
         raise ServiceError(403, "forbidden", str(exc)) from None
+    # A memory wipe limits what this member reads, from any author (issue #157).
+    return dataclasses.replace(scope, after_id=member.recall_floor_id)
 
 
 def _audit(session, auth: MemberAuth, request: Request, detail: dict, count: int) -> None:
