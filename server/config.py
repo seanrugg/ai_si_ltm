@@ -167,6 +167,8 @@ class ServerConfig(BaseSettings):
     # dashboard-stored value is ignored, writes return 409 locked. Env:
     # LTMS_ENROLLMENT_POLICY_LOCKED.
     enrollment_policy_locked: bool = False
+    # LTMS_RETENTION_LOCKED: environment data retention settings win over the dashboard (#155)
+    retention_locked: bool = False
 
     # Pending enrollment requests older than this many days are expired by the
     # hourly scheduler job. Env: LTMS_PENDING_ENROLLMENT_TTL_DAYS.

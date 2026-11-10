@@ -26,10 +26,12 @@ def start_scheduler(app) -> AsyncIOScheduler:
 
     sched = AsyncIOScheduler(timezone="UTC")
     sched.add_job(run, "interval", minutes=5, args=("purge_expired_auth", retention.purge_expired_auth))
+    # Data retention settings are resolved on every run, so dashboard changes
+    # apply at the next run without a restart (issue #155).
     sched.add_job(run, "cron", hour=7, minute=0,  # 03:00 US Eastern
-                  args=("purge_payloads", retention.purge_payloads, cfg.retention_payload_rules))
+                  args=("purge_payloads", retention.run_payload_purge, cfg))
     sched.add_job(run, "cron", day_of_week="mon", hour=8, minute=0,
-                  args=("prune_audit_log", retention.prune_audit_log, cfg.retention_audit_days))
+                  args=("prune_audit_log", retention.run_audit_prune, cfg))
     if cfg.enable_scheduler:
         # The forwarder's own HTTP client, with a timeout, one per scheduler.
         http = httpx.AsyncClient(timeout=httpx.Timeout(10.0))

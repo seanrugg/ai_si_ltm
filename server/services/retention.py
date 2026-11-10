@@ -60,3 +60,25 @@ async def prune_audit_log(session: AsyncSession, days: int, now: datetime | None
     now = now or datetime.now(timezone.utc)
     result = await session.execute(delete(AuditLog).where(AuditLog.ts < now - timedelta(days=days)))
     return result.rowcount or 0
+
+
+# ---- scheduled jobs that read the current settings (issue #155) ---------------
+
+async def run_payload_purge(session: AsyncSession, cfg, now: datetime | None = None) -> int:
+    """Purge payloads with the data retention rules in force right now."""
+    from server.config import PayloadRule
+    from server.services.runtime_settings import resolve_retention
+
+    settings = await resolve_retention(session, cfg)
+    rules = [PayloadRule(**r) for r in settings["payload_rules"]]
+    return await purge_payloads(session, rules, now=now) if rules else 0
+
+
+async def run_audit_prune(session: AsyncSession, cfg) -> int | None:
+    """Prune the audit log with the setting in force; None (keep forever) skips it."""
+    from server.services.runtime_settings import resolve_retention
+
+    days = (await resolve_retention(session, cfg))["audit_days"]
+    if days is None:
+        return None
+    return await prune_audit_log(session, days)

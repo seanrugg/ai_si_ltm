@@ -31,6 +31,7 @@ AUDIT_ACTIONS = (
     "mcp_token_revoke",
     "mcp_settings_change",
     "mcp_settings_reset",
+    "retention_change",
 )
 
 
