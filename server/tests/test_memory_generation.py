@@ -5,6 +5,7 @@ that is adapter-specific, so the client only exposes a callback.
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -115,3 +116,69 @@ def test_outbox_survives_wipe_detected_at_login(tmp_path, http, admin, mesh):
 
     z3.flush()  # and it gets delivered
     assert len(z3.outbox) == 0
+
+
+# --- state file hardening (issue #201) -------------------------------------
+
+def _client(mesh, state_file, calls=None):
+    z3 = mesh.member("z3-r0", permissions=["contribute", "recall"])
+    z3.state_path = str(state_file)
+    if calls is not None:
+        z3.on_memory_wipe = lambda value: calls.append(value)
+    return z3
+
+
+def test_bump_without_callback_is_saved(tmp_path, admin, mesh):
+    state_file = tmp_path / "generation.json"
+    state_file.write_text(json.dumps({"memory_generation": 1}))
+    z3 = _client(mesh, state_file)
+    assert _wipe(admin, z3).status_code == 200
+    assert _wipe(admin, z3).status_code == 200  # server generation 2
+
+    z3.login()
+    assert json.loads(state_file.read_text()) == {"memory_generation": 2}
+
+    calls: list[int] = []
+    z3.on_memory_wipe = lambda value: calls.append(value)
+    z3.login()
+    assert calls == []  # a callback added later doesn't fire for the old wipe
+
+
+@pytest.mark.parametrize("content", ["{}", "[]", json.dumps({"memory_generation": "2"}),
+                                     json.dumps({"memory_generation": True})])
+def test_unusable_state_file_is_not_known_yet(tmp_path, admin, mesh, content):
+    state_file = tmp_path / "generation.json"
+    state_file.write_text(content)
+    calls: list[int] = []
+    z3 = _client(mesh, state_file, calls)
+    assert _wipe(admin, z3).status_code == 200  # server generation 1
+
+    z3.login()  # does not raise
+    assert calls == []
+    assert json.loads(state_file.read_text()) == {"memory_generation": 1}
+
+
+def test_save_leaves_no_temp_file(tmp_path, admin, mesh):
+    state_file = tmp_path / "generation.json"
+    z3 = _client(mesh, state_file)
+    z3.login()
+    assert json.loads(state_file.read_text()) == {"memory_generation": 0}
+    assert [p.name for p in tmp_path.iterdir()] == ["generation.json"]
+
+
+def test_failed_swap_keeps_the_old_state_file(tmp_path, admin, mesh, monkeypatch):
+    state_file = tmp_path / "generation.json"
+    state_file.write_text(json.dumps({"memory_generation": 1}))
+    calls: list[int] = []
+    z3 = _client(mesh, state_file, calls)
+    assert _wipe(admin, z3).status_code == 200
+    assert _wipe(admin, z3).status_code == 200  # server generation 2
+
+    def boom(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "replace", boom)
+    with pytest.raises(OSError):
+        z3.login()
+    assert json.loads(state_file.read_text()) == {"memory_generation": 1}  # old content intact
+
