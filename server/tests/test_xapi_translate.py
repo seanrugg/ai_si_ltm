@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from server.xapi.translate import record_to_statement
+from server.xapi.translate import GLOSSARY, RECORD_CONCEPTS, record_to_statement
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 
@@ -26,15 +26,7 @@ CASES = _load_cases()
 
 
 def _payload_for(case: dict):
-    payload = case.get("payload")
-    if isinstance(payload, dict) and payload.get("$generate"):
-        return {
-            "kind": "sensor",
-            "sensor": "battery",
-            "unit": "percent",
-            "samples": [{"t": i, "v": 70} for i in range(2000)],
-        }
-    return payload
+    return case.get("payload")
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c["name"])
@@ -114,3 +106,100 @@ def test_place_with_spaces_is_percent_encoded():
     place = s["context"]["contextActivities"]["grouping"][0]
     assert place["id"] == "https://ltms.example.org/places/kitchen%20table"
     assert place["definition"]["name"] == {"en": "kitchen table"}
+
+
+# ---- I2IDL Glossary concepts and swarm contextGroups (issue #142) ----------
+
+
+BASE_CASE = next(c for c in CASES if c["record"].get("swarm"))
+
+
+def _stmt(_version="2.0.0", **changes):
+    rec = {**BASE_CASE["record"], **changes}
+    return record_to_statement(rec, base=BASE_CASE["options"]["base"], xapi_version=_version)
+
+
+def test_category_has_profile_then_learning_record_then_type_concept():
+    decision = _stmt(type="decision")["context"]["contextActivities"]["category"]
+    assert [c["id"] for c in decision][1:] == [GLOSSARY + "learning-record"]
+    assert len(decision) == 2
+    lesson = _stmt(type="lesson")["context"]["contextActivities"]["category"]
+    assert len(lesson) == 3
+    assert lesson[2]["id"] == GLOSSARY + "experiential-learning"
+    assert lesson[2]["definition"]["type"] == "http://www.w3.org/2004/02/skos/core#Concept"
+    assert decision[0]["definition"]["type"] == "http://adlnet.gov/expapi/activities/profile"
+
+
+def test_category_applies_to_both_xapi_versions():
+    old = _stmt(type="lesson", _version="1.0.3")["context"]["contextActivities"]["category"]
+    assert [c["id"] for c in old][1:] == [GLOSSARY + "learning-record", GLOSSARY + "experiential-learning"]
+
+
+def test_context_groups_only_for_swarm_records_at_2_0_0():
+    with_swarm = _stmt()["context"]
+    group = with_swarm["contextGroups"][0]
+    assert group["objectType"] == "contextGroup"
+    assert group["group"]["name"] == BASE_CASE["record"]["swarm"]
+    assert group["relevantTypes"] == ["https://w3id.org/xapi-ai/activity-type/swarm"]
+    assert "grouping" in with_swarm["contextActivities"]  # existing swarm grouping kept
+    assert "contextGroups" not in _stmt(_version="1.0.3")["context"]
+    assert "contextGroups" not in _stmt(swarm=None)["context"]
+
+
+def test_glossary_targets_are_in_the_published_vocabulary():
+    vocab = (Path(__file__).resolve().parents[2] / "docs" / "vocabulary.jsonld").read_text(encoding="utf-8")
+    for concept in ("learning-record", *RECORD_CONCEPTS.values()):
+        assert f'"{GLOSSARY}{concept}"' in vocab, concept
+
+
+# ---- every payload is sent (issue #150) -------------------------------------
+
+E = "https://w3id.org/xapi-ai/extensions/"
+
+
+def _base_rec(**changes):
+    rec = {**BASE_CASE["record"], **changes}
+    rec.pop("outcome", None) if "outcome" not in changes else None
+    return rec
+
+
+def test_thought_decision_and_lesson_payloads_go_to_holocron_payload():
+    for rtype in ("thought", "decision", "lesson"):
+        p = {"text": f"{rtype} body", "n": 1}
+        st = record_to_statement(_base_rec(type=rtype), base="https://x.example", payload=p)
+        assert st["context"]["extensions"][E + "holocron/payload"] == p, rtype
+        assert E + "holocron/payload-purged" not in st["context"]["extensions"]
+
+
+def test_telemetry_over_16kb_is_sent_whole():
+    p = {"kind": "sensor", "sensor": "battery", "unit": "percent",
+         "samples": [{"t": i, "v": 70} for i in range(2000)]}
+    assert len(json.dumps(p)) > 16 * 1024
+    st = record_to_statement(_base_rec(type="perception", tags=["telemetry"]), base="https://x.example", payload=p)
+    assert st["result"]["extensions"][E + "telemetry"] == p
+    assert E + "holocron/payload" not in st["context"]["extensions"]
+
+
+def test_telemetry_of_unknown_kind_goes_to_holocron_payload():
+    p = {"kind": "lidar-raw", "points": 3}
+    st = record_to_statement(_base_rec(type="perception", tags=["telemetry"]), base="https://x.example", payload=p)
+    assert st["context"]["extensions"][E + "holocron/payload"] == p
+    assert "result" not in st
+
+
+def test_missing_payload_is_marked_purged():
+    st = record_to_statement(_base_rec(type="thought"), base="https://x.example", payload=None)
+    assert st["context"]["extensions"][E + "holocron/payload-purged"] is True
+
+
+def test_outcome_on_a_non_action_record_goes_to_result_extensions_only():
+    st = record_to_statement(_base_rec(type="decision", outcome="success"), base="https://x.example", payload={})
+    assert st["result"] == {"extensions": {E + "outcome": "success"}}
+    action = record_to_statement(_base_rec(type="action", outcome="failure"), base="https://x.example", payload={})
+    assert action["result"]["success"] is False
+
+
+def test_header_raw_is_passed_through_as_the_exact_string():
+    raw = '{"agent":"robot-1","seq":1}'
+    st = record_to_statement(_base_rec(type="thought", header_raw=raw), base="https://x.example", payload={})
+    assert st["context"]["extensions"][E + "holocron/header"] == raw

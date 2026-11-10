@@ -9,17 +9,25 @@ from __future__ import annotations
 import uuid
 from urllib.parse import quote
 
-from ltms_contract.canonical import canonicalize
-
 MAPPING_VERSION = "1"
 AI = "https://w3id.org/xapi-ai"
 EXT = AI + "/extensions/"
 PROFILE_VERSION = AI + "/profile/0.10.0"
 # = uuid5(NAMESPACE_URL, PROFILE_VERSION + "/holocron-mapping/1")
 NAMESPACE = uuid.UUID("19413c7a-d33c-5129-b99b-07d709cef285")
-TELEMETRY_MAX_BYTES = 16 * 1024
 
 VALID_XAPI_VERSIONS = ("2.0.0", "1.0.3")
+
+GLOSSARY = "https://id.i2idl.org/concepts/"
+SKOS_CONCEPT = "http://www.w3.org/2004/02/skos/core#Concept"
+# record type -> glossary concept; every statement also gets learning-record
+RECORD_CONCEPTS = {
+    "perception": "sensor",
+    "thought": "metacognition",
+    "communication": "social-learning",
+    "event": "learning-event",
+    "lesson": "experiential-learning",
+}
 
 # record type -> (verb IRI, display)
 VERBS = {
@@ -94,6 +102,11 @@ def record_to_statement(
             "definition": {"type": "http://adlnet.gov/expapi/activities/profile"},
         }
     ]
+    for concept in ("learning-record", RECORD_CONCEPTS.get(rtype)):
+        if concept:
+            category.append(
+                {"objectType": "Activity", "id": GLOSSARY + concept, "definition": {"type": SKOS_CONCEPT}}
+            )
     grouping: list[dict] = []
     swarm = rec.get("swarm")
     if swarm:
@@ -131,6 +144,13 @@ def record_to_statement(
             )
     if context_agents:
         context["contextAgents"] = context_agents
+    if xapi_version == "2.0.0" and swarm:
+        context["contextGroups"] = [{
+            "objectType": "contextGroup",
+            "group": {"objectType": "Group", "name": swarm,
+                      "account": {"homePage": base, "name": swarm}},
+            "relevantTypes": [AI + "/activity-type/swarm"],
+        }]
 
     extensions = {
         EXT + "holocron/seq": rec["seq"],
@@ -156,23 +176,30 @@ def record_to_statement(
     statement["context"] = context
 
     result: dict = {}
-    if rtype == "action":
-        outcome = rec.get("outcome")
-        if outcome:
+    result_ext: dict = {}
+    outcome = rec.get("outcome")
+    if outcome:
+        if rtype == "action":
             result["success"] = outcome == "success"
-            result["extensions"] = {EXT + "outcome": outcome}
-    elif rtype == "perception" and "telemetry" in (rec.get("tags") or []):
-        if isinstance(payload, dict) and payload.get("kind") in _TELEMETRY_KINDS:
-            if len(canonicalize(payload)) <= TELEMETRY_MAX_BYTES:
-                telemetry = dict(payload)
-            else:
-                telemetry = {"kind": payload["kind"]}
-                for key in ("frame", "sensor", "unit"):
-                    if key in payload:
-                        telemetry[key] = payload[key]
-                telemetry["samples_count"] = len(payload.get("samples") or [])
-                telemetry["truncated"] = True
-            result["extensions"] = {EXT + "telemetry": telemetry}
+        result_ext[EXT + "outcome"] = outcome
+
+    # Everything LTMS receives, the LRS receives (Sean, 9 Nov). Known telemetry
+    # goes to result.extensions whole; every other payload goes to
+    # context.extensions as a JSON object; no payload means it was purged.
+    is_telemetry = (rtype == "perception" and "telemetry" in (rec.get("tags") or [])
+                    and isinstance(payload, dict) and payload.get("kind") in _TELEMETRY_KINDS)
+    if payload is None:
+        extensions[EXT + "holocron/payload-purged"] = True
+    elif is_telemetry:
+        result_ext[EXT + "telemetry"] = payload
+    else:
+        extensions[EXT + "holocron/payload"] = payload
+    if rec.get("header_raw") is not None:
+        # The exact signed bytes as a string, so hash and sig can be re-checked.
+        extensions[EXT + "holocron/header"] = rec["header_raw"]
+
+    if result_ext:
+        result["extensions"] = result_ext
     if result:
         statement["result"] = result
 
