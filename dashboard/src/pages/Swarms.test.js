@@ -5,6 +5,7 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import React from "react";
 import { MemoryRouter } from "react-router-dom";
 import Swarms, { KeyOnceDialog } from "./Swarms.jsx";
+import { api } from "../api/client.js";
 
 const swarms = [{
   id: "a".repeat(64), name: "echo-base", status: "active", home: true,
@@ -87,5 +88,19 @@ describe("wipe swarm memory", () => {
     expect(wipeButton.disabled).to.equal(true);
     fireEvent.change(screen.getByLabelText(/Confirm by typing echo-base/), { target: { value: "echo-base" } });
     expect(wipeButton.disabled).to.equal(false);
+  });
+
+  it("wipes with the typed name, says so in text, and asks for the name again next time", async () => {
+    vi.mocked(api).mockResolvedValue({ swarm: "echo-base", wiped: [{ name: "jetson-hub" }, { name: "vector" }] });
+    render(React.createElement(MemoryRouter, null, React.createElement(Swarms)));
+    fireEvent.click(screen.getByRole("button", { name: /^Wipe swarm memory$/ }));
+    fireEvent.change(screen.getByLabelText(/Confirm by typing echo-base/), { target: { value: "echo-base" } });
+    fireEvent.click(screen.getByRole("button", { name: /Wipe 2 active members/ }));
+    expect(await screen.findByText("Memory wiped for 2 members of echo-base.")).toBeDefined();
+    expect(api).toHaveBeenCalledWith("/admin/swarms/echo-base/wipe", { method: "POST", body: { confirm: "echo-base" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Wipe swarm memory$/ }));
+    expect(screen.getByLabelText(/Confirm by typing echo-base/).value).toBe("");
+    expect(screen.getByRole("button", { name: /Wipe 2 active members/ }).disabled).toBe(true);
   });
 });

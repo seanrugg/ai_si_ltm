@@ -242,6 +242,7 @@ function MemberRow({ m, swarm, swarms, onDone }) {
   const [mode, setMode] = useState(null); // null | "edit" | "revoke" | "wipe"
   const [reason, setReason] = useState("");
   const [confirmWipe, setConfirmWipe] = useState("");
+  const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -251,6 +252,29 @@ function MemberRow({ m, swarm, swarms, onDone }) {
     try {
       await api(`/admin/members/${m.id}/${path}`, { method, body });
       setMode(null);
+      onDone();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // The typed name is cleared whenever the panel opens or closes, so a wipe
+  // always needs the name typed again.
+  function showWipe(open) {
+    setConfirmWipe("");
+    setNotice(null);
+    setMode(open ? "wipe" : null);
+  }
+
+  async function wipe() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/admin/members/${m.id}/wipe`, { method: "POST", body: { confirm: m.name } });
+      showWipe(false);
+      setNotice(`${m.name}'s memory was wiped.`);
       onDone();
     } catch (err) {
       setError(err);
@@ -276,12 +300,13 @@ function MemberRow({ m, swarm, swarms, onDone }) {
           <span className="flex flex-wrap gap-2 items-center">
             <button className="btn" onClick={() => setMode("edit")}>Permissions</button>
             <button className="btn btn-danger" onClick={() => setMode("revoke")}>Revoke</button>
-            <button className="btn btn-danger" onClick={() => setMode("wipe")}>Wipe memory</button>
+            <button className="btn btn-danger" onClick={() => showWipe(true)}>Wipe memory</button>
             <HelpTip id={`wipe-memory-help-${m.name}`} label="About wiping memory">{MEMORY_WIPE}</HelpTip>
           </span>
         )}
       </div>
       <ErrorNote error={error} />
+      <p className={notice ? "mt-2 text-sm" : "sr-only"} role="status">{notice}</p>
       {m.status === "active" && mode === null && (
         <MembershipForm key={`${swarm?.swarm ?? ""}:${swarm?.role ?? ""}`} name={m.name} current={swarm ?? null}
                         swarms={swarms} onDone={onDone} />
@@ -309,30 +334,33 @@ function MemberRow({ m, swarm, swarms, onDone }) {
           </div>
         </div>
       )}
-        {m.status === "active" && mode === "wipe" && (
-          <div className="mt-3 rounded-md border border-bad/40 bg-bad/5 p-3 text-sm">
-            <p>
-              <strong>Clean slate. This can't be undone.</strong> This droid stops recalling everything from before now,
-              including what other droids recorded. It keeps its name and keeps writing to its chain. Policies still apply.
-              The record log and anything already sent to an LRS are kept.
-            </p>
-            {m.memory_generation > 0 && (
-              <p className="mb-2 text-xs text-paper-muted">Wiped {plural(m.memory_generation, "time")}</p>
-            )}
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <input className="field w-72" value={confirmWipe}
-                     onChange={(e) => setConfirmWipe(e.target.value)}
-                     placeholder={m.name} aria-label={`Confirm by typing ${m.name}`} />
-              <HelpTip id={`wipe-vs-delete-${m.name}`} label="Wipe vs delete">{WIPE_VS_DELETE}</HelpTip>
-              <button className="btn btn-danger" disabled={busy || confirmWipe !== m.name}
-                      onClick={() => act("POST", "wipe", { confirm: m.name })}>
-                Wipe {m.name}'s memory
-              </button>
-              <button className="btn" onClick={() => setMode(null)}>Cancel</button>
-            </div>
-            <p className="mt-2 text-xs text-paper-muted">To keep a copy first, use Export.</p>
+      {m.status === "active" && mode === "wipe" && (
+        <div className="mt-3 rounded-md border border-bad/40 bg-bad/5 p-3 text-sm">
+          <p>
+            <strong>Clean slate. This can't be undone.</strong> This droid stops recalling everything from before now,
+            including what other droids recorded. It keeps its name and keeps writing to its chain. Policies still apply.
+            The record log and anything already sent to an LRS are kept.
+          </p>
+          {m.memory_generation > 0 && (
+            <p className="mt-2 text-xs text-paper-muted">Wiped {plural(m.memory_generation, "time")}</p>
+          )}
+          <label htmlFor={`wipe-confirm-${m.id}`} className="mt-2 block text-xs text-paper-muted">
+            Confirm by typing {m.name}
+          </label>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <input id={`wipe-confirm-${m.id}`} className="field w-72" value={confirmWipe} autoComplete="off"
+                   onChange={(e) => setConfirmWipe(e.target.value)} />
+            <HelpTip id={`wipe-vs-delete-${m.name}`} label="Wipe vs delete">{WIPE_VS_DELETE}</HelpTip>
+            <button className="btn btn-danger" disabled={busy || confirmWipe !== m.name} onClick={wipe}>
+              Wipe {m.name}'s memory
+            </button>
+            <button className="btn" onClick={() => showWipe(false)}>Cancel</button>
           </div>
-        )}
+          <p className="mt-2 text-xs text-paper-muted">
+            To keep a copy first, use <Link to="/export" className="underline">Export</Link>.
+          </p>
+        </div>
+      )}
     </li>
   );
 }

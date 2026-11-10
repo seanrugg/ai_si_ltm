@@ -176,4 +176,32 @@ describe("wipe memory", () => {
     fireEvent.change(screen.getByLabelText(/Confirm by typing alice/), { target: { value: "alice" } });
     expect(wipeButton.disabled).to.equal(false);
   });
+
+  it("wipes with the typed name, says so in text, and asks for the name again next time", async () => {
+    renderMembers();
+    fireEvent.click(screen.getAllByRole("button", { name: /^Wipe memory$/ })[0]);
+    fireEvent.change(screen.getByLabelText(/Confirm by typing alice/), { target: { value: "alice" } });
+    fireEvent.click(screen.getByRole("button", { name: /Wipe alice's memory/ }));
+    expect(await screen.findByText("alice's memory was wiped.")).toBeDefined();
+    expect(api).toHaveBeenCalledWith("/admin/members/1/wipe", { method: "POST", body: { confirm: "alice" } });
+
+    fireEvent.click(screen.getAllByRole("button", { name: /^Wipe memory$/ })[0]);
+    expect(screen.getByLabelText(/Confirm by typing alice/).value).toBe("");
+    expect(screen.getByRole("button", { name: /Wipe alice's memory/ }).disabled).toBe(true);
+  });
+
+  it("clears the typed name on Cancel", () => {
+    renderMembers();
+    fireEvent.click(screen.getAllByRole("button", { name: /^Wipe memory$/ })[0]);
+    fireEvent.change(screen.getByLabelText(/Confirm by typing alice/), { target: { value: "alice" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel$/ }));
+    fireEvent.click(screen.getAllByRole("button", { name: /^Wipe memory$/ })[0]);
+    expect(screen.getByRole("button", { name: /Wipe alice's memory/ }).disabled).toBe(true);
+  });
+
+  it("links to Export from the wipe panel", () => {
+    renderMembers();
+    fireEvent.click(screen.getAllByRole("button", { name: /^Wipe memory$/ })[0]);
+    expect(screen.getByRole("link", { name: "Export" }).getAttribute("href")).toBe("/export");
+  });
 });
