@@ -46,7 +46,7 @@ export default function Integrity() {
                   <span><StatusBadge status={r.status} /></span>
                   <span className="text-sm text-paper-muted">
                     {r.records} records verified
-                    {r.payloads_purged > 0 && `, ${r.payloads_purged} payloads purged by retention`}
+                    {r.payloads_purged > 0 && `, ${r.payloads_purged} payloads purged`}
                   </span>
                 </div>
                 {r.error && (
