@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client.js";
-import RecordRow from "../components/RecordRow.jsx";
+import RecordRow, { TombstoneRow } from "../components/RecordRow.jsx";
 import { EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui.jsx";
 import { localTime } from "../lib/format.js";
+import { missingSeqs } from "../lib/tombstones.js";
 
 const TYPES = ["communication", "thought", "decision", "action", "event", "perception", "lesson", "policy", "system"];
 const OUTCOMES = ["success", "partial", "reflex_stop", "stuck", "abandoned", "failed"];
@@ -68,6 +69,41 @@ export default function Timeline() {
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auto, filterKey]);
+
+  // A member's own timeline (only the Member filter set): where a seq is
+  // missing, look it up, and show a tombstone if an admin deleted it (#174).
+  // Seqs hidden by the telemetry toggle come back as ordinary records and are skipped.
+  const memberOnly = Boolean(filters.agent) && !filters.type && !filters.outcome && !filters.place && !filters.q;
+  const [tombstones, setTombstones] = useState([]);
+  const recordSeqs = records.map((r) => `${r.agent}:${r.seq}`).join(" ");
+  useEffect(() => {
+    const own = memberOnly ? records.filter((r) => r.agent === filters.agent) : [];
+    const seqs = missingSeqs(own);
+    if (seqs.length === 0) {
+      setTombstones([]);
+      return undefined;
+    }
+    let live = true;
+    Promise.all(seqs.map(async (seq) => {
+      try {
+        const rec = await api(`/admin/records/${encodeURIComponent(filters.agent)}/${seq}`);
+        return rec?.deleted ? rec : null;
+      } catch {
+        return null;
+      }
+    })).then((found) => {
+      if (live) setTombstones(found.filter(Boolean));
+    });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recordSeqs, memberOnly, filters.agent]);
+
+  // Tombstones go where their seq falls; the list is newest first.
+  const rows = [...records];
+  for (const t of tombstones) {
+    const at = rows.findIndex((r) => r.agent === t.agent && Number(r.seq) < t.seq);
+    rows.splice(at === -1 ? rows.length : at, 0, t);
+  }
 
   function apply(e) {
     e.preventDefault();
@@ -149,7 +185,9 @@ export default function Timeline() {
       <ErrorNote error={error} onRetry={() => load(0)} />
       {records.length > 0 && (
         <ul className="panel" aria-label="Records, newest first">
-          {records.map((r) => <RecordRow key={r.hash} record={r} />)}
+          {rows.map((r) => (r.deleted
+            ? <TombstoneRow key={`deleted-${r.hash}`} tombstone={r} />
+            : <RecordRow key={r.hash} record={r} />))}
         </ul>
       )}
       {loading && <Loading what="Loading records" />}
