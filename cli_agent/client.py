@@ -11,8 +11,10 @@ copy this: it is the whole member side of the protocol in ~150 lines.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 
 import httpx
+from typing import Callable
 
 from ltms_contract import GENESIS_HASH, auth_signing_message, build_record, load_key, public_key_hex
 
@@ -25,7 +27,9 @@ class LTMSError(Exception):
 
 class LTMSClient:
     def __init__(self, base_url: str | None = None, *, key_path: str | None = None, name: str | None = None,
-                 signing_key=None, http: httpx.Client | None = None, timeout: float = 15.0) -> None:
+                 signing_key=None, http: httpx.Client | None = None, timeout: float = 15.0,
+                 state_path: str | None = None,
+                 on_memory_wipe: Callable[[int], None] | None = None) -> None:
         if key_path:
             name, signing_key = load_key(key_path)
         if signing_key is None or not name:
@@ -38,6 +42,40 @@ class LTMSClient:
         self.seq = 0                 # last seq the server acknowledged
         self.last_hash = GENESIS_HASH
         self.outbox: list[dict] = []  # signed, not yet acknowledged
+        self.state_path = state_path   # small JSON file remembering the last seen memory_generation
+        self.on_memory_wipe = on_memory_wipe  # device-specific callback; never set by this package
+
+    # ------------------------------------------------------------------ generation tracking
+
+    def _load_generation(self) -> int | None:
+        """Last seen memory_generation, or None if not known yet."""
+        if self.state_path is None:
+            return None
+        try:
+            with open(self.state_path) as f:
+                return int(json.load(f).get("memory_generation") or 0)
+        except (FileNotFoundError, json.JSONDecodeError, ValueError, TypeError):
+            return None
+
+    def _save_generation(self, value: int) -> None:
+        if self.state_path is None:
+            return
+        with open(self.state_path, "w") as f:
+            json.dump({"memory_generation": value}, f)
+
+    def _check_generation(self, value: int) -> None:
+        """Warn the device when the server's memory_generation moved ahead of what we last saw.
+
+        A wipe resets memory, not the chain: this never touches self.outbox.
+        The new value is saved only after the callback returns, so a crash re-runs it.
+        """
+        saved = self._load_generation()
+        if saved is None:
+            self._save_generation(value)   # not known yet: remember it, no callback
+            return
+        if value > saved and self.on_memory_wipe is not None:
+            self.on_memory_wipe(value)
+            self._save_generation(value)
 
     # ------------------------------------------------------------------ http
     def _call(self, method: str, path: str, *, auth: bool = True, **kw) -> dict:
@@ -70,6 +108,7 @@ class LTMSClient:
         self.token_expires = datetime.fromisoformat(tok["expires_at"])
         self.permissions = tok["permissions"]
         self.seq, self.last_hash = tok["last_ack_seq"], tok["last_hash"]
+        self._check_generation(tok["memory_generation"])
         return tok
 
     def _ensure_token(self) -> None:
@@ -81,6 +120,7 @@ class LTMSClient:
         head = self._call("GET", "/api/records/head")
         self.seq, self.last_hash = head["last_ack_seq"], head["last_hash"]
         self.outbox.clear()
+        self._check_generation(head["memory_generation"])
         return head
 
     # ------------------------------------------------------------------ write
