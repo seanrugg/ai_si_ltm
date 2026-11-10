@@ -16,7 +16,8 @@ from ltms_contract import RECORD_TYPES
 from server.api.deps import ADMIN_COOKIE, AdminAuth, client_ip, current_admin, transaction
 from server.api.schemas import (AdminLogin, ApproveRequest, BulkMembersRequest,
                                 EnrollmentPolicyUpdate, InviteCreate, McpSettingsUpdate,
-                                McpTokenCreate, PermissionsRequest, ReasonRequest, SwarmMode)
+                                LrsResumeRequest, McpTokenCreate, PermissionsRequest, ReasonRequest,
+                                SwarmMode)
 from server.models import (AuditLog, EnrollmentSwarmRequest, Member, McpToken, Record, RecordPayload,
                            RecordProvenance, RuntimeSetting, Swarm, SwarmMember)
 from server.services import auth as auth_service
@@ -977,6 +978,15 @@ async def update_lrs_endpoint(endpoint_id: str, request: Request, body: dict, ad
             actor=f"admin:{admin.username}",
             **{k: v for k, v in body.items() if k in lrs_service.PATCH_FIELDS},
         )
+        return lrs_service.endpoint_to_dict(endpoint)
+
+
+@router.post("/admin/lrs/{endpoint_id}/resume")
+async def resume_lrs_endpoint(endpoint_id: str, body: LrsResumeRequest, request: Request,
+                              admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        endpoint = await lrs_service.resume_endpoint(
+            session, endpoint_id, actor=f"admin:{admin.username}", backlog_mode=body.backlog)
         return lrs_service.endpoint_to_dict(endpoint)
 
 

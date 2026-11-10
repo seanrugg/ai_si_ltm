@@ -290,6 +290,32 @@ async def backlog(session: AsyncSession, endpoint: LrsEndpoint) -> int:
     return int((await session.execute(stmt)).scalar() or 0)
 
 
+async def resume_endpoint(
+    session: AsyncSession, endpoint_id: uuid.UUID | str, *, actor: str, backlog_mode: str
+) -> LrsEndpoint:
+    """Turn a paused endpoint back on, skipping or sending what was written meanwhile.
+
+    The only way to move a cursor by hand, and it only moves forward.
+    """
+    if backlog_mode not in ("skip", "send"):
+        raise ServiceError(422, "bad_backlog_mode", 'backlog must be "skip" or "send"')
+    endpoint = await get_endpoint(session, endpoint_id)
+    if endpoint.enabled:
+        raise ServiceError(409, "already_enabled", f"endpoint {endpoint.name!r} is already sending")
+    pending = await backlog(session, endpoint)
+    old_cursor = endpoint.cursor
+    if backlog_mode == "skip":
+        newest = (await session.execute(select(func.max(Record.id)))).scalar()
+        if newest is not None and newest > (old_cursor or 0):
+            endpoint.cursor = newest
+    endpoint.enabled = True
+    session.add(AuditLog(actor=actor, action="lrs_resume", detail={
+        "endpoint_id": str(endpoint.id), "endpoint": endpoint.name, "backlog_mode": backlog_mode,
+        "pending": pending, "old_cursor": old_cursor, "new_cursor": endpoint.cursor,
+    }))
+    return endpoint
+
+
 async def forward_once(session: AsyncSession, cfg: ServerConfig, http: httpx.AsyncClient) -> dict:
     """Send each enabled endpoint its next batch of in-scope xAPI statements.
 
@@ -375,11 +401,9 @@ async def _forward_endpoint(
         m.id: m.name for m in await session.scalars(select(Member).where(Member.id.in_(list(relay_ids))))
     } if relay_ids else {}
 
-    # Payloads only for perception records tagged telemetry; other payloads are
-    # never loaded and never sent.
-    telemetry_ids = {r.id for r in records
-                     if r.type == "perception" and "telemetry" in (r.tags or [])}
-    payloads = await fetch_payloads(session, [r for r in records if r.id in telemetry_ids])
+    # Every payload goes to the LRS (Sean, 9 Nov); the endpoint's scope still
+    # narrows which records are sent.
+    payloads = await fetch_payloads(session, records)
 
     statements = []
     for r in records:
@@ -391,10 +415,9 @@ async def _forward_endpoint(
         rec["relay"] = relay_names.get(prov.relay_member_id) if prov is not None and prov.relay_member_id is not None else None
         rec["agent_kind"] = member_by_id[r.member_id].kind
         rec["received_at"] = r.received_at.isoformat()
-        payload = None
-        if r.id in telemetry_ids:
-            row = payloads.get(r.id)
-            payload = json.loads(row.payload_raw) if row is not None else None
+        rec["header_raw"] = r.header_raw.decode("utf-8")
+        row = payloads.get(r.id)
+        payload = json.loads(row.payload_raw) if row is not None else None
         statements.append(record_to_statement(
             rec, base=cfg.public_base_url, xapi_version=endpoint.xapi_version, payload=payload))
 

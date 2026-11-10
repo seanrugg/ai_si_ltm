@@ -63,6 +63,13 @@
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/learning-record",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
       }
      ],
      "grouping": [
@@ -101,7 +108,8 @@
      "https://w3id.org/xapi-ai/extensions/holocron/refs": {
       "because": "robot-1:41"
      },
-     "https://w3id.org/xapi-ai/extensions/software": "z3 0.4.1"
+     "https://w3id.org/xapi-ai/extensions/software": "z3 0.4.1",
+     "https://w3id.org/xapi-ai/extensions/holocron/payload-purged": true
     },
     "contextAgents": [
      {
@@ -115,6 +123,22 @@
       },
       "relevantTypes": [
        "https://w3id.org/xapi-ai/activity-type/relay-role"
+      ]
+     }
+    ],
+    "contextGroups": [
+     {
+      "objectType": "contextGroup",
+      "group": {
+       "objectType": "Group",
+       "name": "example-swarm",
+       "account": {
+        "homePage": "https://ltms.example.org",
+        "name": "example-swarm"
+       }
+      },
+      "relevantTypes": [
+       "https://w3id.org/xapi-ai/activity-type/swarm"
       ]
      }
     ]
@@ -180,6 +204,13 @@
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/learning-record",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
       }
      ]
     },
@@ -192,7 +223,8 @@
      "https://w3id.org/xapi-ai/extensions/holocron/record-type": "action",
      "https://w3id.org/xapi-ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
      "https://w3id.org/xapi-ai/extensions/holocron/mapping-version": "1",
-     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot"
+     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot",
+     "https://w3id.org/xapi-ai/extensions/holocron/payload-purged": true
     }
    },
    "result": {
@@ -265,6 +297,20 @@
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/learning-record",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/social-learning",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
       }
      ],
      "grouping": [
@@ -289,7 +335,8 @@
      "https://w3id.org/xapi-ai/extensions/holocron/record-type": "communication",
      "https://w3id.org/xapi-ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
      "https://w3id.org/xapi-ai/extensions/holocron/mapping-version": "1",
-     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot"
+     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot",
+     "https://w3id.org/xapi-ai/extensions/holocron/payload-purged": true
     },
     "contextAgents": [
      {
@@ -329,6 +376,22 @@
       },
       "relevantTypes": [
        "https://w3id.org/xapi-ai/activity-type/relay-role"
+      ]
+     }
+    ],
+    "contextGroups": [
+     {
+      "objectType": "contextGroup",
+      "group": {
+       "objectType": "Group",
+       "name": "example-swarm",
+       "account": {
+        "homePage": "https://ltms.example.org",
+        "name": "example-swarm"
+       }
+      },
+      "relevantTypes": [
+       "https://w3id.org/xapi-ai/activity-type/swarm"
       ]
      }
     ]
@@ -397,6 +460,20 @@
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/learning-record",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/social-learning",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
       }
      ],
      "grouping": [
@@ -421,7 +498,8 @@
      "https://w3id.org/xapi-ai/extensions/holocron/record-type": "communication",
      "https://w3id.org/xapi-ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
      "https://w3id.org/xapi-ai/extensions/holocron/mapping-version": "1",
-     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot"
+     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot",
+     "https://w3id.org/xapi-ai/extensions/holocron/payload-purged": true
     }
    }
   }
@@ -502,6 +580,20 @@
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/learning-record",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/sensor",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
       }
      ]
     },
@@ -545,101 +637,7 @@
   }
  },
  {
-  "name": "telemetry-sensor-large-truncated",
-  "record": {
-   "agent": "robot-1",
-   "ts": "2026-10-31T14:02:11Z",
-   "prev_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-   "payload_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-   "sig": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-   "received_at": "2026-10-31T14:02:11.412000+00:00",
-   "agent_kind": "robot",
-   "seq": 46,
-   "type": "perception",
-   "hash": "5555555555555555555555555555555555555555555555555555555555555555",
-   "summary": "Battery window",
-   "tags": [
-    "telemetry",
-    "internal"
-   ]
-  },
-  "options": {
-   "base": "https://ltms.example.org",
-   "xapi_version": "2.0.0"
-  },
-  "payload": {
-   "$generate": "sensor battery percent, 2000 samples {t:i, v:70}"
-  },
-  "statement": {
-   "id": "ca8e6454-03d1-5d85-8514-aa96b4d32058",
-   "actor": {
-    "objectType": "Agent",
-    "account": {
-     "homePage": "https://ltms.example.org",
-     "name": "robot-1"
-    }
-   },
-   "verb": {
-    "id": "https://w3id.org/xapi-ai/verbs/perceived",
-    "display": {
-     "en": "perceived"
-    }
-   },
-   "object": {
-    "objectType": "Activity",
-    "id": "https://ltms.example.org/records/robot-1/46",
-    "definition": {
-     "type": "https://w3id.org/xapi-ai/activity-type/record",
-     "name": {
-      "en": "Battery window"
-     }
-    }
-   },
-   "timestamp": "2026-10-31T14:02:11Z",
-   "version": "2.0.0",
-   "context": {
-    "contextActivities": {
-     "category": [
-      {
-       "objectType": "Activity",
-       "id": "https://w3id.org/xapi-ai/profile/0.10.0",
-       "definition": {
-        "type": "http://adlnet.gov/expapi/activities/profile"
-       }
-      }
-     ]
-    },
-    "extensions": {
-     "https://w3id.org/xapi-ai/extensions/holocron/seq": 46,
-     "https://w3id.org/xapi-ai/extensions/holocron/hash": "5555555555555555555555555555555555555555555555555555555555555555",
-     "https://w3id.org/xapi-ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-     "https://w3id.org/xapi-ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-     "https://w3id.org/xapi-ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-     "https://w3id.org/xapi-ai/extensions/holocron/record-type": "perception",
-     "https://w3id.org/xapi-ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
-     "https://w3id.org/xapi-ai/extensions/holocron/mapping-version": "1",
-     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot",
-     "https://w3id.org/xapi-ai/extensions/holocron/tags": [
-      "telemetry",
-      "internal"
-     ]
-    }
-   },
-   "result": {
-    "extensions": {
-     "https://w3id.org/xapi-ai/extensions/telemetry": {
-      "kind": "sensor",
-      "sensor": "battery",
-      "unit": "percent",
-      "samples_count": 2000,
-      "truncated": true
-     }
-    }
-   }
-  }
- },
- {
-  "name": "telemetry-unknown-kind-no-payload",
+  "name": "telemetry-unknown-kind-payload",
   "record": {
    "agent": "robot-1",
    "ts": "2026-10-31T14:02:11Z",
@@ -700,6 +698,20 @@
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/learning-record",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/sensor",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
       }
      ]
     },
@@ -715,13 +727,21 @@
      "https://w3id.org/xapi-ai/extensions/agent-kind": "robot",
      "https://w3id.org/xapi-ai/extensions/holocron/tags": [
       "telemetry"
-     ]
+     ],
+     "https://w3id.org/xapi-ai/extensions/holocron/payload": {
+      "kind": "lidar",
+      "points": [
+       1,
+       2,
+       3
+      ]
+     }
     }
    }
   }
  },
  {
-  "name": "perception-not-telemetry-payload-ignored",
+  "name": "perception-not-telemetry-payload",
   "record": {
    "agent": "robot-1",
    "ts": "2026-10-31T14:02:11Z",
@@ -779,6 +799,20 @@
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/learning-record",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/sensor",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
       }
      ]
     },
@@ -791,7 +825,11 @@
      "https://w3id.org/xapi-ai/extensions/holocron/record-type": "perception",
      "https://w3id.org/xapi-ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
      "https://w3id.org/xapi-ai/extensions/holocron/mapping-version": "1",
-     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot"
+     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot",
+     "https://w3id.org/xapi-ai/extensions/holocron/payload": {
+      "kind": "pose",
+      "samples": []
+     }
     }
    }
   }
@@ -857,6 +895,20 @@
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/learning-record",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/experiential-learning",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
       }
      ]
     },
@@ -874,7 +926,8 @@
       "from": [
        "robot-1:43"
       ]
-     }
+     },
+     "https://w3id.org/xapi-ai/extensions/holocron/payload-purged": true
     }
    }
   }
@@ -935,6 +988,20 @@
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/learning-record",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
+      },
+      {
+       "objectType": "Activity",
+       "id": "https://id.i2idl.org/concepts/learning-event",
+       "definition": {
+        "type": "http://www.w3.org/2004/02/skos/core#Concept"
+       }
       }
      ]
     },
@@ -947,7 +1014,8 @@
      "https://w3id.org/xapi-ai/extensions/holocron/record-type": "event",
      "https://w3id.org/xapi-ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
      "https://w3id.org/xapi-ai/extensions/holocron/mapping-version": "1",
-     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot"
+     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot",
+     "https://w3id.org/xapi-ai/extensions/holocron/payload-purged": true
     }
    }
   }
