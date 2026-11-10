@@ -26,15 +26,7 @@ CASES = _load_cases()
 
 
 def _payload_for(case: dict):
-    payload = case.get("payload")
-    if isinstance(payload, dict) and payload.get("$generate"):
-        return {
-            "kind": "sensor",
-            "sensor": "battery",
-            "unit": "percent",
-            "samples": [{"t": i, "v": 70} for i in range(2000)],
-        }
-    return payload
+    return case.get("payload")
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c["name"])
@@ -158,3 +150,56 @@ def test_glossary_targets_are_in_the_published_vocabulary():
     vocab = (Path(__file__).resolve().parents[2] / "docs" / "vocabulary.jsonld").read_text(encoding="utf-8")
     for concept in ("learning-record", *RECORD_CONCEPTS.values()):
         assert f'"{GLOSSARY}{concept}"' in vocab, concept
+
+
+# ---- every payload is sent (issue #150) -------------------------------------
+
+E = "https://w3id.org/xapi-ai/extensions/"
+
+
+def _base_rec(**changes):
+    rec = {**BASE_CASE["record"], **changes}
+    rec.pop("outcome", None) if "outcome" not in changes else None
+    return rec
+
+
+def test_thought_decision_and_lesson_payloads_go_to_holocron_payload():
+    for rtype in ("thought", "decision", "lesson"):
+        p = {"text": f"{rtype} body", "n": 1}
+        st = record_to_statement(_base_rec(type=rtype), base="https://x.example", payload=p)
+        assert st["context"]["extensions"][E + "holocron/payload"] == p, rtype
+        assert E + "holocron/payload-purged" not in st["context"]["extensions"]
+
+
+def test_telemetry_over_16kb_is_sent_whole():
+    p = {"kind": "sensor", "sensor": "battery", "unit": "percent",
+         "samples": [{"t": i, "v": 70} for i in range(2000)]}
+    assert len(json.dumps(p)) > 16 * 1024
+    st = record_to_statement(_base_rec(type="perception", tags=["telemetry"]), base="https://x.example", payload=p)
+    assert st["result"]["extensions"][E + "telemetry"] == p
+    assert E + "holocron/payload" not in st["context"]["extensions"]
+
+
+def test_telemetry_of_unknown_kind_goes_to_holocron_payload():
+    p = {"kind": "lidar-raw", "points": 3}
+    st = record_to_statement(_base_rec(type="perception", tags=["telemetry"]), base="https://x.example", payload=p)
+    assert st["context"]["extensions"][E + "holocron/payload"] == p
+    assert "result" not in st
+
+
+def test_missing_payload_is_marked_purged():
+    st = record_to_statement(_base_rec(type="thought"), base="https://x.example", payload=None)
+    assert st["context"]["extensions"][E + "holocron/payload-purged"] is True
+
+
+def test_outcome_on_a_non_action_record_goes_to_result_extensions_only():
+    st = record_to_statement(_base_rec(type="decision", outcome="success"), base="https://x.example", payload={})
+    assert st["result"] == {"extensions": {E + "outcome": "success"}}
+    action = record_to_statement(_base_rec(type="action", outcome="failure"), base="https://x.example", payload={})
+    assert action["result"]["success"] is False
+
+
+def test_header_raw_is_passed_through_as_the_exact_string():
+    raw = '{"agent":"robot-1","seq":1}'
+    st = record_to_statement(_base_rec(type="thought", header_raw=raw), base="https://x.example", payload={})
+    assert st["context"]["extensions"][E + "holocron/header"] == raw
