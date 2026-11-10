@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import json
+import os
 
 import httpx
 from typing import Callable
@@ -53,15 +54,26 @@ class LTMSClient:
             return None
         try:
             with open(self.state_path) as f:
-                return int(json.load(f).get("memory_generation") or 0)
-        except (FileNotFoundError, json.JSONDecodeError, ValueError, TypeError):
+                state = json.load(f)
+        except (FileNotFoundError, ValueError):  # no file, or not JSON
             return None
+        # Anything but {"memory_generation": <int>} is "not known yet". A bool is
+        # an int in Python, so it is ruled out by name.
+        value = state.get("memory_generation") if isinstance(state, dict) else None
+        if isinstance(value, bool) or not isinstance(value, int):
+            return None
+        return value
 
     def _save_generation(self, value: int) -> None:
         if self.state_path is None:
             return
-        with open(self.state_path, "w") as f:
+        # Write a temp file and swap it in, so a crash mid-save leaves the old file intact.
+        tmp = self.state_path + ".tmp"
+        with open(tmp, "w") as f:
             json.dump({"memory_generation": value}, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, self.state_path)
 
     def _check_generation(self, value: int) -> None:
         """Warn the device when the server's memory_generation moved ahead of what we last saw.
@@ -73,9 +85,10 @@ class LTMSClient:
         if saved is None:
             self._save_generation(value)   # not known yet: remember it, no callback
             return
-        if value > saved and self.on_memory_wipe is not None:
-            self.on_memory_wipe(value)
-            self._save_generation(value)
+        if value > saved:
+            if self.on_memory_wipe is not None:
+                self.on_memory_wipe(value)
+            self._save_generation(value)   # also with no callback, so one added later doesn't fire for an old wipe
 
     # ------------------------------------------------------------------ http
     def _call(self, method: str, path: str, *, auth: bool = True, **kw) -> dict:
