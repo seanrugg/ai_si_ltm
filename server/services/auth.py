@@ -69,6 +69,7 @@ async def exchange_token(
         "permissions": member.permissions,
         "last_ack_seq": member.last_ack_seq,
         "last_hash": member.last_hash,
+        "memory_generation": member.memory_generation,
     }
 
 

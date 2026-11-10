@@ -59,7 +59,11 @@ def test_chain_continues_and_verifies(mesh, admin, db_exec):
     z3, _ = _before(mesh)
     head_before = z3.sync_head()
     assert _wipe(admin, z3).status_code == 200
-    assert z3.sync_head() == head_before
+    head_after = z3.sync_head()
+    assert head_after["name"] == head_before["name"]
+    assert head_after["last_ack_seq"] == head_before["last_ack_seq"]
+    assert head_after["last_hash"] == head_before["last_hash"]
+    assert head_after["memory_generation"] == head_before["memory_generation"] + 1
     z3.append("event", summary="after")
     z3.flush()
     assert z3.sync_head()["last_ack_seq"] == head_before["last_ack_seq"] + 1

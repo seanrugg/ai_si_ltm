@@ -53,7 +53,8 @@ async def chain_head(request: Request, agent: str | None = None,
             if relay_swarm is None or row is None or row.swarm_id != relay_swarm:
                 raise ServiceError(403, "not_in_swarm", f"{agent!r} is not a member of this relay's swarm")
             member = other
-        return {"name": member.name, "last_ack_seq": member.last_ack_seq, "last_hash": member.last_hash}
+        return {"name": member.name, "last_ack_seq": member.last_ack_seq, "last_hash": member.last_hash,
+                "memory_generation": member.memory_generation}
 
 
 async def _member_scope(session, auth: MemberAuth) -> recall.Scope:
