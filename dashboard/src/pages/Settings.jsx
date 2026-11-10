@@ -5,7 +5,7 @@ const GROUPS = [
   { title: "Database", match: (k) => k.startsWith("db_") },
   { title: "Sign-in", match: (k) => k === "admin_username" || k.includes("ttl") || k === "cookie_secure" || k === "future_skew_seconds" },
   { title: "Limits", match: (k) => k.includes("_rate") || k.startsWith("max_") },
-  { title: "Retention", match: (k) => k.startsWith("retention_") },
+  { title: "Data retention", match: (k) => k.startsWith("retention_") },
 ];
 
 const LABELS = {

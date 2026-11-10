@@ -1,0 +1,268 @@
+{
+  "@context": {
+    "skos": "http://www.w3.org/2004/02/skos/core#",
+    "owl": "http://www.w3.org/2002/07/owl#",
+    "inScheme": {
+      "@id": "skos:inScheme",
+      "@type": "@id"
+    },
+    "prefLabel": "skos:prefLabel",
+    "definition": "skos:definition",
+    "editorialNote": "skos:editorialNote",
+    "versionInfo": "owl:versionInfo",
+    "exactMatch": {
+      "@id": "skos:exactMatch",
+      "@type": "@id"
+    },
+    "closeMatch": {
+      "@id": "skos:closeMatch",
+      "@type": "@id"
+    },
+    "broadMatch": {
+      "@id": "skos:broadMatch",
+      "@type": "@id"
+    },
+    "relatedMatch": {
+      "@id": "skos:relatedMatch",
+      "@type": "@id"
+    }
+  },
+  "@graph": [
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "@type": "skos:ConceptScheme",
+      "prefLabel": "LTMS vocabulary",
+      "versionInfo": "0.1.0-provisional",
+      "editorialNote": "Provisional, pending I2IDL review. Matches are functional analogies for a machine memory system, not claims of human cognition. Matched against I2IDL Glossary of Digital Learning v0.0.93."
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/local-journal",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Local journal",
+      "definition": "A member's signed records held on the device until the server acknowledges them, then pruned.",
+      "closeMatch": [
+        "https://id.i2idl.org/concepts/short-term-memory"
+      ]
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/context-pack",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Context pack",
+      "definition": "The capped bundle of records a member reads before acting.",
+      "closeMatch": [
+        "https://id.i2idl.org/concepts/working-memory"
+      ]
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/long-term-store",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Long-term store",
+      "definition": "The server's append-only store of signed records, with permanent headers and a recall API.",
+      "closeMatch": [
+        "https://id.i2idl.org/concepts/long-term-memory"
+      ]
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/recall",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Recall",
+      "definition": "Retrieving stored records through the recall API.",
+      "relatedMatch": [
+        "https://id.i2idl.org/concepts/retrieval-practice"
+      ]
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/record-cycle",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Record cycle",
+      "definition": "The cycle of perception, thought, decision, action and outcome, and lesson.",
+      "closeMatch": [
+        "https://id.i2idl.org/concepts/experiential-learning"
+      ]
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/self-report",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Self-report",
+      "definition": "Perception records tagged internal, and thoughts about the member's own performance.",
+      "relatedMatch": [
+        "https://id.i2idl.org/concepts/metacognitive-monitoring"
+      ]
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/observation-layer",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Observation layer",
+      "definition": "The record contract, member keys, ingest and storage used together to observe a mesh.",
+      "exactMatch": [
+        "https://id.i2idl.org/concepts/instrumentation"
+      ]
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/record",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Record",
+      "definition": "One signed contract entry: evidence about a performance event.",
+      "closeMatch": [
+        "https://id.i2idl.org/concepts/learning-record"
+      ]
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/record-event",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Record event",
+      "definition": "The single occurrence a record describes, identified by agent and sequence number.",
+      "closeMatch": [
+        "https://id.i2idl.org/concepts/learning-event"
+      ]
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/telemetry-window",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Telemetry window",
+      "definition": "A perception record tagged telemetry that summarizes a window of samples.",
+      "closeMatch": [
+        "https://id.i2idl.org/concepts/streaming-learning-data"
+      ]
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/lrs-forwarder",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "LRS forwarder",
+      "definition": "The component that translates records into xAPI statements and sends them to an LRS.",
+      "exactMatch": [
+        "https://id.i2idl.org/concepts/learning-record-provider-lrp"
+      ]
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/record-path",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Record path",
+      "definition": "The route of a record from member through relay and server to any LRS.",
+      "exactMatch": [
+        "https://id.i2idl.org/concepts/data-pipeline"
+      ]
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/permanent-header",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Permanent header",
+      "definition": "Record headers cannot be changed after they are stored.",
+      "closeMatch": [
+        "https://id.i2idl.org/concepts/statement-immutability"
+      ]
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/record-reference",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Record reference",
+      "definition": "The refs field, which points one record at another.",
+      "closeMatch": [
+        "https://id.i2idl.org/concepts/statement-reference"
+      ]
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/integrity-report",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Integrity report",
+      "definition": "The per-member result of checking hashes, signatures and chain continuity.",
+      "relatedMatch": [
+        "https://id.i2idl.org/concepts/data-quality"
+      ]
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/perception",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Perception record",
+      "definition": "Record type: something the member sensed.",
+      "broadMatch": [
+        "https://id.i2idl.org/concepts/sensor"
+      ]
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/thought",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Thought record",
+      "definition": "Record type: the member's reasoning.",
+      "relatedMatch": [
+        "https://id.i2idl.org/concepts/metacognition"
+      ]
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/decision",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Decision record",
+      "definition": "Record type: a choice the member made."
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/action",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Action record",
+      "definition": "Record type: something the member did, with an outcome."
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/communication",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Communication record",
+      "definition": "Record type: an exchange with a peer.",
+      "relatedMatch": [
+        "https://id.i2idl.org/concepts/social-learning"
+      ]
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/event",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Event record",
+      "definition": "Record type: something that happened to or around the member.",
+      "broadMatch": [
+        "https://id.i2idl.org/concepts/learning-event"
+      ]
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/lesson",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Lesson record",
+      "definition": "Record type: something the member concluded from experience.",
+      "relatedMatch": [
+        "https://id.i2idl.org/concepts/experiential-learning",
+        "https://id.i2idl.org/concepts/knowledge-retention"
+      ]
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/policy",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Policy record",
+      "definition": "Record type: an operator rule."
+    },
+    {
+      "@id": "https://w3id.org/xapi-ai/ltms/system",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "System record",
+      "definition": "Record type: reserved for the server."
+    }
+  ]
+}

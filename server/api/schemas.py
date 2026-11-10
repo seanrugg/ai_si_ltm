@@ -81,6 +81,10 @@ class EnrollmentPolicyUpdate(BaseModel):
     confirm: str | None = None
 
 
+class LrsResumeRequest(BaseModel):
+    backlog: str  # "skip" or "send"; validated by the service (422 bad_backlog_mode)
+
+
 class BulkMembersRequest(BaseModel):
     action: str  # "approve" or "reject"
     ids: list[str] = Field(..., max_length=100)
