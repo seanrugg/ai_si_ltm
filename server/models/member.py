@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, CheckConstraint, LargeBinary, String, Text, Uuid
+from sqlalchemy import BigInteger, CheckConstraint, Integer, LargeBinary, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from server.models.base import Base, JSONType, UTCDateTime, utcnow
@@ -44,4 +44,9 @@ class Member(Base):
     # Chain head: highest acknowledged seq and its hash (genesis = 64 zeros).
     last_ack_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     last_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="0" * 64)
+    # Memory wipe (issue #157): this member recalls only records with id above
+    # the floor (policies excepted). The floor only moves forward; the
+    # generation counts wipes so a device can tell it was wiped.
+    recall_floor_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    memory_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utcnow)

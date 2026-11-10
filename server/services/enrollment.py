@@ -384,6 +384,8 @@ def member_to_dict(m: Member) -> dict:
         "scope": m.scope,
         "last_ack_seq": m.last_ack_seq,
         "last_hash": m.last_hash,
+        "memory_generation": m.memory_generation,
+        "recall_floor_id": m.recall_floor_id,
         "enrolled_at": m.enrolled_at.isoformat() if m.enrolled_at else None,
         "revoked_at": m.revoked_at.isoformat() if m.revoked_at else None,
         "last_seen_at": m.last_seen_at.isoformat() if m.last_seen_at else None,

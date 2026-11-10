@@ -34,6 +34,9 @@ class Scope:
     places: list[str] | None = None
     swarms: list[str] | None = None
     payloads: bool = False
+    # Memory wipe (issue #157): only records with id above this are visible,
+    # except policies, which are operating rules rather than memory. 0 = no floor.
+    after_id: int = 0
 
 
 def effective_scope(permissions: list[str], scope: dict | None) -> Scope:
@@ -79,6 +82,8 @@ def apply_scope(stmt: Select, scope: Scope) -> Select:
             conds.append(Record.id.not_in(
                 select(RecordProvenance.record_id).where(RecordProvenance.swarm_id.is_not(None))))
         stmt = stmt.where(or_(*conds)) if conds else stmt.where(false())
+    if scope.after_id:
+        stmt = stmt.where(or_(Record.id > scope.after_id, Record.type == "policy"))
     return stmt
 
 
