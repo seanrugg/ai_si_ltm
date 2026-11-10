@@ -119,6 +119,10 @@ async def list_endpoints(session: AsyncSession) -> list[LrsEndpoint]:
     return list(result.scalars())
 
 
+# Statuses an LRS returns for a batch it will never accept: skip it, don't retry.
+PERMANENT_REJECTIONS = (400, 409, 413, 422)
+
+
 async def _newest_record_id(session: AsyncSession) -> int:
     return (await session.execute(select(func.max(Record.id)))).scalar() or 0
 
@@ -335,8 +339,7 @@ async def forward_once(session: AsyncSession, cfg: ServerConfig, http: httpx.Asy
             if not records:
                 break
             try:
-                await _forward_endpoint(session, cfg, http, endpoint, records)
-                forwarded += len(records)
+                forwarded += await _forward_endpoint(session, cfg, http, endpoint, records)
             except httpx.HTTPError as exc:
                 endpoint.last_error = f"network error: {exc}"
                 endpoint.last_error_at = datetime.now(timezone.utc)
@@ -431,8 +434,22 @@ async def _forward_endpoint(
                     "first_record_id": records[0].id, "last_record_id": records[-1].id},
         ))
         return len(records)
-    if resp.status_code == 409:
-        raise ServiceError(409, "lrs_mapping_changed",
-                           f"endpoint {endpoint.name!r}: HTTP 409, the LRS mapping may have changed; cursor unchanged")
+    if resp.status_code in PERMANENT_REJECTIONS:
+        # The LRS is optional and LTMS runs standalone (Sean, 9 Nov): a batch the
+        # LRS will never accept is skipped, not retried forever. Those records
+        # don't reach that LRS; LTMS keeps them, and the endpoint keeps going.
+        endpoint.cursor = records[-1].id
+        now = datetime.now(timezone.utc)
+        endpoint.last_error = (f"HTTP {resp.status_code}: the LRS rejected {len(records)} statement(s) "
+                               f"(record ids {records[0].id}-{records[-1].id}); skipped, not sent")
+        endpoint.last_error_at = now
+        session.add(AuditLog(
+            actor="system:lrs-forward", action="lrs_skip",
+            detail={"endpoint": endpoint.name, "status": resp.status_code, "count": len(records),
+                    "first_record_id": records[0].id, "last_record_id": records[-1].id},
+        ))
+        return 0
+    # Anything else (5xx, auth, rate limits) is retried next run while the
+    # endpoint is on. Pausing and resuming drops the backlog (#175).
     raise ServiceError(resp.status_code, "bad_response",
                        f"endpoint {endpoint.name!r}: HTTP {resp.status_code}")

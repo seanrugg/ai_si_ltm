@@ -210,20 +210,45 @@ def test_second_forward_sends_only_new_records(admin, mesh, http, app, db_exec):
     assert _endpoint_row(db_exec, "lrs-one").cursor == first_ids[2] + 2
 
 
-def test_409_keeps_cursor_and_reports_mapping(admin, mesh, http, app, db_exec):
+@pytest.mark.parametrize("status", [400, 409, 413, 422])
+def test_a_permanently_rejected_batch_is_skipped_not_retried(status, admin, mesh, http, app, db_exec):
+    """The LRS is optional (Sean, 9 Nov): a batch it will never accept is skipped,
+    logged, and the endpoint carries on with later records."""
+    _endpoint(admin, "lrs-one", "https://one.example.org/", "s1",
+              scope={"types": ["communication"]})
+    z3 = mesh.member("z3-r0")
+    z3.append("communication", summary="rejected")
+    z3.flush()
+
+    assert _forward(app, http, lambda req: httpx.Response(status)) == {"forwarded": 0}
+    ep = _endpoint_row(db_exec, "lrs-one")
+    assert ep.cursor == _record_ids(db_exec)[-1]
+    assert ep.last_error is not None and str(status) in ep.last_error and "skipped" in ep.last_error
+
+    async def skips(session):
+        return list(await session.scalars(select(AuditLog).where(AuditLog.action == "lrs_skip")))
+    rows = db_exec(skips)
+    assert len(rows) == 1 and rows[0].detail["status"] == status and rows[0].detail["count"] == 1
+
+    z3.append("communication", summary="accepted later")
+    z3.flush()
+    sent = []
+    assert _forward(app, http, lambda req: sent.extend(json.loads(req.content)) or httpx.Response(200)) \
+        == {"forwarded": 1}
+    assert [s["object"]["definition"]["name"]["en"] for s in sent] == ["accepted later"]
+
+
+@pytest.mark.parametrize("status", [401, 403, 429, 500, 503])
+def test_other_failures_keep_the_cursor_for_a_retry(status, admin, mesh, http, app, db_exec):
     _endpoint(admin, "lrs-one", "https://one.example.org/", "s1",
               scope={"types": ["communication"]})
     z3 = mesh.member("z3-r0")
     z3.append("communication", summary="hello")
     z3.flush()
-
-    def handler(req):
-        return httpx.Response(409)
-
-    assert _forward(app, http, handler) == {"forwarded": 0}
+    before = _endpoint_row(db_exec, "lrs-one").cursor
+    assert _forward(app, http, lambda req: httpx.Response(status)) == {"forwarded": 0}
     ep = _endpoint_row(db_exec, "lrs-one")
-    assert ep.cursor == 0
-    assert ep.last_error is not None and "409" in ep.last_error and "mapping" in ep.last_error
+    assert ep.cursor == before and str(status) in ep.last_error
 
 
 def test_disabled_and_scopeless_endpoints_send_nothing(admin, mesh, http, app):
