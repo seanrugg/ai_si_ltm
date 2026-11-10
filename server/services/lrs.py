@@ -119,6 +119,10 @@ async def list_endpoints(session: AsyncSession) -> list[LrsEndpoint]:
     return list(result.scalars())
 
 
+async def _newest_record_id(session: AsyncSession) -> int:
+    return (await session.execute(select(func.max(Record.id)))).scalar() or 0
+
+
 async def create_endpoint(
     session: AsyncSession,
     cfg: ServerConfig,
@@ -149,6 +153,8 @@ async def create_endpoint(
         username=username,
         secret_enc=secret_enc,
         scope=scope,
+        # Only records ingested from now on are sent (Sean, 9 Nov; issue #175).
+        cursor=await _newest_record_id(session),
     )
     session.add(endpoint)
     await session.flush()
@@ -232,6 +238,15 @@ async def update_endpoint(
         elif field == "enabled":
             if not isinstance(value, bool):
                 raise ServiceError(422, "bad_lrs", "enabled must be true or false")
+            if value and not endpoint.enabled:
+                # Resuming never sends what was written while paused (#175).
+                skipped = await backlog(session, endpoint)
+                old_cursor = endpoint.cursor
+                endpoint.cursor = max(old_cursor or 0, await _newest_record_id(session))
+                session.add(AuditLog(actor=actor, action="lrs_resume", detail={
+                    "endpoint_id": str(endpoint.id), "endpoint": endpoint.name, "skipped": skipped,
+                    "old_cursor": old_cursor, "new_cursor": endpoint.cursor,
+                }))
         elif field == "username":
             if not isinstance(value, str):
                 raise ServiceError(422, "bad_lrs", "username must be a string")
@@ -288,32 +303,6 @@ async def backlog(session: AsyncSession, endpoint: LrsEndpoint) -> int:
     stmt = select(func.count(Record.id)).where(Record.id > endpoint.cursor)
     stmt = apply_scope(stmt, scope)
     return int((await session.execute(stmt)).scalar() or 0)
-
-
-async def resume_endpoint(
-    session: AsyncSession, endpoint_id: uuid.UUID | str, *, actor: str, backlog_mode: str
-) -> LrsEndpoint:
-    """Turn a paused endpoint back on, skipping or sending what was written meanwhile.
-
-    The only way to move a cursor by hand, and it only moves forward.
-    """
-    if backlog_mode not in ("skip", "send"):
-        raise ServiceError(422, "bad_backlog_mode", 'backlog must be "skip" or "send"')
-    endpoint = await get_endpoint(session, endpoint_id)
-    if endpoint.enabled:
-        raise ServiceError(409, "already_enabled", f"endpoint {endpoint.name!r} is already sending")
-    pending = await backlog(session, endpoint)
-    old_cursor = endpoint.cursor
-    if backlog_mode == "skip":
-        newest = (await session.execute(select(func.max(Record.id)))).scalar()
-        if newest is not None and newest > (old_cursor or 0):
-            endpoint.cursor = newest
-    endpoint.enabled = True
-    session.add(AuditLog(actor=actor, action="lrs_resume", detail={
-        "endpoint_id": str(endpoint.id), "endpoint": endpoint.name, "backlog_mode": backlog_mode,
-        "pending": pending, "old_cursor": old_cursor, "new_cursor": endpoint.cursor,
-    }))
-    return endpoint
 
 
 async def forward_once(session: AsyncSession, cfg: ServerConfig, http: httpx.AsyncClient) -> dict:

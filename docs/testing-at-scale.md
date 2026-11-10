@@ -51,11 +51,8 @@ immutable. To clear an LRS you keep between runs:
 1. Drop and recreate **the LRS's own database**, never the LTMS database.
 2. Recreate its API key if it wasn't seeded from the environment.
 3. Update the endpoint's credentials in LTMS (dashboard, LRS page).
-4. Delete the endpoint in LTMS and add it again. A new endpoint's cursor
-   starts at 0, and nothing else resets it.
 
-## If the record → statement mapping changed
-
-Clear the LRS **before** re-adding the endpoint. Statement IDs are derived
-from record hashes, so the LRS already holds those IDs with the old content:
-it answers 409 Conflict, and that endpoint stops advancing.
+An LRS only receives records ingested while its endpoint is on: a new
+endpoint, or one turned back on after a pause, starts from the newest record
+and never sends what came before. So a cleared LRS fills up again only with
+records written after that point; there is no way to re-send history to it.
