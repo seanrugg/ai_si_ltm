@@ -10,7 +10,8 @@ import { api } from "../api/client.js";
 
 const members = {
   members: [
-    { id: 1, name: "alice", status: "active", kind: "agent", permissions: [], last_ack_seq: 3, last_seen_at: null },
+    { id: 1, name: "alice", status: "active", kind: "agent", permissions: [], last_ack_seq: 3, last_seen_at: null,
+      memory_generation: 2 },
     { id: 2, name: "bob", status: "active", kind: "agent", permissions: [], last_ack_seq: 1, last_seen_at: null },
     { id: 3, name: "charlie", status: "active", kind: "agent", permissions: [], last_ack_seq: 2, last_seen_at: null },
   ],
@@ -35,7 +36,8 @@ vi.mock("../api/client.js", () => ({
 
 beforeEach(() => {
   allMembers = [
-    { id: 1, name: "alice", status: "active", kind: "agent", permissions: [], last_ack_seq: 3, last_seen_at: null },
+    { id: 1, name: "alice", status: "active", kind: "agent", permissions: [], last_ack_seq: 3, last_seen_at: null,
+      memory_generation: 2 },
     { id: 2, name: "bob", status: "active", kind: "agent", permissions: [], last_ack_seq: 1, last_seen_at: null },
     { id: 3, name: "charlie", status: "active", kind: "agent", permissions: [], last_ack_seq: 2, last_seen_at: null },
     { id: "4", name: "dora", status: "pending", kind: "agent", permissions: [], requested_permissions: ["recall"], public_key: "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111", created_at: "2026-01-01T00:00:00Z" },
@@ -146,5 +148,60 @@ describe("pending bulk actions", () => {
     expect(api).toHaveBeenLastCalledWith("/admin/members/bulk", expect.objectContaining({
       body: expect.objectContaining({ action: "reject", reason: "unknown device" }),
     }));
+  });
+});
+
+describe("wipe memory", () => {
+  it("offers Wipe memory for every active member and shows the wipe panel", () => {
+    renderMembers();
+    expect(screen.getAllByRole("button", { name: /^Wipe memory$/ })).toHaveLength(3);
+    fireEvent.click(screen.getAllByRole("button", { name: /^Wipe memory$/ })[0]);
+    expect(screen.getByText(/Clean slate\. This can't be undone\./)).toBeDefined();
+    expect(screen.getByText(/Wiped 2 times/)).toBeDefined();
+    expect(screen.getAllByLabelText(/About wiping memory/)).not.toHaveLength(0);
+    expect(screen.getAllByLabelText(/Wipe vs delete/)).not.toHaveLength(0);
+  });
+
+  it("omits Wiped N times when the member was never wiped", () => {
+    renderMembers();
+    fireEvent.click(screen.getAllByRole("button", { name: /^Wipe memory$/ })[1]); // bob, never wiped
+    expect(screen.queryByText(/Wiped \d+ time/)).toBeNull();
+  });
+
+  it("enables the wipe button only when the confirm input matches the member's name", () => {
+    renderMembers();
+    fireEvent.click(screen.getAllByRole("button", { name: /^Wipe memory$/ })[0]);
+    const wipeButton = screen.getByRole("button", { name: /Wipe alice's memory/ });
+    expect(wipeButton.disabled).to.equal(true);
+    fireEvent.change(screen.getByLabelText(/Confirm by typing alice/), { target: { value: "alice" } });
+    expect(wipeButton.disabled).to.equal(false);
+  });
+
+  it("wipes with the typed name, says so in text, and asks for the name again next time", async () => {
+    renderMembers();
+    fireEvent.click(screen.getAllByRole("button", { name: /^Wipe memory$/ })[0]);
+    fireEvent.change(screen.getByLabelText(/Confirm by typing alice/), { target: { value: "alice" } });
+    fireEvent.click(screen.getByRole("button", { name: /Wipe alice's memory/ }));
+    expect(await screen.findByText("alice's memory was wiped.")).toBeDefined();
+    expect(api).toHaveBeenCalledWith("/admin/members/1/wipe", { method: "POST", body: { confirm: "alice" } });
+
+    fireEvent.click(screen.getAllByRole("button", { name: /^Wipe memory$/ })[0]);
+    expect(screen.getByLabelText(/Confirm by typing alice/).value).toBe("");
+    expect(screen.getByRole("button", { name: /Wipe alice's memory/ }).disabled).toBe(true);
+  });
+
+  it("clears the typed name on Cancel", () => {
+    renderMembers();
+    fireEvent.click(screen.getAllByRole("button", { name: /^Wipe memory$/ })[0]);
+    fireEvent.change(screen.getByLabelText(/Confirm by typing alice/), { target: { value: "alice" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel$/ }));
+    fireEvent.click(screen.getAllByRole("button", { name: /^Wipe memory$/ })[0]);
+    expect(screen.getByRole("button", { name: /Wipe alice's memory/ }).disabled).toBe(true);
+  });
+
+  it("links to Export from the wipe panel", () => {
+    renderMembers();
+    fireEvent.click(screen.getAllByRole("button", { name: /^Wipe memory$/ })[0]);
+    expect(screen.getByRole("link", { name: "Export" }).getAttribute("href")).toBe("/export");
   });
 });
