@@ -1,4 +1,6 @@
 import { useState } from "react";
+import HelpTip from "../components/HelpTip.jsx";
+import { RETENTION_FOREVER, RETENTION_RULES } from "../lib/help.js";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import { ErrorNote, Loading, PageHeader } from "../components/ui.jsx";
@@ -106,16 +108,22 @@ function RetentionForm({ data, onSaved }) {
       <fieldset disabled={locked || busy}>
         <fieldset className="mb-4">
           <legend className="mb-2 text-sm font-bold text-paper-muted">Payloads</legend>
-          <label className="mb-1 flex items-center gap-2 text-sm cursor-pointer">
-            <input type="radio" name="payload-mode" className="accent-led" checked={keepAll}
-                   onChange={() => { setKeepAll(true); setConfirming(false); }} />
-            Keep all payloads forever
-          </label>
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
-            <input type="radio" name="payload-mode" className="accent-led" checked={!keepAll}
-                   onChange={() => { setKeepAll(false); setConfirming(false); }} />
-            Expire payloads by rule
-          </label>
+          <div className="mb-1 flex items-center">
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="radio" name="payload-mode" className="accent-led" checked={keepAll}
+                     onChange={() => { setKeepAll(true); setConfirming(false); }} />
+              Keep all payloads forever
+            </label>
+            <HelpTip id="retention-forever" label="About keeping payloads forever">{RETENTION_FOREVER}</HelpTip>
+          </div>
+          <div className="flex items-center">
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="radio" name="payload-mode" className="accent-led" checked={!keepAll}
+                     onChange={() => { setKeepAll(false); setConfirming(false); }} />
+              Expire payloads by rule
+            </label>
+            <HelpTip id="retention-rules" label="About expiring payloads">{RETENTION_RULES}</HelpTip>
+          </div>
         </fieldset>
 
         {!keepAll && (

@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import HelpTip from "../components/HelpTip.jsx";
+import { LRS_PAUSE, LRS_SCOPE } from "../lib/help.js";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui.jsx";
@@ -60,7 +62,10 @@ export function EndpointRow({ endpoint, backlog, onReload }) {
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
           <dt className="text-paper-muted">xAPI version</dt>
           <dd>{endpoint.xapi_version}</dd>
-          <dt className="text-paper-muted">Sending</dt>
+          <dt className="text-paper-muted">
+            Sending
+            <HelpTip id={`lrs-pause-${endpoint.id}`} label="About pausing">{LRS_PAUSE}</HelpTip>
+          </dt>
           <dd>
             <label className="flex items-center gap-2 cursor-pointer">
               <input type="checkbox" className="accent-led" checked={endpoint.enabled}
@@ -237,7 +242,8 @@ export function EndpointForm({ initial, onSaved, onCancel, busy }) {
             </div>
           ))}
         </div>
-        <p className="mt-1 text-xs text-paper-muted">Comma-separated values per field. An empty <b>types</b> field means nothing is exported.</p>
+        <p className="mt-1 text-xs text-paper-muted">Comma-separated values per field. An empty <b>types</b> field means nothing is exported.
+          <HelpTip id={`${fid}-scope-help`} label="About scope">{LRS_SCOPE}</HelpTip></p>
         <label className="flex items-center gap-2 text-sm mt-2 cursor-pointer">
           <input type="checkbox" checked={form.enabled}
                  onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))} className="accent-led" />

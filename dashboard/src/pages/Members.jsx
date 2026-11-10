@@ -1,4 +1,6 @@
 import { useState } from "react";
+import HelpTip from "../components/HelpTip.jsx";
+import { SWARM_MOVE, SWARM_ROLE } from "../lib/help.js";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
@@ -207,6 +209,7 @@ export function MembershipForm({ name, current, swarms, onDone }) {
             {options.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
           </select>
         </label>
+        <HelpTip id={`${id}-swarm-help`} label={`About moving ${name}`}>{SWARM_MOVE}</HelpTip>
         <label className="flex flex-col gap-1 text-xs text-paper-muted" htmlFor={`${id}-role`}>
           Role
           <select id={`${id}-role`} className="field" value={swarm ? role : ""} disabled={!swarm}
@@ -217,6 +220,7 @@ export function MembershipForm({ name, current, swarms, onDone }) {
             <option value="observer">observer</option>
           </select>
         </label>
+        <HelpTip id={`${id}-role-help`} label="About roles">{SWARM_ROLE}</HelpTip>
         <button className="btn" disabled={busy || kind === "none" || (hubWarning && !hubOk)}>Apply</button>
       </div>
       <p className="mt-1 min-h-4 text-xs text-paper-muted" aria-live="polite">{describeChange(current ?? null, target)}</p>
