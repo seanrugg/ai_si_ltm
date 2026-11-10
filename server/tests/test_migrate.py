@@ -547,3 +547,51 @@ async def _table_names(db_url):
             return {r[0] for r in rows}
     finally:
         await engine.dispose()
+
+
+@needs_postgres
+def test_upgrade_to_0006_allows_delete_only_with_a_tombstone(db_url):
+    """Issue #173: after upgrading, a record row can be deleted only once its
+    tombstone exists; tombstones themselves are append-only; downgrade restores
+    the original rule."""
+    from sqlalchemy import text
+
+    assert _invoke(["upgrade"], db_url)[0] == 0
+    _seed_one_record(db_url)
+
+    async def run(*stmts):
+        engine = create_async_engine(db_url)
+        try:
+            async with engine.begin() as conn:
+                for stmt in stmts:
+                    await conn.execute(text(stmt))
+        finally:
+            await engine.dispose()
+
+    with pytest.raises(Exception):
+        asyncio.run(run("DELETE FROM records"))
+    asyncio.run(run(
+        "INSERT INTO record_tombstones (member_id, agent, seq, hash, prev_hash, deleted_at, deleted_by) "
+        "SELECT member_id, agent, seq, hash, prev_hash, now(), 'admin:test' FROM records",
+        "DELETE FROM record_payloads",
+        "DELETE FROM record_provenance",
+        "DELETE FROM records",
+    ))
+    with pytest.raises(Exception):
+        asyncio.run(run("UPDATE record_tombstones SET reason = 'x'"))
+    with pytest.raises(Exception):
+        asyncio.run(run("DELETE FROM record_tombstones"))
+    with pytest.raises(Exception):
+        asyncio.run(run("TRUNCATE records"))
+
+    from alembic import command
+
+    from server.migrate import alembic_config
+    command.downgrade(alembic_config(db_url), "0005")
+    assert "record_tombstones" not in asyncio.run(_table_names(db_url))
+    asyncio.run(run(
+        "INSERT INTO records (member_id, agent, seq, ts, type, prev_hash, payload_hash, hash, sig, "
+        "header_raw, received_at) VALUES ('00000000-0000-0000-0000-000000000001', 'test', 2, NOW(), "
+        "'event', 'aaaa', 'bbbb', 'bbbb', 'sig', '\\x00'::bytea, NOW())"))
+    with pytest.raises(Exception):
+        asyncio.run(run("DELETE FROM records"))

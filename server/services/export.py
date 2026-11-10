@@ -4,6 +4,11 @@ JSONL is a complete, verifiable copy: each line carries the exact signed
 header string, its hash and signature, the member's public key and the payload,
 so anyone can re-check it with ``ltms_contract``. CSV is for spreadsheets.
 
+Records an admin deleted (#173) are exported as tombstones after the records,
+in agent/seq order, so chains still verify across the gaps. A tombstone has no
+type, time or swarm, so tombstones are included only when the export is
+unfiltered or filtered by member alone.
+
 The export queries ``Record`` directly (everything an admin can see), pages by
 ``Record.id`` in batches of 500, and streams from its own session so the
 request's transaction isn't held open.
@@ -21,14 +26,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ltms_contract import RECORD_TYPES, ContractError, parse_ts
-from server.models import Member, Record, RecordPayload, RecordProvenance, Swarm
+from server.models import Member, Record, RecordPayload, RecordProvenance, RecordTombstone, Swarm
 from server.services.errors import ServiceError
 
 BATCH = 500
 FORMATS = {"jsonl": "application/x-ndjson", "csv": "text/csv; charset=utf-8"}
 CSV_COLUMNS = ["agent", "seq", "ts", "type", "summary", "place", "outcome", "peers", "tags", "refs",
                "swarm", "relay", "received_at", "hash", "prev_hash", "payload_hash", "sig",
-               "payload_purged", "payload"]
+               "payload_purged", "payload", "deleted"]
 _FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
 
 
@@ -139,6 +144,21 @@ async def _records(sessionmaker: async_sessionmaker, f: ExportFilter):
             return
 
 
+async def _tombstones(sessionmaker: async_sessionmaker, f: ExportFilter) -> list[RecordTombstone]:
+    if f.swarm or f.types or f.since or f.until:
+        return []
+    stmt = select(RecordTombstone).order_by(RecordTombstone.agent, RecordTombstone.seq)
+    if f.agent:
+        stmt = stmt.where(RecordTombstone.agent == f.agent)
+    async with sessionmaker() as session:
+        return list(await session.scalars(stmt))
+
+
+def _tombstone_line(t: RecordTombstone) -> dict:
+    return {"deleted": True, "agent": t.agent, "seq": t.seq, "hash": t.hash, "prev_hash": t.prev_hash,
+            "deleted_at": _iso(t.deleted_at), "deleted_by": t.deleted_by, "reason": t.reason}
+
+
 def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat()
 
@@ -157,6 +177,8 @@ async def stream_jsonl(sessionmaker, f: ExportFilter, exported_at: datetime) -> 
             "provenance": {"swarm": ctx["swarm"], "relay": ctx["relay"], "received_at": _iso(r.received_at)},
         }
         yield (json.dumps(line, ensure_ascii=False) + "\n").encode("utf-8")
+    for t in await _tombstones(sessionmaker, f):
+        yield (json.dumps(_tombstone_line(t), ensure_ascii=False) + "\n").encode("utf-8")
 
 
 def safe_cell(value) -> str:
@@ -188,6 +210,12 @@ async def stream_csv(sessionmaker, f: ExportFilter) -> AsyncIterator[bytes]:
                _json_or_empty(r.peers), _json_or_empty(r.tags), _json_or_empty(r.refs),
                ctx["swarm"], ctx["relay"], _iso(r.received_at), r.hash, r.prev_hash, r.payload_hash, r.sig,
                "true" if payload is None else "false",
-               "" if payload is None else payload.payload_raw.decode("utf-8")]
+               "" if payload is None else payload.payload_raw.decode("utf-8"), "false"]
         writer.writerow([safe_cell(v) for v in row])
+        yield flush()
+    for t in await _tombstones(sessionmaker, f):
+        row = {c: "" for c in CSV_COLUMNS}
+        row.update(agent=t.agent, seq=t.seq, hash=t.hash, prev_hash=t.prev_hash, deleted="true",
+                   summary=f"deleted by {t.deleted_by} on {_iso(t.deleted_at)}" + (f": {t.reason}" if t.reason else ""))
+        writer.writerow([safe_cell(row[c]) for c in CSV_COLUMNS])
         yield flush()

@@ -33,6 +33,7 @@ AUDIT_ACTIONS = (
     "mcp_settings_change",
     "mcp_settings_reset",
     "retention_change",
+    "record_delete",
 )
 
 

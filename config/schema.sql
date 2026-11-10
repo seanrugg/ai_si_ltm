@@ -4,9 +4,10 @@
 -- Apply to an empty database as the ltms owner:
 --   psql -v ON_ERROR_STOP=1 -d ltms -f config/schema.sql
 --
--- `records` holds permanent, signed chain headers and is append-only (triggers
--- below block UPDATE, DELETE and TRUNCATE). `record_payloads` may be purged by
--- retention; the chain still verifies without them.
+-- `records` holds signed chain headers and is append-only (triggers below
+-- block UPDATE and TRUNCATE, and DELETE unless the record's tombstone in
+-- `record_tombstones` already exists). `record_tombstones` is append-only.
+-- `record_payloads` may be purged by retention; the chain still verifies.
 
 BEGIN;
 
@@ -167,6 +168,32 @@ CREATE TABLE invites (
 
 CREATE INDEX idx_invites_swarm ON invites (swarm_id);
 
+CREATE TABLE record_tombstones (
+	id BIGSERIAL NOT NULL, 
+	member_id UUID NOT NULL, 
+	agent VARCHAR(64) NOT NULL, 
+	seq BIGINT NOT NULL, 
+	hash VARCHAR(64) NOT NULL, 
+	prev_hash VARCHAR(64) NOT NULL, 
+	deleted_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	deleted_by VARCHAR(64) NOT NULL, 
+	reason VARCHAR(500), 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_record_tombstones_member_seq UNIQUE (member_id, seq), 
+	FOREIGN KEY(member_id) REFERENCES members (id), 
+	UNIQUE (hash)
+);
+
+CREATE OR REPLACE FUNCTION record_tombstones_no_mutation() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'record_tombstones table is append-only: % is not permitted', TG_OP;
+END
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_record_tombstones_no_mutation BEFORE UPDATE OR DELETE ON record_tombstones FOR EACH ROW EXECUTE FUNCTION record_tombstones_no_mutation();
+
+CREATE TRIGGER trg_record_tombstones_no_truncate BEFORE TRUNCATE ON record_tombstones FOR EACH STATEMENT EXECUTE FUNCTION record_tombstones_no_mutation();
+
 CREATE TABLE records (
 	id BIGSERIAL NOT NULL, 
 	member_id UUID NOT NULL, 
@@ -203,6 +230,12 @@ CREATE INDEX idx_records_type_ts ON records (type, ts);
 
 CREATE OR REPLACE FUNCTION records_no_mutation() RETURNS trigger AS $$
 BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF EXISTS (SELECT 1 FROM record_tombstones t
+               WHERE t.member_id = OLD.member_id AND t.seq = OLD.seq AND t.hash = OLD.hash) THEN
+      RETURN OLD;
+    END IF;
+  END IF;
   RAISE EXCEPTION 'records table is append-only: % is not permitted', TG_OP;
 END
 $$ LANGUAGE plpgsql;

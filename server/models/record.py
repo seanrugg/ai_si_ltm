@@ -75,11 +75,41 @@ class RecordPayload(Base):
     size: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
+class RecordTombstone(Base):
+    """What remains of a record an admin deleted (issue #173).
+
+    Only what the next record links to, plus who deleted it, when and why.
+    The chain stays verifiable: the next record's ``prev_hash`` equals this
+    ``hash``, and this ``prev_hash`` equals the previous record's hash. Rows
+    are append-only (triggers), and a ``records`` row can only be deleted once
+    its tombstone exists.
+    """
+
+    __tablename__ = "record_tombstones"
+    __table_args__ = (UniqueConstraint("member_id", "seq", name="uq_record_tombstones_member_seq"),)
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
+    member_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("members.id"), nullable=False)
+    agent: Mapped[str] = mapped_column(String(64), nullable=False)
+    seq: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    prev_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    deleted_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utcnow)
+    deleted_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(500))
+
+
 # --- append-only enforcement ------------------------------------------------ #
 _PG_FUNC = DDL(
     """
 CREATE OR REPLACE FUNCTION records_no_mutation() RETURNS trigger AS $$
 BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF EXISTS (SELECT 1 FROM record_tombstones t
+               WHERE t.member_id = OLD.member_id AND t.seq = OLD.seq AND t.hash = OLD.hash) THEN
+      RETURN OLD;
+    END IF;
+  END IF;
   RAISE EXCEPTION 'records table is append-only: %% is not permitted', TG_OP;
 END
 $$ LANGUAGE plpgsql
@@ -99,6 +129,8 @@ _SQLITE_NO_UPDATE = DDL(
 )
 _SQLITE_NO_DELETE = DDL(
     "CREATE TRIGGER trg_records_no_delete BEFORE DELETE ON records "
+    "WHEN NOT EXISTS (SELECT 1 FROM record_tombstones t "
+    "WHERE t.member_id = OLD.member_id AND t.seq = OLD.seq AND t.hash = OLD.hash) "
     "BEGIN SELECT RAISE(ABORT, 'records table is append-only: DELETE is not permitted'); END"
 )
 
@@ -108,3 +140,36 @@ for _ddl in (_SQLITE_NO_UPDATE, _SQLITE_NO_DELETE):
     event.listen(Record.__table__, "after_create", _ddl.execute_if(dialect="sqlite"))
 
 APPEND_ONLY_DDL_POSTGRES = (_PG_FUNC, _PG_ROW_TRIGGER, _PG_TRUNCATE_TRIGGER)
+
+# Tombstones themselves are append-only: never updated, deleted or truncated.
+_PG_TOMB_FUNC = DDL(
+    """
+CREATE OR REPLACE FUNCTION record_tombstones_no_mutation() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'record_tombstones table is append-only: %% is not permitted', TG_OP;
+END
+$$ LANGUAGE plpgsql
+"""
+)
+_PG_TOMB_ROW_TRIGGER = DDL(
+    "CREATE TRIGGER trg_record_tombstones_no_mutation BEFORE UPDATE OR DELETE ON record_tombstones "
+    "FOR EACH ROW EXECUTE FUNCTION record_tombstones_no_mutation()"
+)
+_PG_TOMB_TRUNCATE_TRIGGER = DDL(
+    "CREATE TRIGGER trg_record_tombstones_no_truncate BEFORE TRUNCATE ON record_tombstones "
+    "FOR EACH STATEMENT EXECUTE FUNCTION record_tombstones_no_mutation()"
+)
+_SQLITE_TOMB_NO_UPDATE = DDL(
+    "CREATE TRIGGER trg_record_tombstones_no_update BEFORE UPDATE ON record_tombstones "
+    "BEGIN SELECT RAISE(ABORT, 'record_tombstones table is append-only: UPDATE is not permitted'); END"
+)
+_SQLITE_TOMB_NO_DELETE = DDL(
+    "CREATE TRIGGER trg_record_tombstones_no_delete BEFORE DELETE ON record_tombstones "
+    "BEGIN SELECT RAISE(ABORT, 'record_tombstones table is append-only: DELETE is not permitted'); END"
+)
+for _ddl in (_PG_TOMB_FUNC, _PG_TOMB_ROW_TRIGGER, _PG_TOMB_TRUNCATE_TRIGGER):
+    event.listen(RecordTombstone.__table__, "after_create", _ddl.execute_if(dialect="postgresql"))
+for _ddl in (_SQLITE_TOMB_NO_UPDATE, _SQLITE_TOMB_NO_DELETE):
+    event.listen(RecordTombstone.__table__, "after_create", _ddl.execute_if(dialect="sqlite"))
+
+TOMBSTONE_DDL_POSTGRES = (_PG_TOMB_FUNC, _PG_TOMB_ROW_TRIGGER, _PG_TOMB_TRUNCATE_TRIGGER)

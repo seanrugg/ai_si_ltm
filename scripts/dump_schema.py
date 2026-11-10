@@ -12,7 +12,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateIndex, CreateTable
 
 from server.models import Base
-from server.models.record import APPEND_ONLY_DDL_POSTGRES
+from server.models.record import APPEND_ONLY_DDL_POSTGRES, TOMBSTONE_DDL_POSTGRES
 
 OUT = Path(__file__).resolve().parents[1] / "config" / "schema.sql"
 
@@ -22,9 +22,10 @@ HEADER = """-- LTMS schema for PostgreSQL 15+.
 -- Apply to an empty database as the ltms owner:
 --   psql -v ON_ERROR_STOP=1 -d ltms -f config/schema.sql
 --
--- `records` holds permanent, signed chain headers and is append-only (triggers
--- below block UPDATE, DELETE and TRUNCATE). `record_payloads` may be purged by
--- retention; the chain still verifies without them.
+-- `records` holds signed chain headers and is append-only (triggers below
+-- block UPDATE and TRUNCATE, and DELETE unless the record's tombstone in
+-- `record_tombstones` already exists). `record_tombstones` is append-only.
+-- `record_payloads` may be purged by retention; the chain still verifies.
 """
 
 
@@ -37,6 +38,9 @@ def render() -> str:
             parts.append(str(CreateIndex(index).compile(dialect=dialect)).strip() + ";\n")
         if table.name == "records":
             for ddl in APPEND_ONLY_DDL_POSTGRES:
+                parts.append(ddl.statement.replace("%%", "%").strip() + ";\n")
+        if table.name == "record_tombstones":
+            for ddl in TOMBSTONE_DDL_POSTGRES:
                 parts.append(ddl.statement.replace("%%", "%").strip() + ";\n")
     parts.append("COMMIT;\n")
     return "\n".join(parts)

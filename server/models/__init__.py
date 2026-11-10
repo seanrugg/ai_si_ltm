@@ -6,7 +6,7 @@ from server.models.invite import Invite
 from server.models.lrs import LrsEndpoint
 from server.models.member import Member
 from server.models.mcp_token import McpToken
-from server.models.record import Record, RecordPayload
+from server.models.record import Record, RecordPayload, RecordTombstone
 from server.models.runtime_setting import RuntimeSetting
 from server.models.swarm import RecordProvenance, Swarm, SwarmMember
 
@@ -24,6 +24,7 @@ __all__ = [
     "Record",
     "RecordPayload",
     "RecordProvenance",
+    "RecordTombstone",
     "RuntimeSetting",
     "Swarm",
     "SwarmMember",
