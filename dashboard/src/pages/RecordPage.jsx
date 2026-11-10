@@ -1,6 +1,6 @@
 import { useParams } from "react-router-dom";
 import { useApi } from "../api/useApi.js";
-import { RecordDetail } from "../components/RecordRow.jsx";
+import { RecordDetail, TombstoneNote } from "../components/RecordRow.jsx";
 import { ErrorNote, Loading, PageHeader } from "../components/ui.jsx";
 import { localTime } from "../lib/format.js";
 
@@ -12,7 +12,12 @@ export default function RecordPage() {
       <PageHeader title={`${agent} #${seq}`} />
       {loading && <Loading />}
       <ErrorNote error={error} onRetry={reload} />
-      {data && (
+      {data?.deleted && (
+        <div className="panel p-4">
+          <TombstoneNote tombstone={data} />
+        </div>
+      )}
+      {data && !data.deleted && (
         <div className="panel p-4">
           <p className="mb-4 text-sm text-paper-muted">
             {data.type} at {localTime(data.ts)}
