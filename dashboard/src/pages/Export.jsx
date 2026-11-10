@@ -1,4 +1,6 @@
 import { useState } from "react";
+import HelpTip from "../components/HelpTip.jsx";
+import { EXPORT_FORMAT } from "../lib/help.js";
 import { useApi } from "../api/useApi.js";
 import { PageHeader } from "../components/ui.jsx";
 
@@ -51,7 +53,9 @@ export default function Export() {
 
       <form className="panel max-w-2xl p-4" onSubmit={(e) => e.preventDefault()} aria-label="Export records">
         <fieldset className="mb-4">
-          <legend className="mb-2 text-sm font-bold text-paper-muted">Format</legend>
+          <legend className="mb-2 text-sm font-bold text-paper-muted">
+            Format <HelpTip id="export-format" label="About export formats">{EXPORT_FORMAT}</HelpTip>
+          </legend>
           {[["jsonl", "JSONL: complete and verifiable"], ["csv", "CSV: for spreadsheets"]].map(([value, label]) => (
             <label key={value} className="mb-1 flex items-center gap-2 text-sm cursor-pointer">
               <input type="radio" name="export-format" value={value} className="accent-led"

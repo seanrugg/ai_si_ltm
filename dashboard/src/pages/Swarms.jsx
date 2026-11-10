@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import HelpTip from "../components/HelpTip.jsx";
+import { SWARM_ROLE } from "../lib/help.js";
 import { Link } from "react-router-dom";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
@@ -401,6 +403,7 @@ function SwarmCard({ swarm, swarms, allMembers, onReload }) {
                     aria-label="Role">
               {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
+            <HelpTip id={`add-role-help-${swarm.name}`} label="About roles">{SWARM_ROLE}</HelpTip>
             <button className="btn btn-primary" disabled={busy || !addName}>Add</button>
           </form>
 
