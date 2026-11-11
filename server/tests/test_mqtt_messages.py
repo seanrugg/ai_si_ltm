@@ -66,3 +66,24 @@ def test_decode_ack_rejects():
         decode_ack(
             json.dumps({"last_ack_seq": "7", "last_hash": "a" * 64}).encode("utf-8")
         )  # string seq
+
+
+# --- hello (#216) ---
+from cli_agent.mqtt_messages import (  # noqa: E402
+    agent_from_hello_topic, decode_hello, encode_hello, hello_topic, topic_kind,
+)
+
+
+def test_hello_round_trip_and_checks():
+    assert hello_topic("z3-r0", "echo-base") == "echo-base/z3-r0/hello"
+    assert topic_kind("echo-base/z3-r0/hello") == "hello"
+    assert agent_from_hello_topic("echo-base/z3-r0/hello", "echo-base") == "z3-r0"
+    msg = decode_hello(encode_hello("z3-r0", [{"ip": "192.168.1.41", "interface": "wlan0"}]), "z3-r0")
+    assert msg == {"agent": "z3-r0", "network": [{"ip": "192.168.1.41", "interface": "wlan0"}]}
+    assert decode_hello(encode_hello("z3-r0"), "z3-r0") == {"agent": "z3-r0"}
+    with pytest.raises(ValueError):
+        decode_hello(encode_hello("dx-1"), "z3-r0")
+    with pytest.raises(ValueError):
+        decode_hello(b'{"agent": "z3-r0", "network": "nope"}', "z3-r0")
+    with pytest.raises(ValueError):
+        agent_from_hello_topic("echo-base/z3-r0/records", "echo-base")

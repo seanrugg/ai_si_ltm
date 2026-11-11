@@ -133,3 +133,53 @@ def test_tick_client_down_publishes_nothing(mesh, home, outbox):
     assert hub.tick() is None
     assert sent == []
     assert [r["seq"] for r in outbox.pending("z3-r0")] == before
+
+
+# --- hello (#216) ---
+class _NetClient:
+    def __init__(self, fail=False):
+        self.calls, self.fail = [], fail
+
+    def _call(self, method, path, **kw):
+        if self.fail:
+            from cli_agent.client import LTMSError
+            raise LTMSError(500, "boom", "boom")
+        self.calls.append((method, path, kw.get("json")))
+        return {"addresses": []}
+
+
+def test_hello_network_is_reported_on_the_next_tick(tmp_path):
+    from cli_agent.hub import Hub
+    from cli_agent.mqtt_messages import encode_hello
+    from cli_agent.outbox import Outbox
+
+    client = _NetClient()
+    hub = Hub(client, Outbox(str(tmp_path / "o.db")), lambda *a, **k: None, "echo-base")
+    assert hub.on_hello("echo-base/z3-r0/hello", encode_hello("z3-r0", [{"ip": "192.168.1.41"}]))
+    assert hub.report_network() == 1
+    assert client.calls == [("PUT", "/api/relay/network/z3-r0",
+                             {"addresses": [{"ip": "192.168.1.41", "interface": None}]})]
+    assert hub.report_network() == 0  # sent once
+
+
+def test_hello_without_network_makes_no_call_and_bad_hello_is_dropped(tmp_path):
+    from cli_agent.hub import Hub
+    from cli_agent.mqtt_messages import encode_hello
+    from cli_agent.outbox import Outbox
+
+    client = _NetClient()
+    hub = Hub(client, Outbox(str(tmp_path / "o.db")), lambda *a, **k: None, "echo-base")
+    assert hub.on_hello("echo-base/z3-r0/hello", encode_hello("z3-r0"))
+    assert not hub.on_hello("echo-base/z3-r0/hello", encode_hello("dx-1"))
+    assert hub.dropped == 1
+    assert hub.report_network() == 0 and client.calls == []
+
+
+def test_a_failed_report_never_raises(tmp_path):
+    from cli_agent.hub import Hub
+    from cli_agent.mqtt_messages import encode_hello
+    from cli_agent.outbox import Outbox
+
+    hub = Hub(_NetClient(fail=True), Outbox(str(tmp_path / "o.db")), lambda *a, **k: None, "echo-base")
+    hub.on_hello("echo-base/z3-r0/hello", encode_hello("z3-r0", [{"ip": "10.0.0.2"}]))
+    assert hub.report_network() == 0 and hub.dropped == 1

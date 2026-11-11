@@ -13,7 +13,9 @@ import threading
 import httpx
 
 from cli_agent.client import LTMSError
-from cli_agent.mqtt_messages import acks_topic, agent_from_topic, decode_record, encode_ack
+from cli_agent.mqtt_messages import (
+    acks_topic, agent_from_hello_topic, agent_from_topic, decode_hello, decode_record, encode_ack,
+)
 from cli_agent.outbox import Outbox
 from cli_agent.replicator import replicate_once
 
@@ -27,6 +29,8 @@ class Hub:
         self.lock = threading.Lock()
         self.dropped = 0
         self.stuck: dict = {}
+        # LAN addresses from members' hello messages (#216), sent to LTMS on the next tick.
+        self.pending_network: dict[str, list] = {}
 
     def on_record(self, topic: str, payload: bytes) -> bool:
         try:
@@ -39,7 +43,36 @@ class Hub:
             logging.warning("Hub: dropped record on %s: %s", topic, exc)
             return False
 
+    def on_hello(self, topic: str, payload: bytes) -> bool:
+        """A member announced itself. Its addresses are reported on the next tick. Never raises."""
+        try:
+            agent = agent_from_hello_topic(topic, self.swarm)
+            msg = decode_hello(payload, agent)
+        except ValueError as exc:
+            self.dropped += 1
+            logging.warning("Hub: dropped hello on %s: %s", topic, exc)
+            return False
+        if msg.get("network"):
+            with self.lock:
+                self.pending_network[agent] = msg["network"]
+        return True
+
+    def report_network(self) -> int:
+        """Send pending hello addresses to LTMS (PUT /api/relay/network/{agent}). Never raises."""
+        with self.lock:
+            pending, self.pending_network = self.pending_network, {}
+        sent = 0
+        for agent, network in pending.items():
+            try:
+                self.client._call("PUT", f"/api/relay/network/{agent}", json={"addresses": network})
+                sent += 1
+            except (LTMSError, httpx.HTTPError) as exc:
+                self.dropped += 1
+                logging.warning("Hub: network report for %s failed: %s", agent, exc)
+        return sent
+
     def tick(self, batch_size: int = 100) -> dict | None:
+        self.report_network()
         try:
             with self.lock:
                 result = replicate_once(self.client, self.outbox, batch_size)

@@ -20,7 +20,8 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from cli_agent.member_link import MemberLink
-from cli_agent.mqtt_messages import acks_topic
+from cli_agent.client import local_addresses
+from cli_agent.mqtt_messages import acks_topic, encode_hello, hello_topic
 from cli_agent.outbox import Outbox
 from ltms_contract import load_key
 
@@ -93,11 +94,15 @@ def make_on_message(acks: "queue.Queue[bytes]"):
     return on_message
 
 
-def make_on_connect(acks_topic_name: str, wanted: threading.Event):
+def make_on_connect(acks_topic_name: str, wanted: threading.Event, hello=None):
+    """``hello`` is an optional ``() -> (topic, payload)``: published on every connect (#216)."""
     def on_connect(client, userdata, flags, reason_code, properties) -> None:
         try:
             client.subscribe(acks_topic_name, qos=1)
             wanted.set()
+            if hello is not None:
+                topic, payload = hello()
+                client.publish(topic, payload, qos=1, retain=False)
             logging.info(
                 "Member: MQTT connected (reason %s), subscribed to %s",
                 reason_code,
@@ -150,7 +155,14 @@ def main() -> None:
         mqtt_client.publish(topic, payload, qos=1, retain=retain)
 
     link = MemberLink(name, key, outbox, cfg.state_path, publish, cfg.swarm)
-    mqtt_client.on_connect = make_on_connect(acks_topic(name, cfg.swarm), resend_wanted)
+    def hello():
+        try:
+            network = local_addresses()
+        except OSError:  # no resolvable hostname: announce without addresses
+            network = []
+        return hello_topic(name, cfg.swarm), encode_hello(name, network)
+
+    mqtt_client.on_connect = make_on_connect(acks_topic(name, cfg.swarm), resend_wanted, hello)
     mqtt_client.on_message = make_on_message(acks)
     if cfg.mqtt_username is not None:
         mqtt_client.username_pw_set(cfg.mqtt_username, cfg.mqtt_password)
