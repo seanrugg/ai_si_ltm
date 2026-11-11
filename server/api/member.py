@@ -7,10 +7,10 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select
 
-from server.api.deps import MemberAuth, current_member, request_id, require, transaction
+from server.api.deps import MemberAuth, client_ip, current_member, request_id, require, transaction
 from server.api.schemas import RecordBatch
 from server.models import AuditLog, Member
-from server.services import cognition, recall, swarms
+from server.services import cognition, network, recall, swarms
 from server.services.errors import ServiceError
 from server.services.ingest import ingest_batch
 
@@ -33,6 +33,8 @@ async def post_records(
             future_skew_seconds=cfg.future_skew_seconds,
             request_id=request_id(request),
         )
+        if result.accepted:  # the submitter's address; a hub's relay records the hub only
+            await network.record_seen(session, await session.get(Member, auth.member_id), client_ip(request))
         return result.as_dict()
 
 

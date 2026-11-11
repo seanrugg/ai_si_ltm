@@ -174,6 +174,22 @@ CREATE TABLE invites (
 
 CREATE INDEX idx_invites_swarm ON invites (swarm_id);
 
+CREATE TABLE member_addresses (
+	id BIGSERIAL NOT NULL, 
+	member_id UUID NOT NULL, 
+	ip VARCHAR(45) NOT NULL, 
+	source VARCHAR(8) NOT NULL, 
+	interface VARCHAR(32), 
+	first_seen TIMESTAMP WITH TIME ZONE NOT NULL, 
+	last_seen TIMESTAMP WITH TIME ZONE NOT NULL, 
+	count INTEGER NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_member_addresses_member_ip_source UNIQUE (member_id, ip, source), 
+	FOREIGN KEY(member_id) REFERENCES members (id)
+);
+
+CREATE INDEX idx_member_addresses_last_seen ON member_addresses (last_seen);
+
 CREATE TABLE record_tombstones (
 	id BIGSERIAL NOT NULL, 
 	member_id UUID NOT NULL, 

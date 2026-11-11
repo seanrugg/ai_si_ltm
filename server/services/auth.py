@@ -11,6 +11,7 @@ from ltms_contract.record import HEX128_RE
 from server.models import AdminSession, AdminUser, AuditLog, AuthChallenge, Member, Token
 from server.security.passwords import hash_password, verify_password
 from server.security.tokens import hash_token, new_nonce_hex, new_token
+from server.services import network
 from server.services.errors import ServiceError
 
 
@@ -62,6 +63,7 @@ async def exchange_token(
                       remote_ip=remote_ip, expires_at=expires))
     member.last_seen_at = _now()
     session.add(AuditLog(member_id=member.id, actor=member.name, action="token_issued", detail={"ip": remote_ip}))
+    await network.record_seen(session, member, remote_ip)
     return {
         "token": raw,
         "token_type": "bearer",

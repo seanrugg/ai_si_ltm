@@ -92,6 +92,8 @@ class ServerConfig(BaseSettings):
     retention_payload_rules: list[PayloadRule] = Field(
         default_factory=lambda: [PayloadRule(**r) for r in DEFAULT_PAYLOAD_RULES])
     retention_audit_days: int = 365
+    # Member addresses (#189): rows not seen for this many days are pruned nightly.
+    address_history_days: int = 180
 
     # Scheduler (disabled in tests)
     enable_scheduler: bool = True

@@ -36,6 +36,7 @@ AUDIT_ACTIONS = (
     "record_delete",
     "memory_wipe",
     "cognition_change",
+    "network_change",
 )
 
 
