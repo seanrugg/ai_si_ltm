@@ -85,9 +85,9 @@ describe("Profile page", () => {
 
   it("keeps the tab and range in the URL", async () => {
     mockApi();
-    renderAt("/members/z3-r0/profile?range=30d&tab=history");
+    renderAt("/members/z3-r0/profile?range=30d&tab=network");
     await screen.findByText("Coming soon.");
-    expect(screen.getByRole("tab", { name: "History" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: "Network" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("button", { name: "30d" }).getAttribute("aria-pressed")).toBe("true");
     expect(vi.mocked(api).mock.calls.find(([p]) => p === "/admin/profile/summary")[1].params.hours).toBe(720);
 

@@ -144,3 +144,45 @@ export function actionPoses(records) {
   }
   return out;
 }
+
+// History markers (issue #197): color by kind, icon by action.
+export const HISTORY_ICONS = {
+  enrolled: "M12 5v14 M5 12h14",
+  joined: "M10 6a2 2 0 1 0 4 0a2 2 0 1 0-4 0 M3 18a2 2 0 1 0 4 0a2 2 0 1 0-4 0 M17 18a2 2 0 1 0 4 0a2 2 0 1 0-4 0 M11 7.8 6 16.2 M13 7.8l5 8.4 M7 18h10",
+  lesson: "M4 6.5C6 5.5 9 5.5 12 7c3-1.5 6-1.5 8-.5V18c-2-1-5-1-8 .5-3-1.5-6-1.5-8-.5z M12 7v11.5",
+  network: "M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0 M3 12h18 M12 3c2.5 2.5 3.8 5.5 3.8 9s-1.3 6.5-3.8 9 M12 3c-2.5 2.5-3.8 5.5-3.8 9s1.3 6.5 3.8 9",
+  wipe: "M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0 M5.6 5.6l12.8 12.8",
+  deletion: "M5 7h14 M10 7V4h4v3 M7 7l1 13h8l1-13",
+  other: "M12 8v4 M12 16h.01 M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0",
+};
+
+const ICON_FOR_ACTION = {
+  enroll_request: "enrolled", enroll_auto: "enrolled", enroll_approve: "enrolled",
+  swarm_join: "joined", swarm_leave: "joined",
+  first_lesson: "lesson",
+  network_change: "network",
+  memory_wipe: "wipe",
+  record_delete: "deletion",
+};
+
+/** { color, icon, iconPath } for one history event. */
+export function historyMarker(event, { ROLES, NEUTRAL, learnColor }) {
+  const icon = ICON_FOR_ACTION[event.action] || "other";
+  let color = NEUTRAL;
+  if (event.kind === "learning") color = learnColor;
+  else if (event.kind === "membership") {
+    const role = event.action === "swarm_join" ? String(event.detail || "").match(/as (\w+)/)?.[1] : null;
+    color = (ROLES[role] || ROLES.free).color;
+  }
+  return { color, icon, iconPath: HISTORY_ICONS[icon] };
+}
+
+/** Points for a sparkline of `series` ([{t, v}]) in a width × height box. */
+export function sparkPoints(series, width, height) {
+  if (!series?.length) return "";
+  const vs = series.map((p) => p.v);
+  const min = Math.min(...vs);
+  const span = Math.max(...vs) - min || 1;
+  const step = series.length > 1 ? width / (series.length - 1) : 0;
+  return series.map((p, i) => `${(i * step).toFixed(1)},${(height - 1 - ((p.v - min) / span) * (height - 2)).toFixed(1)}`).join(" ");
+}
