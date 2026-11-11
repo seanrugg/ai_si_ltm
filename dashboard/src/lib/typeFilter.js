@@ -28,10 +28,14 @@ export const DEFAULT_TYPES = ALL_TYPES.filter((t) => t !== "sensed");
 
 /**
  * The `type` query param as a Set of filter types.
- * Empty or missing means the default: everything except `sensed`.
+ * Empty or missing means the default: everything except `sensed`;
+ * "none" means nothing selected (issue #205).
  * Unknown names are dropped, so a stale URL never breaks the page.
  */
+export const NONE = "none";
+
 export function parseTypes(param) {
+  if (String(param ?? "").trim() === NONE) return new Set();
   const list = String(param ?? "")
     .split(",")
     .map((t) => t.trim())
@@ -41,9 +45,12 @@ export function parseTypes(param) {
 
 /**
  * A Set of filter types as the `type` query param: a comma list in group
- * order, or "" when the set is the default (so default views stay bookmarkable).
+ * order, "" when the set is the default (so default views stay bookmarkable),
+ * or "none" when nothing is selected.
  */
 export function serializeTypes(set) {
+  // "" already means the default, so the empty selection needs its own value.
+  if (set.size === 0) return NONE;
   if (set.size === DEFAULT_TYPES.length && DEFAULT_TYPES.every((t) => set.has(t))) return "";
   return ALL_TYPES.filter((t) => set.has(t)).join(",");
 }

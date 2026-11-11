@@ -81,7 +81,7 @@ describe("TypePicker", () => {
     onChange = renderPicker(ALL_SERIALIZED, vi.fn());
     fireEvent.click(button("All types"));
     fireEvent.click(button("None"));
-    expect(onChange).toHaveBeenLastCalledWith("");
+    expect(onChange).toHaveBeenLastCalledWith("none"); // not "", which means the default (#205)
 
     cleanup();
     onChange = renderPicker(DEFAULT_SERIALIZED, vi.fn());

@@ -6,7 +6,7 @@ import TypePicker from "../components/TypePicker.jsx";
 import { EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui.jsx";
 import { localTime } from "../lib/format.js";
 import { LABELS, parseTypes } from "../lib/typeFilter.js";
-import { missingSeqs } from "../lib/tombstones.js";
+import { mergeTombstones, tombstoneRange } from "../lib/tombstones.js";
 
 const OUTCOMES = ["success", "partial", "reflex_stop", "stuck", "abandoned", "failed"];
 const PAGE = 50;
@@ -34,6 +34,43 @@ export default function Timeline() {
     });
   }
 
+  // A member's own timeline (the Member filter, with or without a date):
+  // deleted records show as tombstones where their seq falls (#174). One
+  // request per page lists the member's tombstones in that page's seq range
+  // (#205). The date filter (`since`) does NOT turn this off: a gap between
+  // two records inside the date range is inside the range too, so it is a
+  // deletion. Type, outcome, place and summary filters do turn it off, since
+  // their gaps are filtered-out records, not deletions.
+  const showTombstones = Boolean(filters.agent) && !filters.type && !filters.outcome && !filters.place && !filters.q;
+  const [tombstones, setTombstones] = useState([]);
+  const lowestSeq = useRef(null);
+
+  async function loadTombstones(page, offset, last) {
+    if (!showTombstones) {
+      setTombstones([]);
+      return;
+    }
+    const first = offset === 0;
+    const own = page.filter((r) => r.agent === filters.agent).map((r) => Number(r.seq));
+    const params = tombstoneRange(page, filters.agent, {
+      first, last, since: filters.since, prevLowest: first ? null : lowestSeq.current,
+    });
+    if (own.length > 0) {
+      lowestSeq.current = Math.min(...own, ...(first || lowestSeq.current == null ? [] : [lowestSeq.current]));
+    } else if (first) {
+      lowestSeq.current = null;
+    }
+    let found = [];
+    if (params) {
+      try {
+        found = (await api("/admin/tombstones", { params })).tombstones || [];
+      } catch {
+        found = []; // tombstones are a nicety; the records still show
+      }
+    }
+    setTombstones((prev) => (first ? found : mergeTombstones(prev, found)));
+  }
+
   async function load(offset = 0) {
     setLoading(true);
     setError(null);
@@ -49,8 +86,10 @@ export default function Timeline() {
           ...(since ? { from: since } : {}),
         },
       });
+      const last = res.records.length < PAGE;
       setRecords((prev) => (offset ? [...prev, ...res.records] : res.records));
-      setMore(res.records.length === PAGE);
+      setMore(!last);
+      await loadTombstones(res.records, offset, last);
     } catch (err) {
       setError(err);
     } finally {
@@ -89,40 +128,15 @@ export default function Timeline() {
   // Active filters become chips under the filter row; the default type
   // selection (everything except sensed, i.e. no `type` param) shows no chip.
   const active = [];
-  if (filters.type) active.push({ key: "type", label: `Type: ${[...parseTypes(filters.type)].map((t) => LABELS[t]).join(", ")}` });
+  if (filters.type) {
+    const types = [...parseTypes(filters.type)];
+    active.push({ key: "type", label: `Type: ${types.length ? types.map((t) => LABELS[t]).join(", ") : "none"}` });
+  }
   if (filters.agent) active.push({ key: "agent", label: `Member: ${filters.agent}` });
   if (filters.outcome) active.push({ key: "outcome", label: `Outcome: ${filters.outcome.replace("_", " ")}` });
   if (filters.place) active.push({ key: "place", label: `Place: ${filters.place}` });
   if (filters.q) active.push({ key: "q", label: `Summary contains: ${filters.q}` });
   if (filters.since) active.push({ key: "since", label: `Since: ${localTime(filters.since)}` });
-
-  // A member's own timeline (only the Member filter set): where a seq is
-  // missing, look it up, and show a tombstone if an admin deleted it (#174).
-  // Seqs hidden by a type filter come back as ordinary records and are skipped.
-  const memberOnly = Boolean(filters.agent) && !filters.type && !filters.outcome && !filters.place && !filters.q;
-  const [tombstones, setTombstones] = useState([]);
-  const recordSeqs = records.map((r) => `${r.agent}:${r.seq}`).join(" ");
-  useEffect(() => {
-    const own = memberOnly ? records.filter((r) => r.agent === filters.agent) : [];
-    const seqs = missingSeqs(own);
-    if (seqs.length === 0) {
-      setTombstones([]);
-      return undefined;
-    }
-    let live = true;
-    Promise.all(seqs.map(async (seq) => {
-      try {
-        const rec = await api(`/admin/records/${encodeURIComponent(filters.agent)}/${seq}`);
-        return rec?.deleted ? rec : null;
-      } catch {
-        return null;
-      }
-    })).then((found) => {
-      if (live) setTombstones(found.filter(Boolean));
-    });
-    return () => { live = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recordSeqs, memberOnly, filters.agent]);
 
   // Tombstones go where their seq falls; the list is newest first.
   const rows = [...records];
@@ -187,7 +201,7 @@ export default function Timeline() {
       )}
 
       <ErrorNote error={error} onRetry={() => load(0)} />
-      {records.length > 0 && (
+      {rows.length > 0 && (
         <ul className="panel" aria-label="Records, newest first">
           {rows.map((r) => (r.deleted
             ? <TombstoneRow key={`deleted-${r.hash}`} tombstone={r} />
