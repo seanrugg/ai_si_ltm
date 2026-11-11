@@ -398,6 +398,20 @@ CREATE TABLE dataset_items (
 
 CREATE INDEX idx_dataset_items_sha256 ON dataset_items (sha256);
 
+CREATE TABLE dataset_uploads (
+	id UUID NOT NULL, 
+	version_id BIGINT NOT NULL, 
+	key VARCHAR(200) NOT NULL, 
+	filename TEXT NOT NULL, 
+	size_bytes BIGINT NOT NULL, 
+	received_bytes BIGINT NOT NULL, 
+	created_by VARCHAR(64) NOT NULL, 
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	updated_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(version_id) REFERENCES dataset_versions (id)
+);
+
 CREATE TABLE record_payloads (
 	record_id BIGINT NOT NULL, 
 	payload_raw BYTEA NOT NULL, 

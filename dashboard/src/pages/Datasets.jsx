@@ -6,7 +6,7 @@ import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, Loading, PageHeader, StatusBadge } from "../components/ui.jsx";
 import { DATASET_APPROVE, DATASET_LARGE, DATASET_SCOPE } from "../lib/help.js";
-import { FILTERS, filterDatasets, formatBytes, hasPending, sortDatasets, totalSize, uploadFiles } from "../lib/datasets.js";
+import { CHUNKED_ABOVE, FILTERS, filterDatasets, formatBytes, hasPending, sortDatasets, totalSize, uploadFiles } from "../lib/datasets.js";
 import { localTime } from "../lib/format.js";
 
 function UploadResults({ results }) {
@@ -26,10 +26,13 @@ function FilePicker({ id, datasetId, version, onDone }) {
   const [files, setFiles] = useState([]);
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState(null);
+  const [progress, setProgress] = useState(null);
 
   async function upload() {
     setBusy(true);
-    setResults(await uploadFiles(api, datasetId, version, files));
+    setResults(await uploadFiles(api, datasetId, version, files,
+      (name, sent, total) => setProgress({ name, pct: Math.floor((sent / total) * 100) })));
+    setProgress(null);
     setBusy(false);
     setFiles([]);
     onDone?.();
@@ -41,9 +44,20 @@ function FilePicker({ id, datasetId, version, onDone }) {
       <input id={id} type="file" multiple className="field"
              onChange={(e) => setFiles(Array.from(e.target.files || []))} />
       <p className="mt-1 text-xs text-warn">{DATASET_LARGE}</p>
+      {files.some((f) => f.size > CHUNKED_ABOVE) && (
+        <p className="mt-1 text-xs text-paper-muted">
+          Files over 25 MB upload in 8 MB chunks and resume if the connection drops. They&apos;re stored whole
+          and served as files, without extracted text.
+        </p>
+      )}
       <button type="button" className="btn btn-primary mt-2" disabled={busy || files.length === 0} onClick={upload}>
         {busy ? "Uploading…" : files.length ? `Upload ${files.length} file${files.length === 1 ? "" : "s"}` : "Upload"}
       </button>
+      {progress && (
+        <p className="mt-2 text-sm" role="status">
+          {progress.name}: <progress max="100" value={progress.pct} aria-label={`Uploading ${progress.name}`} /> {progress.pct}%
+        </p>
+      )}
       <UploadResults results={results} />
     </div>
   );

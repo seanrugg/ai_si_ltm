@@ -38,17 +38,58 @@ export function formatBytes(n) {
   return `${x < 10 && i > 0 ? x.toFixed(1) : Math.round(x)} ${units[i]}`;
 }
 
+// Files above this go up in resumable chunks (#245); the server's text limit.
+export const CHUNKED_ABOVE = 25 * 1024 * 1024;
+
+const itemsPath = (datasetId, version) =>
+  `/admin/datasets/${encodeURIComponent(datasetId)}/versions/${version}/items`;
+
+// Resumable upload: start, PUT each chunk with Content-Range, finish. A chunk
+// refused with wrong_offset (the server already has more, or less) resumes
+// from the server's received_bytes. onProgress(sent, total).
+export async function uploadChunked(api, datasetId, version, file, onProgress = () => {}) {
+  const base = `${itemsPath(datasetId, version)}/uploads`;
+  const up = await api(base, { method: "POST", body: { filename: file.name, size: file.size } });
+  const size = up.chunk_bytes;
+  let sent = up.received_bytes || 0;
+  let retries = 0;
+  while (sent < file.size) {
+    const end = Math.min(sent + size, file.size);
+    try {
+      const res = await api(`${base}/${up.upload_id}`, {
+        method: "PUT", body: file.slice(sent, end),
+        headers: { "Content-Range": `bytes ${sent}-${end - 1}/${file.size}` },
+      });
+      sent = res.received_bytes;
+      retries = 0;
+    } catch (err) {
+      if (retries >= 3) throw err;
+      retries += 1;
+      sent = (await api(`${base}/${up.upload_id}`)).received_bytes; // resume where the server is
+    }
+    onProgress(sent, file.size);
+  }
+  const done = await api(`${base}/${up.upload_id}/finish`, { method: "POST" });
+  return done.item;
+}
+
 // Upload files one per request, so each file gets its own result and one bad
-// file doesn't stop the rest. Returns [{name, ok, key?, error?}].
-export async function uploadFiles(api, datasetId, version, files) {
+// file doesn't stop the rest. Big files use the resumable path.
+// Returns [{name, ok, key?, error?}].
+export async function uploadFiles(api, datasetId, version, files, onProgress = () => {}) {
   const results = [];
   for (const file of files) {
-    const body = new FormData();
-    body.append("files", file, file.name);
     try {
-      const res = await api(`/admin/datasets/${encodeURIComponent(datasetId)}/versions/${version}/items`,
-        { method: "POST", body });
-      results.push({ name: file.name, ok: true, key: res?.items?.[0]?.key ?? file.name });
+      let key;
+      if (file.size > CHUNKED_ABOVE) {
+        key = (await uploadChunked(api, datasetId, version, file, (s, t) => onProgress(file.name, s, t))).key;
+      } else {
+        const body = new FormData();
+        body.append("files", file, file.name);
+        const res = await api(itemsPath(datasetId, version), { method: "POST", body });
+        key = res?.items?.[0]?.key ?? file.name;
+      }
+      results.push({ name: file.name, ok: true, key });
     } catch (err) {
       results.push({ name: file.name, ok: false, error: err.message || String(err) });
     }

@@ -108,3 +108,33 @@ describe("retire", () => {
     expect(screen.queryByRole("button", { name: "New version" })).toBeNull();
   });
 });
+
+describe("chunked upload (#245)", () => {
+  it("sends big files in chunks with Content-Range and resumes after a failure", async () => {
+    const { uploadChunked } = await import("../lib/datasets.js");
+    const file = new File([new Uint8Array(25)], "run.h5");
+    let failed = false;
+    api.mockImplementation(async (path, opts = {}) => {
+      if (path.endsWith("/uploads")) return { upload_id: "u1", chunk_bytes: 10, received_bytes: 0 };
+      if (path.endsWith("/finish")) return { item: { key: "run.h5" } };
+      if (opts.method === "PUT") {
+        const [, first, last] = opts.headers["Content-Range"].match(/bytes (\d+)-(\d+)/);
+        if (first === "10" && !failed) { failed = true; throw new Error("network"); }
+        return { received_bytes: Number(last) + 1 };
+      }
+      return { received_bytes: 10 }; // status after the failure
+    });
+    const progress = [];
+    const item = await uploadChunked(api, "d1", 1, file, (s, t) => progress.push([s, t]));
+    expect(item.key).toBe("run.h5");
+    const ranges = api.mock.calls.filter(([, o]) => o?.method === "PUT").map(([, o]) => o.headers["Content-Range"]);
+    expect(ranges).toEqual(["bytes 0-9/25", "bytes 10-19/25", "bytes 10-19/25", "bytes 20-24/25"]);
+    expect(progress.at(-1)).toEqual([25, 25]);
+    expect(api.mock.calls.at(-1)[0]).toBe("/admin/datasets/d1/versions/1/items/uploads/u1/finish");
+  });
+
+  it("uses the chunked path only above 25 MB", async () => {
+    const { CHUNKED_ABOVE } = await import("../lib/datasets.js");
+    expect(CHUNKED_ABOVE).toBe(25 * 1024 * 1024);
+  });
+});

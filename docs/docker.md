@@ -149,5 +149,17 @@ Uploaded dataset files (see `docs/datasets-design.md`) are stored by content
 hash under `/data/datasets` inside the container: the `ltms-data` compose
 volume, set by `LTMS_DATA_DIR`. PostgreSQL keeps only the catalog and the
 extracted text, so **back up `ltms-data` along with the database**: a database
-restore without it lists items whose files are missing. Text-tier files are
-limited to 25 MB each (`LTMS_DATASET_TEXT_MAX_MB`).
+restore without it lists items whose files are missing.
+
+Limits:
+- Files up to 25 MB (`LTMS_DATASET_TEXT_MAX_MB`) in a text or document format
+  get their text extracted.
+- Anything else, up to 500 MB (`LTMS_DATASET_UPLOAD_MAX_MB`), is stored whole
+  and served as a file, with range requests.
+- The dashboard uploads files over 25 MB in resumable 8 MB chunks. Partial
+  uploads live in `/data/datasets/uploads`, and those unfinished after 24 hours
+  are deleted nightly.
+
+Behind a reverse proxy, allow request bodies of at least 26 MB on
+`/api/admin/datasets/`. `deploy/nginx-directives.conf` does this; the default
+there is 2 MB for everything else.

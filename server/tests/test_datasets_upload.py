@@ -58,8 +58,11 @@ def test_html_keeps_visible_text_only(admin, ds, app, db_exec):
 
 
 def test_content_not_extension_decides(admin, ds):
+    # A PNG named .txt is a PNG: stored whole as a large-tier file, no text (#245).
     r = _upload(admin, ds, "fake.txt")
-    assert r.status_code == 415 and "image/png" in r.json()["error"]["message"]
+    assert r.status_code == 200, r.text
+    item = r.json()["items"][0]
+    assert item["media_type"] == "image/png" and item["tier"] == "large"
 
 
 def test_same_content_stored_once_and_manifest_is_stable(admin, ds, data_dir):
@@ -73,8 +76,13 @@ def test_same_content_stored_once_and_manifest_is_stable(admin, ds, data_dir):
     assert [i["key"] for i in items] == ["copy/notes.txt", "notes.txt"]
 
 
-def test_limits_and_locks(admin, ds):
-    assert _upload(admin, ds, "big.txt", content=b"x" * (1024 * 1024 + 1)).status_code == 413
+def test_limits_and_locks(admin, app, ds):
+    # Above the text limit: stored, but as a large file with no text (#245).
+    r = _upload(admin, ds, "big.txt", content=b"x" * (1024 * 1024 + 1))
+    assert r.status_code == 200 and r.json()["items"][0]["tier"] == "large"
+    app.state.config.dataset_upload_max_mb = 1
+    r = _upload(admin, ds, "bigger.txt", content=b"x" * (1024 * 1024 + 1))
+    assert r.status_code == 413 and "catalog integration" in r.json()["error"]["message"]
     assert _upload(admin, ds, "notes.txt").status_code == 200
     assert _upload(admin, ds, "notes.txt").json()["error"]["code"] == "key_exists"
     assert _upload(admin, ds, "notes.txt", prefix="../up").json()["error"]["code"] == "bad_key"

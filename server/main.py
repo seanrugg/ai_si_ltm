@@ -114,7 +114,8 @@ def create_app(config: ServerConfig | None = None, *, create_tables: bool = True
         request.state.request_id = rid[:64]
         response = await call_next(request)
         response.headers["x-request-id"] = request.state.request_id
-        if request.url.path.startswith("/api"):
+        if request.url.path.startswith("/api") and "cache-control" not in response.headers:
+            # An endpoint that sets its own caching keeps it (dataset files, #245).
             response.headers["cache-control"] = "no-store"
         response.headers["x-content-type-options"] = "nosniff"
         response.headers["x-frame-options"] = "DENY"

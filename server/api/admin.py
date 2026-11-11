@@ -30,6 +30,7 @@ from server.services import location as location_service
 from server.services import network as network_service
 from server.services import profile as profile_service
 from server.services import datasets as datasets_service
+from server.services import dataset_uploads
 from server.services import swarm_remove
 from server.services.errors import ServiceError
 
@@ -1344,6 +1345,51 @@ async def upload_dataset_items(dataset_id: str, version: int, request: Request,
         items = await datasets_service.upload_items(session, request.app.state.config, ds, version, files,
                                                     prefix=prefix)
         return {"items": items, "dataset": await datasets_service.dataset_dict(session, ds)}
+
+
+# Resumable uploads (#245): start, PUT chunks with Content-Range, finish.
+_UPLOADS = "/admin/datasets/{dataset_id}/versions/{version}/items/uploads"
+
+
+@router.post(_UPLOADS, status_code=201)
+async def start_dataset_upload(dataset_id: str, version: int, request: Request, body: dict,
+                               admin: AdminAuth = ADMIN) -> dict:
+    """``{filename, size, prefix?}`` -> an upload id; send 8 MB chunks, then finish."""
+    async with transaction(request) as session:
+        ds = await datasets_service.get_dataset(session, dataset_id)
+        u = await dataset_uploads.start(session, request.app.state.config, ds, version,
+                                        filename=body.get("filename"), size=body.get("size"),
+                                        prefix=body.get("prefix"), admin=f"admin:{admin.username}")
+        return dataset_uploads.upload_dict(u)
+
+
+@router.get(_UPLOADS + "/{upload_id}")
+async def dataset_upload_status(dataset_id: str, version: int, upload_id: str, request: Request,
+                                admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        ds = await datasets_service.get_dataset(session, dataset_id)
+        _, u = await dataset_uploads.get(session, ds, version, upload_id)
+        return dataset_uploads.upload_dict(u)
+
+
+@router.put(_UPLOADS + "/{upload_id}")
+async def put_dataset_upload_chunk(dataset_id: str, version: int, upload_id: str, request: Request,
+                                   admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        ds = await datasets_service.get_dataset(session, dataset_id)
+        u = await dataset_uploads.put_chunk(session, request.app.state.config, ds, version, upload_id,
+                                            content_range=request.headers.get("content-range"),
+                                            body=request.stream())
+        return dataset_uploads.upload_dict(u)
+
+
+@router.post(_UPLOADS + "/{upload_id}/finish")
+async def finish_dataset_upload(dataset_id: str, version: int, upload_id: str, request: Request,
+                                admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        ds = await datasets_service.get_dataset(session, dataset_id)
+        item = await dataset_uploads.finish(session, request.app.state.config, ds, version, upload_id)
+        return {"item": item, "dataset": await datasets_service.dataset_dict(session, ds)}
 
 
 @router.get("/admin/datasets/{dataset_id}/versions/{version}/items")

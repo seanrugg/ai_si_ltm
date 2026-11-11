@@ -45,6 +45,7 @@ AUDIT_ACTIONS = (
     "dataset_version",
     "dataset_approve",
     "dataset_retire",
+    "dataset_upload_expire",
 )
 
 
