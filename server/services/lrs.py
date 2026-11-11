@@ -20,19 +20,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ltms_contract.record import NAME_RE
 from server.config import ServerConfig
 from server.models import (
-    AuditLog, LrsEndpoint, Member, Record, RecordProvenance, RecordTombstone, Swarm,
+    AuditLog, Dataset, DatasetItem, DatasetRead, DatasetVersion, LrsEndpoint, Member, Record,
+    RecordProvenance, RecordTombstone, Swarm,
 )
 from server.services.enrollment import _validate_scope
 from server.services.errors import ServiceError
 from server.services.recall import apply_scope, effective_scope, fetch_payloads
-from server.xapi.translate import because_key, record_to_statement
+from server.xapi.translate import because_key, read_to_statement, record_to_statement
 
 log = logging.getLogger(__name__)
 
 XAPI_VERSIONS = ("2.0.0", "1.0.3")
 AUTH_TYPES = ("basic",)
 
-_UPDATABLE_FIELDS = {"name", "url", "username", "xapi_version", "auth_type", "scope", "enabled"}
+_UPDATABLE_FIELDS = {"name", "url", "username", "xapi_version", "auth_type", "scope", "enabled", "send_reads"}
 PATCH_FIELDS = _UPDATABLE_FIELDS | {"secret"}
 
 
@@ -69,6 +70,8 @@ def endpoint_to_dict(endpoint: LrsEndpoint) -> dict:
         "scope": endpoint.scope,
         "enabled": endpoint.enabled,
         "cursor": endpoint.cursor,
+        "send_reads": endpoint.send_reads,
+        "last_read_id": endpoint.last_read_id,
         "last_success_at": endpoint.last_success_at.isoformat() if endpoint.last_success_at else None,
         "last_error_at": endpoint.last_error_at.isoformat() if endpoint.last_error_at else None,
         "last_error": endpoint.last_error,
@@ -125,6 +128,10 @@ async def list_endpoints(session: AsyncSession) -> list[LrsEndpoint]:
 PERMANENT_REJECTIONS = (400, 409, 413, 422)
 
 
+async def _newest_read_id(session: AsyncSession) -> int:
+    return int(await session.scalar(select(func.max(DatasetRead.id))) or 0)
+
+
 async def _newest_record_id(session: AsyncSession) -> int:
     return (await session.execute(select(func.max(Record.id)))).scalar() or 0
 
@@ -139,9 +146,12 @@ async def create_endpoint(
     secret: str | None = None,
     xapi_version: str = "2.0.0",
     scope: dict | None = None,
+    send_reads: bool = True,
     actor: str,
 ) -> LrsEndpoint:
     name = _validate_name(name)
+    if not isinstance(send_reads, bool):
+        raise ServiceError(422, "bad_lrs", "send_reads must be true or false")
     url = _validate_url(url)
     xapi_version = _validate_xapi_version(xapi_version)
     scope = _validate_scope(scope)
@@ -161,10 +171,12 @@ async def create_endpoint(
         scope=scope,
         # Only records ingested from now on are sent (Sean, 9 Nov; issue #175).
         cursor=await _newest_record_id(session),
+        send_reads=send_reads,
+        last_read_id=await _newest_read_id(session),
     )
     session.add(endpoint)
     await session.flush()
-    fields = ["name", "url", "xapi_version", "auth_type", "username", "scope"]
+    fields = ["name", "url", "xapi_version", "auth_type", "username", "scope", "send_reads"]
     if secret is not None:
         fields.append("secret")
     session.add(AuditLog(actor=actor, action="lrs_create",
@@ -249,10 +261,17 @@ async def update_endpoint(
                 skipped = await backlog(session, endpoint)
                 old_cursor = endpoint.cursor
                 endpoint.cursor = max(old_cursor or 0, await _newest_record_id(session))
+                endpoint.last_read_id = max(endpoint.last_read_id or 0, await _newest_read_id(session))
                 session.add(AuditLog(actor=actor, action="lrs_resume", detail={
                     "endpoint_id": str(endpoint.id), "endpoint": endpoint.name, "skipped": skipped,
                     "old_cursor": old_cursor, "new_cursor": endpoint.cursor,
                 }))
+        elif field == "send_reads":
+            if not isinstance(value, bool):
+                raise ServiceError(422, "bad_lrs", "send_reads must be true or false")
+            if value and not endpoint.send_reads:
+                # Reads made while switched off are never sent (live-only).
+                endpoint.last_read_id = max(endpoint.last_read_id or 0, await _newest_read_id(session))
         elif field == "username":
             if not isinstance(value, str):
                 raise ServiceError(422, "bad_lrs", "username must be a string")
@@ -353,7 +372,99 @@ async def forward_once(session: AsyncSession, cfg: ServerConfig, http: httpx.Asy
             if len(records) < cfg.lrs_batch_size:
                 break
 
+        if endpoint.send_reads:
+            forwarded += await _forward_reads(session, cfg, http, endpoint)
+
     return {"forwarded": forwarded}
+
+
+async def _forward_reads(
+    session: AsyncSession, cfg: ServerConfig, http: httpx.AsyncClient, endpoint: LrsEndpoint,
+) -> int:
+    """Send the endpoint its dataset reads after ``last_read_id`` (#239).
+
+    The same batching, retry and skip rules as records; the endpoint's scope
+    filters don't apply. Errors are recorded on the endpoint, never raised.
+    """
+    sent = 0
+    for _ in range(max(1, cfg.lrs_max_batches_per_run)):
+        reads = list(await session.scalars(
+            select(DatasetRead).where(DatasetRead.id > endpoint.last_read_id)
+            .order_by(DatasetRead.id).limit(cfg.lrs_batch_size)))
+        if not reads:
+            break
+        try:
+            statements = await _read_statements(session, cfg, endpoint, reads)
+            resp = await _post(cfg, http, endpoint, statements)
+        except httpx.HTTPError as exc:
+            endpoint.last_error = f"network error: {exc}"
+            endpoint.last_error_at = datetime.now(timezone.utc)
+            break
+        except Exception as exc:  # one endpoint must not stop the others
+            endpoint.last_error = f"{type(exc).__name__}: {exc}"
+            endpoint.last_error_at = datetime.now(timezone.utc)
+            break
+        detail = {"endpoint": endpoint.name, "count": len(reads), "stream": "dataset_reads",
+                  "first_read_id": reads[0].id, "last_read_id": reads[-1].id}
+        if resp.status_code in (200, 204):
+            endpoint.last_read_id = reads[-1].id
+            endpoint.last_success_at = datetime.now(timezone.utc)
+            endpoint.last_error = None
+            session.add(AuditLog(actor="system:lrs-forward", action="lrs_export", detail=detail))
+            sent += len(reads)
+        elif resp.status_code in PERMANENT_REJECTIONS:
+            endpoint.last_read_id = reads[-1].id
+            endpoint.last_error = (f"HTTP {resp.status_code}: the LRS rejected {len(reads)} dataset read(s) "
+                                   f"(read ids {reads[0].id}-{reads[-1].id}); skipped, not sent")
+            endpoint.last_error_at = datetime.now(timezone.utc)
+            session.add(AuditLog(actor="system:lrs-forward", action="lrs_skip",
+                                 detail={**detail, "status": resp.status_code}))
+        else:
+            endpoint.last_error = f"HTTP {resp.status_code} sending dataset reads"
+            endpoint.last_error_at = datetime.now(timezone.utc)
+            break
+        if len(reads) < cfg.lrs_batch_size:
+            break
+    return sent
+
+
+async def _read_statements(
+    session: AsyncSession, cfg: ServerConfig, endpoint: LrsEndpoint, reads: list[DatasetRead],
+) -> list[dict]:
+    names = {m.id: m.name for m in await session.scalars(
+        select(Member).where(Member.id.in_({r.member_id for r in reads})))}
+    datasets = {d.id: d for d in await session.scalars(
+        select(Dataset).where(Dataset.id.in_({r.dataset_id for r in reads})))}
+    rows = await session.execute(
+        select(DatasetVersion.dataset_id, DatasetVersion.version, DatasetItem.key, DatasetItem.sha256)
+        .join(DatasetItem, DatasetItem.version_id == DatasetVersion.id)
+        .where(DatasetVersion.dataset_id.in_({r.dataset_id for r in reads}),
+               DatasetItem.key.in_({r.item_key for r in reads})))
+    hashes = {(d, v, k): h for d, v, k, h in rows}
+    out = []
+    for r in reads:
+        ds = datasets[r.dataset_id]
+        out.append(read_to_statement(
+            {"id": r.id, "agent": names[r.member_id], "version": r.version, "item_key": r.item_key,
+             "cycle": str(r.cycle) if r.cycle else None, "source": r.source, "ts": r.ts.isoformat(),
+             "sha256": hashes.get((r.dataset_id, r.version, r.item_key))},
+            {"id": str(ds.id), "name": ds.name},
+            base=cfg.public_base_url, xapi_version=endpoint.xapi_version))
+    return out
+
+
+async def _post(cfg: ServerConfig, http: httpx.AsyncClient, endpoint: LrsEndpoint,
+                statements: list[dict]) -> httpx.Response:
+    secret = decrypt_secret(cfg, endpoint)
+    if secret is None:
+        raise ServiceError(422, "no_secret", f"endpoint {endpoint.name!r} has no secret to forward with")
+    token = base64.b64encode(f"{endpoint.username}:{secret}".encode("utf-8")).decode("ascii")
+    headers = {
+        "Authorization": f"Basic {token}",
+        "X-Experience-API-Version": endpoint.xapi_version,
+        "Content-Type": "application/json",
+    }
+    return await http.post(f"{endpoint.url}/statements", json=statements, headers=headers)
 
 
 async def _cause_hashes(session: AsyncSession, records: list[Record]) -> dict[str, str]:
@@ -444,16 +555,7 @@ async def _forward_endpoint(
             rec, base=cfg.public_base_url, xapi_version=endpoint.xapi_version, payload=payload,
             ref_hashes=ref_hashes))
 
-    secret = decrypt_secret(cfg, endpoint)
-    if secret is None:
-        raise ServiceError(422, "no_secret", f"endpoint {endpoint.name!r} has no secret to forward with")
-    token = base64.b64encode(f"{endpoint.username}:{secret}".encode("utf-8")).decode("ascii")
-    headers = {
-        "Authorization": f"Basic {token}",
-        "X-Experience-API-Version": endpoint.xapi_version,
-        "Content-Type": "application/json",
-    }
-    resp = await http.post(f"{endpoint.url}/statements", json=statements, headers=headers)
+    resp = await _post(cfg, http, endpoint, statements)
 
     if resp.status_code in (200, 204):
         endpoint.cursor = records[-1].id

@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, LargeBinary, String, Text, Uuid
+from sqlalchemy import BigInteger, Boolean, LargeBinary, String, Text, Uuid, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from server.models.base import Base, BigIntPK, JSONType, UTCDateTime, utcnow
@@ -38,6 +38,10 @@ class LrsEndpoint(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Last Record.id forwarded (the cursor for the forwarder, issue #60).
     cursor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    # Dataset reads (#239): sent unless switched off; scope filters don't apply.
+    send_reads: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
+    # Last DatasetRead.id forwarded; live-only like ``cursor``.
+    last_read_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
     last_success_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     last_error_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     last_error: Mapped[str | None] = mapped_column(Text)

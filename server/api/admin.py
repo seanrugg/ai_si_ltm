@@ -1218,7 +1218,7 @@ async def list_mcp_tokens(request: Request, admin: AdminAuth = ADMIN) -> dict:
 # --------------------------------------------------------------------------- #
 # LRS endpoints (issue #59)
 # --------------------------------------------------------------------------- #
-_CREATE_FIELDS = {"name", "url", "username", "secret", "xapi_version", "scope"}
+_CREATE_FIELDS = {"name", "url", "username", "secret", "xapi_version", "scope", "send_reads"}
 
 
 @router.get("/admin/lrs")

@@ -167,6 +167,13 @@ The statement id is UUIDv5(NAMESPACE, `"read:" + <dataset_reads.id>`). Reads
 are forwarded by the existing forwarder as a second stream, batched and
 live-only per endpoint.
 
+Each endpoint has its own reads cursor (`last_read_id`) and a `send_reads`
+switch (default on; "Send dataset reads" on the LRS page). The endpoint's scope
+filters (types, agents, places, swarms) apply to records only. Reads made while
+an endpoint is paused, or while `send_reads` is off, are never sent, the same
+rule as records (#175). A rejected batch (400, 409, 413, 422) is skipped and
+audited. Any other failure is retried on the next run.
+
 ## Dashboard
 
 - **Datasets** page: the catalog, Add (upload or integration), pending versions

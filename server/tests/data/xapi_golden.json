@@ -1172,5 +1172,94 @@
     }
    }
   }
+ },
+ {
+  "name": "dataset-read",
+  "read": {
+   "id": 42,
+   "agent": "z3-r0",
+   "version": 3,
+   "item_key": "manuals/drive train.md",
+   "cycle": "5b0f6a3e-2c1d-4e8f-9a7b-1c2d3e4f5a6b",
+   "source": "served",
+   "ts": "2026-11-11T08:15:00+00:00",
+   "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "dataset": {
+   "id": "0d9c8b7a-6f5e-4d3c-2b1a-0f9e8d7c6b5a",
+   "name": "Drive manuals"
+  },
+  "options": {
+   "base": "https://ltms.example.org",
+   "xapi_version": "2.0.0"
+  },
+  "statement": {
+   "id": "05960480-bcfb-534b-89da-86cd54394458",
+   "actor": {
+    "objectType": "Agent",
+    "account": {
+     "homePage": "https://ltms.example.org",
+     "name": "z3-r0"
+    }
+   },
+   "verb": {
+    "id": "https://w3id.org/xapi-ai/verbs/read-resource",
+    "display": {
+     "en": "read resource"
+    }
+   },
+   "object": {
+    "objectType": "Activity",
+    "id": "https://ltms.example.org/datasets/0d9c8b7a-6f5e-4d3c-2b1a-0f9e8d7c6b5a/v/3/items/manuals%2Fdrive%20train.md",
+    "definition": {
+     "type": "https://w3id.org/xapi-ai/activity-type/dataset-item",
+     "name": {
+      "en": "manuals/drive train.md"
+     }
+    }
+   },
+   "context": {
+    "contextActivities": {
+     "parent": [
+      {
+       "objectType": "Activity",
+       "id": "https://ltms.example.org/datasets/0d9c8b7a-6f5e-4d3c-2b1a-0f9e8d7c6b5a/v/3",
+       "definition": {
+        "type": "https://w3id.org/xapi-ai/activity-type/dataset",
+        "name": {
+         "en": "Drive manuals"
+        }
+       }
+      }
+     ],
+     "grouping": [
+      {
+       "objectType": "Activity",
+       "id": "https://ltms.example.org",
+       "definition": {
+        "type": "https://w3id.org/xapi-ai/activity-type/fleet"
+       }
+      }
+     ],
+     "category": [
+      {
+       "objectType": "Activity",
+       "id": "https://w3id.org/xapi-ai/profile/0.11.0",
+       "definition": {
+        "type": "http://adlnet.gov/expapi/activities/profile"
+       }
+      }
+     ]
+    },
+    "extensions": {
+     "https://w3id.org/xapi-ai/extensions/resource-version": "3",
+     "https://w3id.org/xapi-ai/extensions/read-source": "served",
+     "https://w3id.org/xapi-ai/extensions/resource-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "registration": "5b0f6a3e-2c1d-4e8f-9a7b-1c2d3e4f5a6b"
+   },
+   "timestamp": "2026-11-11T08:15:00+00:00",
+   "version": "2.0.0"
+  }
  }
 ]

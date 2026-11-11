@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from server.xapi.translate import GLOSSARY, RECORD_CONCEPTS, record_to_statement
+from server.xapi.translate import GLOSSARY, RECORD_CONCEPTS, read_to_statement, record_to_statement
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 
@@ -22,7 +22,10 @@ def _load_cases() -> list[dict]:
         return json.load(fh)
 
 
-CASES = _load_cases()
+ALL_CASES = _load_cases()
+# Record cases carry "record"; dataset-read cases (#239) carry "read".
+CASES = [c for c in ALL_CASES if "record" in c]
+READ_CASES = [c for c in ALL_CASES if "read" in c]
 
 
 def _payload_for(case: dict):
@@ -35,6 +38,24 @@ def test_golden(case: dict):
         record_to_statement(case["record"], payload=_payload_for(case), **case["options"])
         == case["statement"]
     )
+
+
+@pytest.mark.parametrize("case", READ_CASES, ids=lambda c: c["name"])
+def test_golden_reads(case: dict):
+    assert read_to_statement(case["read"], case["dataset"], **case["options"]) == case["statement"]
+
+
+def test_read_statement_id_and_optional_fields():
+    case = READ_CASES[0]
+    read = dict(case["read"], cycle=None, sha256=None, source="reported")
+    stmt = read_to_statement(read, case["dataset"], **case["options"])
+    assert stmt["id"] == case["statement"]["id"]  # the id depends only on the read id
+    assert "registration" not in stmt["context"]
+    ext = stmt["context"]["extensions"]
+    assert not any(k.endswith("/resource-hash") for k in ext)
+    assert ext["https://w3id.org/xapi-ai/extensions/read-source"] == "reported"
+    with pytest.raises(ValueError):
+        read_to_statement(dict(read, source="guessed"), case["dataset"], **case["options"])
 
 
 def test_statement_shape():
