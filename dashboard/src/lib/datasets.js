@@ -87,7 +87,12 @@ export async function uploadFiles(api, datasetId, version, files, onProgress = (
         const body = new FormData();
         body.append("files", file, file.name);
         const res = await api(itemsPath(datasetId, version), { method: "POST", body });
-        key = res?.items?.[0]?.key ?? file.name;
+        const first = res?.items?.[0];
+        key = first?.key ?? file.name;
+        if (first?.archive) {
+          results.push({ name: file.name, ok: true, key, archive: first.archive });
+          continue;
+        }
       }
       results.push({ name: file.name, ok: true, key });
     } catch (err) {

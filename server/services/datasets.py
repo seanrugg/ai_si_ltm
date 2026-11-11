@@ -15,7 +15,7 @@ from sqlalchemy import func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models import AuditLog, Dataset, DatasetItem, DatasetRead, DatasetVersion
-from server.services import dataset_store, extract
+from server.services import archives, dataset_store, extract
 from server.models.dataset import DATASET_KINDS
 from server.services.errors import ServiceError
 
@@ -196,6 +196,16 @@ async def add_item(session: AsyncSession, cfg, v: DatasetVersion, *, key: str, f
     served as a file (``…/content``), no text.
     """
     media_type = extract.sniff(head, filename or key)
+    if media_type in archives.ARCHIVE_TYPES:
+        summary = await archives.unpack(session, cfg, v, archive_key=key, sha=sha, size=size,
+                                        media_type=media_type, add_item=add_item, check_new_key=_check_new_key)
+        if summary is not None:
+            # The members are the items; the archive file itself isn't kept.
+            await session.flush()
+            in_use = await session.scalar(select(DatasetItem.id).where(DatasetItem.sha256 == sha).limit(1))
+            dataset_store.remove_if_unused(cfg.data_dir, sha, in_use is not None)
+            return {"key": key, "media_type": media_type, "size_bytes": size, "sha256": sha,
+                    "tier": None, "archive": summary}
     small = size <= cfg.dataset_text_max_mb * 1024 * 1024
     text, meta, tier = None, {}, "large"
     if small and media_type in extract.TEXT_TIER:

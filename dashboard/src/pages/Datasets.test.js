@@ -138,3 +138,13 @@ describe("chunked upload (#245)", () => {
     expect(CHUNKED_ABOVE).toBe(25 * 1024 * 1024);
   });
 });
+
+describe("archive uploads (#246)", () => {
+  it("reports what an archive unpacked to", async () => {
+    api.mockResolvedValueOnce({ items: [{ key: "bundle.zip", archive: {
+      stored: [{ key: "a.md" }], skipped: [{ key: "n.zip", reason: "nested archive (zip)" }], errors: [] } }] });
+    const [r] = await uploadFiles(api, "d1", 1, [new File(["PK"], "bundle.zip")]);
+    expect(r.archive.stored).toHaveLength(1);
+    expect(r.archive.skipped[0].reason).toMatch(/nested/);
+  });
+});
