@@ -30,7 +30,7 @@ from server.services import location as location_service
 from server.services import network as network_service
 from server.services import profile as profile_service
 from server.services import datasets as datasets_service
-from server.services import dataset_uploads, integrations, url_snapshot
+from server.services import charter, dataset_uploads, integrations, url_snapshot
 from server.services import swarm_remove
 from server.services.errors import ServiceError
 
@@ -1345,6 +1345,39 @@ async def upload_dataset_items(dataset_id: str, version: int, request: Request,
         items = await datasets_service.upload_items(session, request.app.state.config, ds, version, files,
                                                     prefix=prefix)
         return {"items": items, "dataset": await datasets_service.dataset_dict(session, ds)}
+
+
+# Fleet charter (#255): publish markdown; see who has read the current version.
+@router.put("/admin/charter")
+async def publish_charter(request: Request, admin: AdminAuth = ADMIN) -> dict:
+    """The body is the charter as markdown (``text/markdown`` or ``{"markdown": ...}``)."""
+    raw = await request.body()
+    if request.headers.get("content-type", "").startswith("application/json"):
+        import json as _json
+
+        try:
+            markdown = _json.loads(raw or b"{}").get("markdown")
+        except (ValueError, AttributeError):
+            raise ServiceError(422, "bad_charter", "send markdown, or JSON {\"markdown\": ...}") from None
+    else:
+        try:
+            markdown = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            raise ServiceError(422, "bad_charter", "the charter must be UTF-8") from None
+    async with transaction(request) as session:
+        return await charter.publish(session, request.app.state.config, markdown, admin=f"admin:{admin.username}")
+
+
+@router.get("/admin/charter")
+async def get_charter(request: Request, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        return await charter.admin_view(session, request.app.state.config)
+
+
+@router.get("/admin/charter/versions/{version}")
+async def get_charter_version(version: int, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        return await charter.version_text(session, version)
 
 
 # Catalog integrations (#248): metadata only; LTMS never fetches from them.

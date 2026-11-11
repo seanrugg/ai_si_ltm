@@ -14,7 +14,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from server.models.base import BigIntPK, Base, JSONType, UTCDateTime, utcnow
 
 DATASET_SCOPES = ("fleet",)
-DATASET_KINDS = ("upload", "url", "integration")
+DATASET_KINDS = ("upload", "url", "integration", "charter")
 INTEGRATION_KINDS = ("http", "s3", "huggingface", "ollama", "openai", "mcp")
 DATASET_STATUSES = ("pending", "approved", "retired")
 VERSION_STATUSES = ("pending", "approved")

@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ltms_contract import ContractError, parse_ts, verify_record
 from server.models import AuditLog, Member, Record, RecordPayload, RecordProvenance, RecordTombstone
-from server.services import swarms
+from server.services import charter, swarms
 
 MEMBER_FORBIDDEN_TYPES = {"system"}  # written only by the server itself
 
@@ -153,6 +153,7 @@ async def ingest_batch(
     future_skew_seconds: int = 300,
     request_id: str | None = None,
     now: datetime | None = None,
+    charter_grace_days: int = 14,
 ) -> IngestResult:
     """Verify and store ``records`` submitted by one member (its own, or relayed). Caller commits."""
     now = now or datetime.now(timezone.utc)
@@ -174,6 +175,9 @@ async def ingest_batch(
         raise IngestRejected("forbidden", "member lacks the 'contribute' permission")
     relay_swarm = await swarms.hub_swarm_id(session, submitter) if others else None
     memberships = await swarms.open_memberships(session, [m.id for m in locked])
+    # The fleet charter (#255): an author who hasn't read it may not write. A
+    # relayed record is checked against its author, not the hub.
+    gate = await charter.Gate.load(session, charter_grace_days, locked, now)
 
     def swarm_of(m: Member) -> str | None:
         row = memberships.get(m.id)
@@ -208,6 +212,8 @@ async def ingest_batch(
             author = author_for(record)
             touched[author.name] = author
             kind, verified = await _check_one(session, author, record, now, future_skew_seconds)
+            if kind == "new" and (blocked := gate.check(author)) is not None:
+                raise IngestRejected(*blocked)
         except IngestRejected as exc:
             stopped = True
             result.results.append({"index": index, "agent": agent, "seq": seq, "status": "rejected",

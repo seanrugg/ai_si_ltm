@@ -10,7 +10,7 @@ from sqlalchemy import select
 from server.api.deps import MemberAuth, client_ip, current_member, request_id, require, transaction
 from server.api.schemas import RecordBatch
 from server.models import AuditLog, Member
-from server.services import cognition, network, recall, swarms
+from server.services import charter, cognition, network, recall, swarms
 from server.services.errors import ServiceError
 from server.services.ingest import ingest_batch
 
@@ -32,6 +32,7 @@ async def post_records(
             body.records,
             future_skew_seconds=cfg.future_skew_seconds,
             request_id=request_id(request),
+            charter_grace_days=cfg.charter_grace_days,
         )
         if result.accepted:  # the submitter's address; a hub's relay records the hub only
             await network.record_seen(session, await session.get(Member, auth.member_id), client_ip(request))
@@ -55,8 +56,12 @@ async def chain_head(request: Request, agent: str | None = None,
             if relay_swarm is None or row is None or row.swarm_id != relay_swarm:
                 raise ServiceError(403, "not_in_swarm", f"{agent!r} is not a member of this relay's swarm")
             member = other
-        return {"name": member.name, "last_ack_seq": member.last_ack_seq, "last_hash": member.last_hash,
+        head = {"name": member.name, "last_ack_seq": member.last_ack_seq, "last_hash": member.last_hash,
                 "memory_generation": member.memory_generation}
+        status = await charter.status_for(session, request.app.state.config, member)
+        if status is not None:
+            head["charter"] = status  # #255: tells a client when to read the charter
+        return head
 
 
 @router.put("/members/me/cognition")
@@ -73,6 +78,13 @@ async def put_network(request: Request, body: dict, auth: MemberAuth = Depends(c
     async with transaction(request) as session:
         member = await session.get(Member, auth.member_id)
         return {"addresses": await network.record_reported(session, member, body, source="reported")}
+
+
+@router.get("/charter")
+async def read_charter(request: Request, auth: MemberAuth = Depends(current_member)) -> dict:
+    """The current fleet charter (#255). Logged as a read, and sent to the LRS."""
+    async with transaction(request) as session:
+        return await charter.read(session, member_id=auth.member_id)
 
 
 @router.post("/members/me/reads")

@@ -200,7 +200,7 @@ CREATE TABLE datasets (
 	integration_id UUID, 
 	PRIMARY KEY (id), 
 	CONSTRAINT ck_datasets_scope CHECK (scope IN ('fleet')), 
-	CONSTRAINT ck_datasets_kind CHECK (kind IN ('upload', 'url', 'integration')), 
+	CONSTRAINT ck_datasets_kind CHECK (kind IN ('upload', 'url', 'integration', 'charter')), 
 	CONSTRAINT ck_datasets_status CHECK (status IN ('pending', 'approved', 'retired')), 
 	UNIQUE (name), 
 	FOREIGN KEY(integration_id) REFERENCES catalog_integrations (id)

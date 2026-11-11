@@ -6,10 +6,13 @@ rate-limited per client IP.
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
+from sqlalchemy import select
 
 from server.api.deps import client_ip, transaction
 from server.api.schemas import ChallengeRequest, EnrollRequest, TokenRequest
+from server.models import Member
 from server.services import auth as auth_service
+from server.services import charter
 from server.services import enrollment
 from server.services import runtime_settings
 from server.services.errors import ServiceError
@@ -60,7 +63,7 @@ async def token(body: TokenRequest, request: Request) -> dict:
     """Step 2 of login: return Ed25519(b"ltms-auth-v1\\n" || nonce_bytes) for a bearer token."""
     _limit(request, "challenge")
     async with transaction(request) as session:
-        return await auth_service.exchange_token(
+        out = await auth_service.exchange_token(
             session,
             name=body.name,
             nonce=body.nonce,
@@ -68,3 +71,8 @@ async def token(body: TokenRequest, request: Request) -> dict:
             ttl=request.app.state.config.token_ttl_seconds,
             remote_ip=client_ip(request),
         )
+        member = await session.scalar(select(Member).where(Member.name == body.name))
+        status = await charter.status_for(session, request.app.state.config, member) if member else None
+        if status is not None:
+            out["charter"] = status  # #255: read it now if "read" is false
+        return out
