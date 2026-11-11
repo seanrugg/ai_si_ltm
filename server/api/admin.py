@@ -26,6 +26,7 @@ from server.services import conversation as conversation_service, enrollment, in
 from server.services import export as export_service
 from server.services import records as records_service
 from server.services import cognition, memory_wipe
+from server.services import network as network_service
 from server.services import profile as profile_service
 from server.services.errors import ServiceError
 
@@ -262,6 +263,14 @@ async def profile_summary(request: Request, admin: AdminAuth = ADMIN, member: st
     async with transaction(request) as session:
         subject = await profile_service.resolve_subject(session, member, swarm)
         return await profile_service.summary(session, subject, hours)
+
+
+@router.get("/admin/network")
+async def network(request: Request, admin: AdminAuth = ADMIN, swarm: str | None = None,
+                  member: str | None = None) -> dict:
+    """Addresses each member uses (#189). Admin only; never exported to an LRS."""
+    async with transaction(request) as session:
+        return await network_service.describe(session, swarm=swarm, member=member)
 
 
 @router.get("/admin/volume")
