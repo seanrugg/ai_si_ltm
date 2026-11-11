@@ -64,6 +64,35 @@ class IngestRejected(Exception):
         self.code, self.message = code, message
 
 
+MAX_SOURCES = 16
+MAX_SOURCE_ITEM = 300
+
+
+def _check_sources(payload: object) -> None:
+    """``payload.sources`` cites dataset items (#240), on any record type.
+
+    At most 16 ``{dataset, version, item}``: ``dataset`` a string, ``version``
+    a positive int, ``item`` a string of at most 300 characters (a ``#fragment``
+    is fine). The dataset need not exist: records are permanent, datasets may
+    be retired later.
+    """
+    if not isinstance(payload, dict) or "sources" not in payload:
+        return
+    sources = payload["sources"]
+    if not isinstance(sources, list) or len(sources) > MAX_SOURCES:
+        raise IngestRejected("bad_sources", f"payload.sources must be a list of at most {MAX_SOURCES} entries")
+    for i, src in enumerate(sources):
+        ok = (
+            isinstance(src, dict) and set(src) == {"dataset", "version", "item"}
+            and isinstance(src["dataset"], str) and src["dataset"]
+            and isinstance(src["version"], int) and not isinstance(src["version"], bool) and src["version"] > 0
+            and isinstance(src["item"], str) and 0 < len(src["item"]) <= MAX_SOURCE_ITEM
+        )
+        if not ok:
+            raise IngestRejected("bad_sources", f"payload.sources[{i}] must be {{dataset: str, version: int > 0, "
+                                                f"item: str (<= {MAX_SOURCE_ITEM} chars)}}")
+
+
 def _seq_of(record: object) -> int | None:
     if isinstance(record, dict) and isinstance(record.get("seq"), int) and not isinstance(record["seq"], bool):
         return record["seq"]
@@ -86,6 +115,7 @@ async def _check_one(session: AsyncSession, member: Member, record: dict, now: d
         raise IngestRejected("type_forbidden", f"members may not write {header['type']!r} records")
     if header["type"] == "policy" and "policy" not in member.permissions:
         raise IngestRejected("type_forbidden", "writing policy records needs the 'policy' permission")
+    _check_sources(verified.payload)
     if parse_ts(header["ts"]) > now + timedelta(seconds=skew):
         raise IngestRejected("future_ts", f"ts is more than {skew}s in the future; check the member's clock")
 
