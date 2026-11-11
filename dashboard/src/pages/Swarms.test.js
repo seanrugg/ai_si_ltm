@@ -30,9 +30,10 @@ function page() {
 }
 
 describe("Swarms page", () => {
-  it("defaults to generating the root key in the browser", () => {
+  it("defaults to adding a swarm with a browser-generated key, explained by a help tip", () => {
     const html = page();
-    expect(html).toContain("Generate root key");
+    expect(html).toMatch(/<button[^>]*>Add swarm<\/button>/);
+    expect(html).toContain('aria-label="About adding a swarm"');
     expect(html).toContain("Already have a key?");
   });
 
@@ -56,6 +57,13 @@ describe("one-time key panel", () => {
     expect(html).toContain('aria-modal="true"');
     expect(html).toContain('aria-labelledby="key-once-h"');
     expect(html).toContain("cannot show it again");
+  });
+
+  it("explains both keys and warns to copy the key now", () => {
+    expect(html).toContain('aria-label="About the private root key"');
+    expect(html).toContain('aria-label="About the public root key"');
+    expect(html).toContain("a".repeat(64));
+    expect(html).toContain("Copy this key now and store it offline");
   });
 
   it("can't be closed until the key is confirmed saved", () => {

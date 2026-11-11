@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import HelpTip from "../components/HelpTip.jsx";
 import LocationForm from "../components/LocationForm.jsx";
-import { SWARM_ROLE, MEMORY_WIPE, WIPE_VS_DELETE } from "../lib/help.js";
+import { ADD_SWARM, MEMORY_WIPE, ROOT_PRIVATE_KEY, ROOT_PUBLIC_KEY, SWARM_ROLE, WIPE_VS_DELETE } from "../lib/help.js";
 import { Link } from "react-router-dom";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
@@ -84,15 +84,27 @@ export function KeyOnceDialog({ swarmName, swarmId, keyString, onDone }) {
           This is the swarm&apos;s root key. LTMS does not keep it and cannot show it again. Store it in your
           password manager. Anyone with it can appoint this swarm&apos;s hub.
         </p>
+        <div className="mb-1 flex items-center gap-2 text-sm font-bold">
+          Private root key
+          <HelpTip id="root-private-key" label="About the private root key">{ROOT_PRIVATE_KEY}</HelpTip>
+        </div>
         <p className="mb-3 break-all rounded-md border border-led/50 bg-ink p-3 font-mono text-sm select-all"
            aria-label="Root key">
           {keyString}
         </p>
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-sm text-paper-muted">
+          <span>Swarm ID <span className="break-all font-mono text-paper">{swarmId}</span></span>
+          <HelpTip id="root-public-key" label="About the public root key">{ROOT_PUBLIC_KEY}</HelpTip>
+        </div>
         <div className="mb-2 flex flex-wrap gap-2">
           <button type="button" className="btn btn-primary" onClick={copy}>Copy</button>
           <button type="button" className="btn" onClick={download}>Download (.txt)</button>
         </div>
         <p className="mb-3 min-h-5 text-sm text-ok" role="status" aria-live="polite">{copyStatus}</p>
+        <p className="mb-2 text-sm text-warn">
+          Copy this key now and store it offline. It is not shown again. Without it you can&apos;t appoint or replace
+          this swarm&apos;s hub.
+        </p>
         <label className="mb-3 flex items-center gap-2 text-sm cursor-pointer">
           <input type="checkbox" className="accent-led" checked={saved} onChange={(e) => setSaved(e.target.checked)} />
           I&apos;ve saved the key
@@ -173,8 +185,9 @@ function CreateSwarm({ onCreated }) {
           Make this the home swarm (only one active home at a time)
         </label>
         <button className="btn btn-primary" disabled={busy}>
-          {mode === "generate" ? "Generate root key" : "Register"}
+          {mode === "generate" ? "Add swarm" : "Register"}
         </button>
+        {mode === "generate" && <HelpTip id="add-swarm" label="About adding a swarm">{ADD_SWARM}</HelpTip>}
       </form>
       <button type="button" className="mb-2 text-sm text-paper-muted underline"
               onClick={() => setMode(mode === "generate" ? "existing" : "generate")}>
