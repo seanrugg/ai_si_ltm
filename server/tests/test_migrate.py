@@ -431,8 +431,15 @@ def test_no_model_drift_after_upgrade(db_url):
         try:
             async with engine.connect() as conn:
 
+                # Expression indexes that only a migration creates (alembic can't
+                # match their text to a model): the dataset full-text index (#238).
+                migration_only = {"idx_dataset_items_fts"}
+
+                def include(obj, name, type_, reflected, compare_to):
+                    return not (type_ == "index" and name in migration_only)
+
                 def compare(connection):
-                    context = MigrationContext.configure(connection)
+                    context = MigrationContext.configure(connection, opts={"include_object": include})
                     return compare_metadata(context, Base.metadata)
 
                 return await conn.run_sync(compare)
