@@ -38,6 +38,7 @@ def test_member_declared_beats_swarm_and_gps_beats_both(mesh, admin, db_exec):
     assert _loc(admin, "z3-r0") == {"name": "z3-r0", "best": None, "all": []}
 
     assert admin.put("/api/admin/locations/swarm/echo-base", json={"label": "Site A"}).status_code == 200
+    assert admin.get("/api/admin/locations").json()["swarms"]["echo-base"]["label"] == "Site A"
     best = _loc(admin, "z3-r0")["best"]
     assert (best["source"], best["label"], best["inherited_from"]) == ("declared", "Site A", "swarm echo-base")
 

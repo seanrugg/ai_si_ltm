@@ -1,4 +1,5 @@
 import { useApi } from "../api/useApi.js";
+import LocationForm from "../components/LocationForm.jsx";
 import { ErrorNote, Loading, PageHeader } from "../components/ui.jsx";
 
 const GROUPS = [
@@ -57,6 +58,7 @@ export function groupSettings(settings) {
 
 export default function Settings() {
   const { data, error, loading, reload } = useApi("/admin/settings");
+  const locations = useApi("/admin/locations");
   return (
     <>
       <PageHeader title="Settings" />
@@ -65,6 +67,12 @@ export default function Settings() {
         (<code className="hash">/etc/ltms/ltms.env</code>, defaults in <code className="hash">config/default.yaml</code>)
         and take effect after a restart. Passwords are never shown.
       </p>
+      <section className="panel mb-6 p-4" aria-labelledby="server-location-h">
+        <h2 id="server-location-h" className="font-bold">Server location</h2>
+        <p className="text-sm text-paper-muted">Where this LTMS server is. The Network tab&apos;s globe draws data flowing here.</p>
+        <LocationForm key={JSON.stringify(locations.data?.server ?? null)} subjectType="member" name="ltms-server"
+                      title="Server" current={locations.data?.server ?? null} onDone={locations.reload} />
+      </section>
       {loading && <Loading />}
       <ErrorNote error={error} onRetry={reload} />
       {data && (
