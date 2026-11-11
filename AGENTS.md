@@ -50,11 +50,10 @@ else disagree, this file wins (except for direct instructions from Sean).
    swarm name or device name. Make it configuration, and use neutral
    placeholders in examples and docs (`hub.local`, `ltms.example.org`,
    `<your-swarm>`, `/opt/ltms`). Device-specific code goes behind an adapter.
-11. **At most two issues per session.** After you open the PR for your second
-   issue, stop and report, even if more issues were named or Sean said
-   "continue development". End with: "Session limit reached; start a new
-   session for #N." A long session fills your context, and late work in it
-   gets sloppy. If one issue turns out larger than expected, stop after that one.
+11. **One issue per session.** After you open the PR for your issue, stop and
+   report, even if more issues were named or Sean said "continue development".
+   End with: "Session limit reached; start a new session for #N." A long session
+   fills your context, and late work in it gets sloppy.
 
 ## 2. Do-not-touch list
 
