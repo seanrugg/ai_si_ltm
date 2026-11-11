@@ -11,10 +11,10 @@ import hashlib
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.models import AuditLog, Dataset, DatasetItem, DatasetVersion
+from server.models import AuditLog, Dataset, DatasetItem, DatasetRead, DatasetVersion
 from server.services import dataset_store, extract
 from server.models.dataset import DATASET_KINDS
 from server.services.errors import ServiceError
@@ -210,3 +210,125 @@ async def list_items(session: AsyncSession, ds: Dataset, version: int) -> list[d
              "tier": i.tier, "meta": i.meta}
             for i in await session.scalars(select(DatasetItem).where(DatasetItem.version_id == v.id)
                                            .order_by(DatasetItem.key))]
+
+
+
+# --------------------------------------------------------------------------- #
+# Member reads and search (#238)
+# --------------------------------------------------------------------------- #
+MAX_QUERY = 200
+FTS_CONFIG = "english"
+
+
+async def _readable(session: AsyncSession, dataset_id) -> Dataset:
+    """An approved dataset, or 404 (members never see pending or retired ones)."""
+    try:
+        ds = await session.get(Dataset, _uuid(dataset_id))
+    except ServiceError:
+        ds = None
+    if ds is None or ds.status != "approved":
+        raise ServiceError(404, "not_found", "no such dataset")
+    return ds
+
+
+async def _readable_version(session: AsyncSession, ds: Dataset, version: int | None) -> DatasetVersion:
+    if version is None:
+        v = await current_version(session, ds)
+    else:
+        v = await session.scalar(select(DatasetVersion).where(
+            DatasetVersion.dataset_id == ds.id, DatasetVersion.version == version,
+            DatasetVersion.status == "approved"))
+    if v is None:
+        raise ServiceError(404, "not_found", "no such version")
+    return v
+
+
+async def list_for_members(session: AsyncSession) -> list[dict]:
+    out = []
+    for ds in await session.scalars(select(Dataset).where(Dataset.status == "approved").order_by(Dataset.name)):
+        v = await current_version(session, ds)
+        if v is None:
+            continue
+        out.append({"id": str(ds.id), "name": ds.name, "description": ds.description, "licence": ds.licence,
+                    "use": ds.use, "scope": ds.scope, "current_version": v.version, "item_count": v.item_count})
+    return out
+
+
+def _snippet(text: str, q: str, width: int = 160) -> str:
+    i = text.lower().find(q.lower().split()[0]) if q.split() else -1
+    start = max(0, i - width // 3) if i >= 0 else 0
+    piece = " ".join(text[start:start + width].split())
+    return ("…" if start else "") + piece + ("…" if start + width < len(text) else "")
+
+
+async def search(session: AsyncSession, dataset_id, q: str, *, version: int | None = None,
+                 limit: int = 20) -> dict:
+    q = (q or "").strip()
+    if not q or len(q) > MAX_QUERY:
+        raise ServiceError(422, "bad_query", f"q is required, at most {MAX_QUERY} characters")
+    limit = max(1, min(int(limit), 50))
+    ds = await _readable(session, dataset_id)
+    v = await _readable_version(session, ds, version)
+    if session.bind.dialect.name == "postgresql":
+        doc = func.to_tsvector(literal(FTS_CONFIG).cast(_regconfig()),
+                               func.coalesce(DatasetItem.key, "") + " " + func.coalesce(DatasetItem.text, ""))
+        query = func.websearch_to_tsquery(literal(FTS_CONFIG).cast(_regconfig()), q)
+        rank = func.ts_rank(doc, query)
+        headline = func.ts_headline(literal(FTS_CONFIG).cast(_regconfig()), func.coalesce(DatasetItem.text, ""),
+                                    query, "MaxWords=30, MinWords=10")
+        rows = (await session.execute(
+            select(DatasetItem.key, headline, rank).where(DatasetItem.version_id == v.id, doc.op("@@")(query))
+            .order_by(rank.desc(), DatasetItem.key).limit(limit))).all()
+        hits = [{"key": k, "snippet": " ".join((h or "").split()), "rank": float(r)} for k, h, r in rows]
+    else:
+        like = f"%{q.lower()}%"
+        rows = (await session.execute(
+            select(DatasetItem.key, DatasetItem.text).where(
+                DatasetItem.version_id == v.id,
+                or_(func.lower(DatasetItem.text).like(like), func.lower(DatasetItem.key).like(like)))
+            .order_by(DatasetItem.key).limit(limit))).all()
+        hits = [{"key": k, "snippet": _snippet(t or "", q), "rank": 1.0} for k, t in rows]
+    return {"dataset": str(ds.id), "version": v.version, "hits": hits}
+
+
+def _regconfig():
+    from sqlalchemy.dialects.postgresql import REGCONFIG
+    return REGCONFIG
+
+
+async def log_read(session: AsyncSession, *, member_id, ds: Dataset, version: int, key: str,
+                   cycle: uuid.UUID | None, source: str = "served") -> bool:
+    """Log a read unless the same member already read this item version in this cycle. True if logged."""
+    stmt = select(DatasetRead.id).where(
+        DatasetRead.member_id == member_id, DatasetRead.dataset_id == ds.id, DatasetRead.version == version,
+        DatasetRead.item_key == key, DatasetRead.source == source)
+    stmt = stmt.where(DatasetRead.cycle.is_(None) if cycle is None else DatasetRead.cycle == cycle)
+    if cycle is not None and await session.scalar(stmt.limit(1)):
+        return False
+    session.add(DatasetRead(member_id=member_id, dataset_id=ds.id, version=version, item_key=key, cycle=cycle,
+                            source=source, ts=_now()))
+    await session.flush()
+    return True
+
+
+def parse_cycle(cycle: str | None) -> uuid.UUID | None:
+    if cycle in (None, ""):
+        return None
+    try:
+        return uuid.UUID(str(cycle))
+    except ValueError:
+        raise ServiceError(422, "bad_cycle", "cycle must be a UUID") from None
+
+
+async def read_item(session: AsyncSession, *, member_id, dataset_id, key: str, version: int | None = None,
+                    cycle: str | None = None) -> dict:
+    cyc = parse_cycle(cycle)
+    ds = await _readable(session, dataset_id)
+    v = await _readable_version(session, ds, version)
+    item = await session.scalar(select(DatasetItem).where(DatasetItem.version_id == v.id, DatasetItem.key == key))
+    if item is None:
+        raise ServiceError(404, "not_found", f"no item {key!r} in version {v.version}")
+    await log_read(session, member_id=member_id, ds=ds, version=v.version, key=key, cycle=cyc)
+    return {"dataset": str(ds.id), "version": v.version, "key": item.key, "media_type": item.media_type,
+            "tier": item.tier, "sha256": item.sha256, "size_bytes": item.size_bytes, "text": item.text,
+            "meta": item.meta}

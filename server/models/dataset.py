@@ -70,6 +70,7 @@ class DatasetItem(Base):
         UniqueConstraint("version_id", "key", name="uq_dataset_items_key"),
         CheckConstraint(f"tier IN {ITEM_TIERS}", name="ck_dataset_items_tier"),
         Index("idx_dataset_items_sha256", "sha256"),
+        # The PostgreSQL full-text index (idx_dataset_items_fts) is created by migration 0013.
     )
 
     id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
@@ -83,3 +84,25 @@ class DatasetItem(Base):
     text: Mapped[str | None] = mapped_column(Text)  # extracted, at most 1 MB
     meta: Mapped[dict | None] = mapped_column(JSONType)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utcnow)
+
+
+READ_SOURCES = ("served", "reported")
+
+
+class DatasetRead(Base):
+    """One member reading one item (#238). Repeat reads in the same cycle aren't logged again."""
+    __tablename__ = "dataset_reads"
+    __table_args__ = (
+        CheckConstraint(f"source IN {READ_SOURCES}", name="ck_dataset_reads_source"),
+        Index("idx_dataset_reads_member_ts", "member_id", "ts"),
+        Index("idx_dataset_reads_dataset", "dataset_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
+    member_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("members.id"), nullable=False)
+    dataset_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("datasets.id"), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    item_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    cycle: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="served")
+    ts: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utcnow)

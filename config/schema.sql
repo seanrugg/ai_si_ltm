@@ -188,6 +188,25 @@ CREATE TABLE auth_challenges (
 	FOREIGN KEY(member_id) REFERENCES members (id)
 );
 
+CREATE TABLE dataset_reads (
+	id BIGSERIAL NOT NULL, 
+	member_id UUID NOT NULL, 
+	dataset_id UUID NOT NULL, 
+	version INTEGER NOT NULL, 
+	item_key VARCHAR(200) NOT NULL, 
+	cycle UUID, 
+	source VARCHAR(16) NOT NULL, 
+	ts TIMESTAMP WITH TIME ZONE NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT ck_dataset_reads_source CHECK (source IN ('served', 'reported')), 
+	FOREIGN KEY(member_id) REFERENCES members (id), 
+	FOREIGN KEY(dataset_id) REFERENCES datasets (id)
+);
+
+CREATE INDEX idx_dataset_reads_dataset ON dataset_reads (dataset_id);
+
+CREATE INDEX idx_dataset_reads_member_ts ON dataset_reads (member_id, ts);
+
 CREATE TABLE dataset_versions (
 	id BIGSERIAL NOT NULL, 
 	dataset_id UUID NOT NULL, 

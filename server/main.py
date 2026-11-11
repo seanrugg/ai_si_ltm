@@ -16,6 +16,7 @@ from fastapi import FastAPI, Request
 
 from server import __version__
 from server.api import admin, member, public
+from server.api import datasets as datasets_api
 from server.api.errors import register_exception_handlers
 from server.config import ServerConfig, load_config
 from server.db import create_all, make_engine, make_sessionmaker
@@ -129,6 +130,7 @@ def create_app(config: ServerConfig | None = None, *, create_tables: bool = True
 
     app.include_router(public.router)
     app.include_router(member.router)
+    app.include_router(datasets_api.router)
     app.include_router(admin.router)
     register_exception_handlers(app)
 
