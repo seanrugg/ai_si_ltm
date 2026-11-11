@@ -29,6 +29,7 @@ from server.services import cognition, memory_wipe
 from server.services import location as location_service
 from server.services import network as network_service
 from server.services import profile as profile_service
+from server.services import swarm_remove
 from server.services.errors import ServiceError
 
 router = APIRouter(prefix="/api", tags=["admin"])
@@ -605,6 +606,16 @@ async def rename_swarm(name: str, request: Request, body: dict, admin: AdminAuth
         swarm = await swarms.get_swarm(session, name)
         swarm = await swarms.rename_swarm(session, swarm, body.get("name"), actor=f"admin:{admin.username}")
         return {"id": swarm.id, "name": swarm.name, "status": swarm.status, "home": swarm.is_home}
+
+
+@router.post("/admin/swarms/{name}/remove")
+async def remove_swarm(name: str, request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    """Remove a swarm (#232): ``{"confirm": name, "members": "free" | "remove", "records": "keep"}``."""
+    async with transaction(request) as session:
+        swarm = await swarms.get_swarm(session, name)
+        return await swarm_remove.remove_swarm(session, swarm, confirm=body.get("confirm"),
+                                               members=body.get("members"), records=body.get("records", "keep"),
+                                               admin=admin.username)
 
 
 @router.post("/admin/swarms/{name}/members")

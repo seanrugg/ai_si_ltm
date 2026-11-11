@@ -122,8 +122,10 @@ CREATE TABLE swarms (
 	open_permissions JSONB DEFAULT '["contribute"]' NOT NULL, 
 	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
 	revoked_at TIMESTAMP WITH TIME ZONE, 
+	removed_at TIMESTAMP WITH TIME ZONE, 
+	former_name VARCHAR(64), 
 	PRIMARY KEY (id), 
-	CONSTRAINT ck_swarms_status CHECK (status IN ('active', 'revoked')), 
+	CONSTRAINT ck_swarms_status CHECK (status IN ('active', 'revoked', 'removed')), 
 	CONSTRAINT ck_swarms_enrollment_mode CHECK (enrollment_mode IN ('approval', 'invite', 'open')), 
 	UNIQUE (name), 
 	UNIQUE (public_key)

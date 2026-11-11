@@ -39,6 +39,7 @@ AUDIT_ACTIONS = (
     "network_change",
     "location_change",
     "swarm_rename",
+    "swarm_remove",
 )
 
 
