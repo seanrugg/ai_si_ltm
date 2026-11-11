@@ -41,7 +41,8 @@ def test_every_text_type_extracts(admin, ds):
     assert got["manuals/rows.json"]["meta"]["rows"] == 2
     assert got["manuals/rows.jsonl"]["meta"]["rows"] == 3
     assert got["manuals/robot.yaml"]["meta"] == {"top": ["robot"]}
-    assert got["manuals/robot.xml"]["meta"] == {"root": "robot", "children": 2}
+    assert got["manuals/robot.xml"]["meta"] == {"root": "robot", "children": 2, "format": "urdf", "robot": "z3",
+                                                 "links": 1, "joints": 1}  # a URDF (#247)
     ds_after = r.json()["dataset"]["versions"][0]
     assert ds_after["item_count"] == 9 and ds_after["manifest_hash"]
 

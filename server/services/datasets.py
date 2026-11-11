@@ -214,6 +214,8 @@ async def add_item(session: AsyncSession, cfg, v: DatasetVersion, *, key: str, f
     elif small and media_type in extract.DOCUMENT_TIER:
         tier = "text"  # served as extracted text, like the text tier
         text, meta = await extract.extract_document(str(dataset_store.path_for(cfg.data_dir, sha)), media_type)
+    else:
+        meta = await extract.extract_media(str(dataset_store.path_for(cfg.data_dir, sha)), media_type)
     session.add(DatasetItem(version_id=v.id, key=key, media_type=media_type, size_bytes=size, sha256=sha,
                             tier=tier, text=text, meta=meta))
     return {"key": key, "media_type": media_type, "size_bytes": size, "sha256": sha, "tier": tier, "meta": meta}
