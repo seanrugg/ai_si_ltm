@@ -76,10 +76,14 @@ CREATE TABLE members (
 	last_hash VARCHAR(64) NOT NULL, 
 	recall_floor_id BIGINT DEFAULT '0' NOT NULL, 
 	memory_generation INTEGER DEFAULT '0' NOT NULL, 
+	cognition_admin VARCHAR(16), 
+	cognition_declared JSONB, 
+	cognition_observed JSONB, 
 	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
 	PRIMARY KEY (id), 
 	CONSTRAINT ck_members_kind CHECK (kind IN ('robot', 'agent', 'assistant', 'relay')), 
 	CONSTRAINT ck_members_status CHECK (status IN ('pending', 'active', 'revoked', 'rejected')), 
+	CONSTRAINT ck_members_cognition_admin CHECK (cognition_admin IS NULL OR cognition_admin IN ('onboard', 'offboard')), 
 	UNIQUE (public_key), 
 	UNIQUE (name)
 );

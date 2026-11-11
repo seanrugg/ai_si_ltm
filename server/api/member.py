@@ -10,7 +10,7 @@ from sqlalchemy import select
 from server.api.deps import MemberAuth, current_member, request_id, require, transaction
 from server.api.schemas import RecordBatch
 from server.models import AuditLog, Member
-from server.services import recall, swarms
+from server.services import cognition, recall, swarms
 from server.services.errors import ServiceError
 from server.services.ingest import ingest_batch
 
@@ -55,6 +55,14 @@ async def chain_head(request: Request, agent: str | None = None,
             member = other
         return {"name": member.name, "last_ack_seq": member.last_ack_seq, "last_hash": member.last_hash,
                 "memory_generation": member.memory_generation}
+
+
+@router.put("/members/me/cognition")
+async def put_cognition(request: Request, body: dict, auth: MemberAuth = Depends(current_member)) -> dict:
+    """The device reports where its AI runs (#185): ``{"location", "models"}``."""
+    async with transaction(request) as session:
+        member = await session.get(Member, auth.member_id)
+        return {"cognition": await cognition.declare(session, member, body)}
 
 
 async def _member_scope(session, auth: MemberAuth) -> recall.Scope:

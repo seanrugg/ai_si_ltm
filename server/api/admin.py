@@ -25,7 +25,7 @@ from server.services import auth as auth_service
 from server.services import conversation as conversation_service, enrollment, integrity, lrs as lrs_service, mcp_access, policy_lifecycle, recall, runtime_settings, swarms
 from server.services import export as export_service
 from server.services import records as records_service
-from server.services import memory_wipe
+from server.services import cognition, memory_wipe
 from server.services.errors import ServiceError
 
 router = APIRouter(prefix="/api", tags=["admin"])
@@ -135,6 +135,19 @@ async def wipe_member(member_id: str, request: Request, body: dict, admin: Admin
     async with transaction(request) as session:
         m = await memory_wipe.wipe_member(session, _uuid(member_id), admin=admin.username,
                                           confirm=body.get("confirm"))
+        return enrollment.member_to_dict(m)
+
+
+@router.patch("/admin/members/{member_id}/cognition")
+async def set_cognition(member_id: str, request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    """Override where a member's AI runs (#185); ``{"cognition": null}`` clears the override."""
+    if "cognition" not in body:
+        raise ServiceError(422, "bad_cognition", "body needs cognition: 'onboard', 'offboard' or null")
+    async with transaction(request) as session:
+        m = await session.get(Member, _uuid(member_id))
+        if m is None:
+            raise ServiceError(404, "not_found", "no such member")
+        await cognition.set_admin(session, m, body["cognition"], admin=f"admin:{admin.username}")
         return enrollment.member_to_dict(m)
 
 

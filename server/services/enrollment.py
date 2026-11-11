@@ -25,7 +25,7 @@ from server.models import (
     AuditLog, EnrollmentSwarmRequest, Invite, Member, Swarm, SwarmMember, Token,
 )
 from server.models.member import MEMBER_KINDS, PERMISSIONS
-from server.services import swarms
+from server.services import cognition, swarms
 from server.services.errors import ServiceError
 
 
@@ -386,6 +386,7 @@ def member_to_dict(m: Member) -> dict:
         "last_hash": m.last_hash,
         "memory_generation": m.memory_generation,
         "recall_floor_id": m.recall_floor_id,
+        "cognition": cognition.resolve(m),
         "enrolled_at": m.enrolled_at.isoformat() if m.enrolled_at else None,
         "revoked_at": m.revoked_at.isoformat() if m.revoked_at else None,
         "last_seen_at": m.last_seen_at.isoformat() if m.last_seen_at else None,
