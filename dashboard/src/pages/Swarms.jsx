@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import HelpTip from "../components/HelpTip.jsx";
 import LocationForm from "../components/LocationForm.jsx";
 import { ADD_SWARM, MEMORY_WIPE, ROOT_PRIVATE_KEY, ROOT_PUBLIC_KEY, SWARM_ROLE, WIPE_VS_DELETE } from "../lib/help.js";
+
+
+import RenameSwarm from "../components/RenameSwarm.jsx";
 import { Link } from "react-router-dom";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
@@ -387,6 +390,7 @@ function SwarmCard({ swarm, swarms, allMembers, location, onReload }) {
               className="ml-3 text-sm font-normal text-paper-muted underline hover:text-paper"
               aria-label={`Profile of ${swarm.name}`}>Profile</Link>
       </h2>
+      <RenameSwarm name={swarm.name} onDone={onReload} />
       <LocationForm key={JSON.stringify(location)} subjectType="swarm" name={swarm.name} current={location}
                     title="Home location" onDone={onReload} />
       <p className="mb-3 text-xs text-paper-muted">

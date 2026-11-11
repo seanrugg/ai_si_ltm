@@ -26,7 +26,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ltms_contract import canonicalize, now_ts, parse_ts
 from ltms_contract.record import NAME_RE, verify_signature
-from server.models import AuditLog, Member, Swarm, SwarmMember
+from server.models import (
+    AuditLog, DeclaredLocation, LrsEndpoint, McpToken, Member, RuntimeSetting, Swarm, SwarmMember,
+)
 from server.models.member import PERMISSIONS
 from server.models.swarm import ENROLLMENT_MODES
 from server.services.errors import ServiceError
@@ -122,6 +124,49 @@ async def create_swarm(session: AsyncSession, *, name: str, public_key_hex: str,
                   public_key=public_key, is_home=is_home)
     session.add(swarm)
     _audit(session, actor, "swarm_create", {"swarm": swarm.id, "name": name, "home": is_home})
+    await session.flush()
+    return swarm
+
+
+def _renamed_scope(scope, old: str, new: str):
+    """A copy of a stored scope with ``old`` replaced by ``new`` in its swarms list, or None if unchanged."""
+    if not isinstance(scope, dict) or not isinstance(scope.get("swarms"), list) or old not in scope["swarms"]:
+        return None
+    return {**scope, "swarms": [new if s == old else s for s in scope["swarms"]]}
+
+
+async def rename_swarm(session: AsyncSession, swarm: Swarm, new_name: str, *, actor: str = "cli") -> Swarm:
+    """Rename a swarm (#231). Its ID, keys, members and records are unchanged.
+
+    Hub appointments are signed over the swarm ID, so they stay valid. Stored
+    scopes that list the swarm by name (member recall scopes, MCP tokens, the
+    MCP open scope, LRS endpoints) and its declared location follow the rename.
+    MQTT topics use the name, so hubs, members and the broker ACL need updating
+    by the operator.
+    """
+    old = swarm.name
+    if not NAME_RE.match(new_name or ""):
+        raise ServiceError(422, "bad_name", "swarm name: lowercase letters, digits, '.', '_' or '-', up to 64")
+    if new_name == old:
+        return swarm
+    if await session.scalar(select(Swarm).where(Swarm.name == new_name)):
+        raise ServiceError(409, "name_taken", f"a swarm named {new_name!r} already exists")
+    swarm.name = new_name
+    for model in (Member, McpToken, LrsEndpoint):
+        for row in await session.scalars(select(model).where(model.scope.is_not(None))):
+            changed = _renamed_scope(row.scope, old, new_name)
+            if changed is not None:
+                row.scope = changed
+    mcp = await session.get(RuntimeSetting, "mcp_access")
+    if mcp is not None and isinstance(mcp.value, dict):
+        changed = _renamed_scope(mcp.value.get("open_scope"), old, new_name)
+        if changed is not None:
+            mcp.value = {**mcp.value, "open_scope": changed}
+    loc = await session.scalar(select(DeclaredLocation).where(
+        DeclaredLocation.subject_type == "swarm", DeclaredLocation.subject_name == old))
+    if loc is not None:
+        loc.subject_name = new_name
+    _audit(session, actor, "swarm_rename", {"swarm": swarm.id, "old": old, "new": new_name})
     await session.flush()
     return swarm
 

@@ -598,6 +598,15 @@ async def create_swarm_endpoint(request: Request, body: dict, admin: AdminAuth =
                 "description": swarm.description, "members": []}
 
 
+@router.patch("/admin/swarms/{name}")
+async def rename_swarm(name: str, request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    """Rename a swarm (#231): ``{"name": "<new>"}``. Its ID, keys and records don't change."""
+    async with transaction(request) as session:
+        swarm = await swarms.get_swarm(session, name)
+        swarm = await swarms.rename_swarm(session, swarm, body.get("name"), actor=f"admin:{admin.username}")
+        return {"id": swarm.id, "name": swarm.name, "status": swarm.status, "home": swarm.is_home}
+
+
 @router.post("/admin/swarms/{name}/members")
 async def add_swarm_member(name: str, request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
     async with transaction(request) as session:

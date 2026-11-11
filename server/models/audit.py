@@ -38,6 +38,7 @@ AUDIT_ACTIONS = (
     "cognition_change",
     "network_change",
     "location_change",
+    "swarm_rename",
 )
 
 

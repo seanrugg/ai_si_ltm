@@ -24,3 +24,7 @@ export const ROOT_PRIVATE_KEY =
   "The private root key signs hub appointments for this swarm. It never leaves this page. LTMS can't recover it, and anyone who has it can appoint a hub.";
 export const ROOT_PUBLIC_KEY =
   "LTMS keeps only the public key. It checks every hub appointment against it. The swarm's ID is a hash of this public key.";
+
+
+export const SWARM_RENAME =
+  "Renaming keeps the swarm's ID, keys and records. Its MQTT topics change: update the hub's and every member's swarm name, and the broker ACL, or they stop connecting.";
