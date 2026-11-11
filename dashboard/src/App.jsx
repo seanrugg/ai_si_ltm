@@ -21,6 +21,7 @@ import Activity from "./pages/Activity.jsx";
 import Lrs from "./pages/Lrs.jsx";
 import Access from "./pages/Access.jsx";
 import Export from "./pages/Export.jsx";
+import Profile from "./pages/Profile.jsx";
 
 const AdminContext = createContext(null);
 export const useAdmin = () => useContext(AdminContext);
@@ -78,6 +79,8 @@ const router = createHashRouter([
       { path: "/retention", element: <Retention /> },
       { path: "/volume", element: <Volume /> },
       { path: "/swarms", element: <Swarms /> },
+      { path: "/members/:name/profile", element: <Profile key="member" subject="member" /> },
+      { path: "/swarms/:name/profile", element: <Profile key="swarm" subject="swarm" /> },
       { path: "/record/:agent/:seq", element: <RecordPage /> },
       { path: "/conversation", element: <Conversation /> },
       { path: "/decision-trace/:agent/:seq", element: <DecisionTrace /> },

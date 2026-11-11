@@ -97,6 +97,8 @@ def test_swarm_subject_includes_relayed_and_direct_records(mesh, admin, db_exec,
     assert s["subject"] == {"type": "swarm", "name": "echo-base"}
     assert s["categories"]["act"] == 3
     assert s["peers"] == []  # member subjects only
+    assert s["members"] == [{"name": "z3-r0", "sense": 0, "act": 2, "comm": 0, "learn": 0},
+                            {"name": "dx-1", "sense": 0, "act": 1, "comm": 0, "learn": 0}]
 
 
 def test_action_success_is_null_without_outcomes(mesh, admin):

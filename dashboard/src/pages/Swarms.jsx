@@ -369,6 +369,9 @@ function SwarmCard({ swarm, swarms, allMembers, onReload }) {
     <section className="mb-8 border rounded-md border-ink-line bg-ink p-4" aria-labelledby={`swarm-${swarm.name}-h`}>
       <h2 id={`swarm-${swarm.name}-h`} className="mb-2 text-lg font-bold">
         <Link to={`/members?show=${encodeURIComponent(`swarm:${swarm.name}`)}`}>{swarm.name}</Link>
+        <Link to={`/swarms/${encodeURIComponent(swarm.name)}/profile`}
+              className="ml-3 text-sm font-normal text-paper-muted underline hover:text-paper"
+              aria-label={`Profile of ${swarm.name}`}>Profile</Link>
       </h2>
       <p className="mb-3 text-xs text-paper-muted">
         <StatusBadge status={swarm.status} /> {swarm.home && <span className="ml-2">home swarm</span>}
