@@ -37,6 +37,25 @@ def tombstone_to_dict(t: RecordTombstone) -> dict:
     }
 
 
+MAX_TOMBSTONES = 500
+
+
+async def list_tombstones(session: AsyncSession, agent: str, *, seq_from: int | None = None,
+                          seq_to: int | None = None) -> list[RecordTombstone]:
+    """One agent's tombstones, seq descending, at most MAX_TOMBSTONES (#205).
+
+    The range is by seq (inclusive): a tombstone keeps no timestamp from the
+    record it replaced. An unknown agent has none.
+    """
+    stmt = select(RecordTombstone).where(RecordTombstone.agent == agent)
+    if seq_from is not None:
+        stmt = stmt.where(RecordTombstone.seq >= seq_from)
+    if seq_to is not None:
+        stmt = stmt.where(RecordTombstone.seq <= seq_to)
+    stmt = stmt.order_by(RecordTombstone.seq.desc()).limit(MAX_TOMBSTONES)
+    return list(await session.scalars(stmt))
+
+
 async def get_tombstone(session: AsyncSession, agent: str, seq: int) -> RecordTombstone | None:
     return await session.scalar(select(RecordTombstone).where(RecordTombstone.agent == agent,
                                                               RecordTombstone.seq == seq))
