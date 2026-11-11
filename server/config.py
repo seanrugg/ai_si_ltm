@@ -6,7 +6,7 @@ from typing import Optional
 from urllib.parse import quote
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ltms_contract import RECORD_TYPES
@@ -171,6 +171,10 @@ class ServerConfig(BaseSettings):
     enrollment_policy_locked: bool = False
     # LTMS_RETENTION_LOCKED: environment data retention settings win over the dashboard (#155)
     retention_locked: bool = False
+
+    # Optional offline city database for network location estimates (#191).
+    # Unset (the default) means no network estimates. Env: LTMS_GEOIP_DB.
+    geoip_db_path: str | None = Field(default=None, validation_alias=AliasChoices("geoip_db_path", "LTMS_GEOIP_DB"))
 
     # Pending enrollment requests older than this many days are expired by the
     # hourly scheduler job. Env: LTMS_PENDING_ENROLLMENT_TTL_DAYS.

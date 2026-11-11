@@ -21,6 +21,21 @@ CREATE TABLE admin_users (
 	UNIQUE (username)
 );
 
+CREATE TABLE declared_locations (
+	id SERIAL NOT NULL, 
+	subject_type VARCHAR(8) NOT NULL, 
+	subject_name VARCHAR(64) NOT NULL, 
+	label VARCHAR(80) NOT NULL, 
+	room VARCHAR(40), 
+	lat FLOAT, 
+	lon FLOAT, 
+	updated_by VARCHAR(64) NOT NULL, 
+	updated_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_declared_locations_subject UNIQUE (subject_type, subject_name), 
+	CONSTRAINT ck_declared_locations_subject_type CHECK (subject_type IN ('member', 'swarm'))
+);
+
 CREATE TABLE lrs_endpoints (
 	id UUID NOT NULL, 
 	name VARCHAR(64) NOT NULL, 
