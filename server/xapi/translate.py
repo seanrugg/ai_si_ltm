@@ -13,6 +13,10 @@ MAPPING_VERSION = "1"
 AI = "https://w3id.org/xapi-ai"
 EXT = AI + "/extensions/"
 PROFILE_VERSION = AI + "/profile/0.10.1"
+# Dataset reads (#239) are defined in AIAAP 0.11.0.
+PROFILE_VERSION_READS = AI + "/profile/0.11.0"
+READ_RESOURCE = (AI + "/verbs/read-resource", "read resource")
+READ_SOURCES = ("served", "reported")
 # Derived from the 0.10.0 IRI (uuid5(NAMESPACE_URL,
 # "https://w3id.org/xapi-ai/profile/0.10.0/holocron-mapping/1")) and fixed
 # for mapping version 1: it does not follow PROFILE_VERSION, so statement ids
@@ -245,3 +249,50 @@ def record_to_statement(
         statement["result"] = result
 
     return statement
+
+
+def read_to_statement(read: dict, dataset: dict, *, base: str, xapi_version: str = "2.0.0") -> dict:
+    """One dataset read (#238) -> one xAPI statement (AIAAP 0.11.0 ``dataset-read``).
+
+    ``read``: ``id``, ``agent`` (member name), ``version``, ``item_key``,
+    ``cycle`` (UUID string or None), ``source``, ``ts`` (ISO), ``sha256`` (or None).
+    ``dataset``: ``id`` and ``name``.
+    """
+    if xapi_version not in VALID_XAPI_VERSIONS:
+        raise ValueError(f"unsupported xAPI version: {xapi_version!r}")
+    if read["source"] not in READ_SOURCES:
+        raise ValueError(f"unknown read source: {read['source']!r}")
+    base = base.rstrip("/")
+    version_path = f"/datasets/{dataset['id']}/v/{read['version']}"
+    item = _activity(base, f"{version_path}/items/{quote(read['item_key'], safe='')}",
+                     AI + "/activity-type/dataset-item", read["item_key"])
+    context: dict = {
+        "contextActivities": {
+            "parent": [_activity(base, version_path, AI + "/activity-type/dataset", dataset["name"])],
+            "grouping": [{"objectType": "Activity", "id": base,
+                          "definition": {"type": AI + "/activity-type/fleet"}}],
+            "category": [{
+                "objectType": "Activity",
+                "id": PROFILE_VERSION_READS,
+                "definition": {"type": "http://adlnet.gov/expapi/activities/profile"},
+            }],
+        },
+        "extensions": {
+            EXT + "resource-version": str(read["version"]),
+            EXT + "read-source": read["source"],
+        },
+    }
+    if read.get("sha256"):
+        context["extensions"][EXT + "resource-hash"] = read["sha256"]
+    if read.get("cycle"):
+        context["registration"] = str(read["cycle"])
+    verb_iri, verb_display = READ_RESOURCE
+    return {
+        "id": str(uuid.uuid5(NAMESPACE, f"read:{read['id']}")),
+        "actor": _account_agent(base, read["agent"]),
+        "verb": {"id": verb_iri, "display": {"en": verb_display}},
+        "object": item,
+        "context": context,
+        "timestamp": read["ts"],
+        "version": xapi_version,
+    }

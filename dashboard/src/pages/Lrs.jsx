@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import HelpTip from "../components/HelpTip.jsx";
-import { LRS_PAUSE, LRS_SCOPE } from "../lib/help.js";
+import { LRS_PAUSE, LRS_SCOPE, LRS_SEND_READS } from "../lib/help.js";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui.jsx";
@@ -151,6 +151,7 @@ export function EndpointForm({ initial, onSaved, onCancel, busy }) {
     places: (initial?.scope?.places || []).join(", "),
     swarms: (initial?.scope?.swarms || []).join(", "),
     enabled: initial?.enabled || false,
+    send_reads: initial ? initial.send_reads !== false : true,
   });
   const [error, setError] = useState(null);
 
@@ -163,6 +164,7 @@ export function EndpointForm({ initial, onSaved, onCancel, busy }) {
       xapi_version: form.xapi_version,
       scope: scopeFromForm(form),
       enabled: form.enabled,
+      send_reads: form.send_reads,
     };
     if (initial) {
       if (form.clearPassword) body.secret = "";
@@ -248,6 +250,12 @@ export function EndpointForm({ initial, onSaved, onCancel, busy }) {
           <input type="checkbox" checked={form.enabled}
                  onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))} className="accent-led" />
           Enabled
+        </label>
+        <label className="flex items-center gap-2 text-sm mt-2 cursor-pointer">
+          <input type="checkbox" checked={form.send_reads}
+                 onChange={(e) => setForm((f) => ({ ...f, send_reads: e.target.checked }))} className="accent-led" />
+          Send dataset reads
+          <HelpTip id={`${fid}-reads-help`} label="About dataset reads">{LRS_SEND_READS}</HelpTip>
         </label>
         <button type="submit" className="btn btn-primary" disabled={busy}>Save</button>
         <button className="btn" type="button" onClick={onCancel} disabled={busy}>Cancel</button>

@@ -3,6 +3,7 @@
 
 export const LRS_PAUSE =
   "While paused, new records aren't sent to this LRS, now or later. Records already sent stay in the LRS.";
+export const LRS_SEND_READS = "Also send every dataset read (who read which item, and when) as a read-resource statement. Scope filters don't apply to reads. Reads made while this is off are never sent.";
 export const LRS_SCOPE = "Which records this LRS receives. A blank Types field sends nothing.";
 export const RETENTION_RULES =
   "Deletes payloads past their age at the nightly run. Headers stay, so chains still verify.";

@@ -67,6 +67,8 @@ CREATE TABLE lrs_endpoints (
 	scope JSONB, 
 	enabled BOOLEAN NOT NULL, 
 	cursor BIGINT NOT NULL, 
+	send_reads BOOLEAN DEFAULT true NOT NULL, 
+	last_read_id BIGINT DEFAULT '0' NOT NULL, 
 	last_success_at TIMESTAMP WITH TIME ZONE, 
 	last_error_at TIMESTAMP WITH TIME ZONE, 
 	last_error TEXT, 
