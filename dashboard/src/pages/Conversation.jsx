@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useApi } from "../api/useApi.js";
 import { api } from "../api/client.js";
 import { EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui.jsx";
@@ -46,8 +46,16 @@ function RecordRow({ r, twoMember, firstMember }) {
   );
 }
 
+// `?members=a,b` opens the members view on that pair (the profile's
+// Interactions tab links here, issue #194).
+export function membersFromParam(param) {
+  return String(param || "").split(",").map((n) => n.trim()).filter(Boolean).slice(0, MAX_MEMBERS);
+}
+
 export default function Conversation() {
-  const [view, setView] = useState("swarm");
+  const [params] = useSearchParams();
+  const linked = membersFromParam(params.get("members"));
+  const [view, setView] = useState(linked.length ? "members" : "swarm");
 
   // Swarm view state
   const [swarm, setSwarm] = useState("");
@@ -59,7 +67,7 @@ export default function Conversation() {
   const [error, setError] = useState(null);
 
   // Members view state
-  const [selectedMembers, setSelectedMembers] = useState([]);
+  const [selectedMembers, setSelectedMembers] = useState(linked);
 
   const { data: swarmsData } = useApi("/admin/swarms");
   const { data: membersData } = useApi("/admin/members");
