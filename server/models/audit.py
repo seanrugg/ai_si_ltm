@@ -41,6 +41,10 @@ AUDIT_ACTIONS = (
     "swarm_rename",
     "swarm_remove",
     "records_purge",
+    "dataset_create",
+    "dataset_version",
+    "dataset_approve",
+    "dataset_retire",
 )
 
 
