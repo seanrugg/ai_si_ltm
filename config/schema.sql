@@ -21,6 +21,26 @@ CREATE TABLE admin_users (
 	UNIQUE (username)
 );
 
+CREATE TABLE datasets (
+	id UUID NOT NULL, 
+	name VARCHAR(80) NOT NULL, 
+	description TEXT, 
+	kind VARCHAR(16) NOT NULL, 
+	scope VARCHAR(16) DEFAULT 'fleet' NOT NULL, 
+	licence TEXT NOT NULL, 
+	use VARCHAR(16) DEFAULT 'reference' NOT NULL, 
+	status VARCHAR(16) NOT NULL, 
+	added_by VARCHAR(64) NOT NULL, 
+	approved_by VARCHAR(64), 
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	updated_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT ck_datasets_scope CHECK (scope IN ('fleet')), 
+	CONSTRAINT ck_datasets_kind CHECK (kind IN ('upload', 'url', 'integration')), 
+	CONSTRAINT ck_datasets_status CHECK (status IN ('pending', 'approved', 'retired')), 
+	UNIQUE (name)
+);
+
 CREATE TABLE declared_locations (
 	id SERIAL NOT NULL, 
 	subject_type VARCHAR(8) NOT NULL, 
@@ -166,6 +186,25 @@ CREATE TABLE auth_challenges (
 	expires_at TIMESTAMP WITH TIME ZONE NOT NULL, 
 	PRIMARY KEY (nonce), 
 	FOREIGN KEY(member_id) REFERENCES members (id)
+);
+
+CREATE TABLE dataset_versions (
+	id BIGSERIAL NOT NULL, 
+	dataset_id UUID NOT NULL, 
+	version INTEGER NOT NULL, 
+	status VARCHAR(16) NOT NULL, 
+	manifest_hash VARCHAR(64), 
+	item_count INTEGER NOT NULL, 
+	size_bytes BIGINT NOT NULL, 
+	source_url TEXT, 
+	snapshot_at TIMESTAMP WITH TIME ZONE, 
+	approved_by VARCHAR(64), 
+	approved_at TIMESTAMP WITH TIME ZONE, 
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_dataset_versions_version UNIQUE (dataset_id, version), 
+	CONSTRAINT ck_dataset_versions_status CHECK (status IN ('pending', 'approved')), 
+	FOREIGN KEY(dataset_id) REFERENCES datasets (id)
 );
 
 CREATE TABLE enrollment_swarm_requests (
@@ -318,6 +357,25 @@ CREATE TABLE tokens (
 );
 
 CREATE INDEX idx_tokens_member ON tokens (member_id);
+
+CREATE TABLE dataset_items (
+	id BIGSERIAL NOT NULL, 
+	version_id BIGINT NOT NULL, 
+	key VARCHAR(200) NOT NULL, 
+	media_type VARCHAR(100) NOT NULL, 
+	size_bytes BIGINT NOT NULL, 
+	sha256 VARCHAR(64), 
+	tier VARCHAR(16) NOT NULL, 
+	text TEXT, 
+	meta JSONB, 
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_dataset_items_key UNIQUE (version_id, key), 
+	CONSTRAINT ck_dataset_items_tier CHECK (tier IN ('text', 'large', 'external')), 
+	FOREIGN KEY(version_id) REFERENCES dataset_versions (id)
+);
+
+CREATE INDEX idx_dataset_items_sha256 ON dataset_items (sha256);
 
 CREATE TABLE record_payloads (
 	record_id BIGINT NOT NULL, 

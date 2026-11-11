@@ -29,6 +29,7 @@ from server.services import cognition, memory_wipe
 from server.services import location as location_service
 from server.services import network as network_service
 from server.services import profile as profile_service
+from server.services import datasets as datasets_service
 from server.services import swarm_remove
 from server.services.errors import ServiceError
 
@@ -1272,3 +1273,51 @@ async def lrs_endpoint_status(endpoint_id: str, request: Request, admin: AdminAu
         data = lrs_service.endpoint_to_dict(endpoint)
         data["backlog"] = await lrs_service.backlog(session, endpoint)
         return data
+
+
+# --------------------------------------------------------------------------- #
+# Fleet datasets (#236, docs/datasets-design.md)
+# --------------------------------------------------------------------------- #
+@router.post("/admin/datasets", status_code=201)
+async def create_dataset(request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    """Create a dataset (``pending``) with an empty version 1: ``{name, description, kind, licence}``."""
+    async with transaction(request) as session:
+        ds = await datasets_service.create_dataset(session, body, admin=f"admin:{admin.username}")
+        return await datasets_service.dataset_dict(session, ds)
+
+
+@router.get("/admin/datasets")
+async def list_datasets(request: Request, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        return {"datasets": await datasets_service.list_datasets(session)}
+
+
+@router.get("/admin/datasets/{dataset_id}")
+async def get_dataset(dataset_id: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        return await datasets_service.dataset_dict(session, await datasets_service.get_dataset(session, dataset_id))
+
+
+@router.post("/admin/datasets/{dataset_id}/versions", status_code=201)
+async def add_dataset_version(dataset_id: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        ds = await datasets_service.get_dataset(session, dataset_id)
+        v = await datasets_service.add_version(session, ds, admin=f"admin:{admin.username}")
+        return datasets_service.version_dict(v)
+
+
+@router.post("/admin/datasets/{dataset_id}/versions/{version}/approve")
+async def approve_dataset_version(dataset_id: str, version: int, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    """Approve a version: every fleet member can then read it."""
+    async with transaction(request) as session:
+        ds = await datasets_service.get_dataset(session, dataset_id)
+        await datasets_service.approve_version(session, ds, version, admin=f"admin:{admin.username}")
+        return await datasets_service.dataset_dict(session, ds)
+
+
+@router.post("/admin/datasets/{dataset_id}/retire")
+async def retire_dataset(dataset_id: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        ds = await datasets_service.get_dataset(session, dataset_id)
+        await datasets_service.retire(session, ds, admin=f"admin:{admin.username}")
+        return await datasets_service.dataset_dict(session, ds)

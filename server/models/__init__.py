@@ -3,6 +3,7 @@ from server.models.auth import AdminSession, AdminUser, AuthChallenge, Token
 from server.models.base import Base
 from server.models.enrollment_request import EnrollmentSwarmRequest
 from server.models.invite import Invite
+from server.models.dataset import Dataset, DatasetItem, DatasetVersion
 from server.models.location import DeclaredLocation
 from server.models.lrs import LrsEndpoint
 from server.models.member import Member
@@ -18,6 +19,9 @@ __all__ = [
     "AuditLog",
     "AuthChallenge",
     "Base",
+    "Dataset",
+    "DatasetItem",
+    "DatasetVersion",
     "DeclaredLocation",
     "EnrollmentSwarmRequest",
     "Invite",
