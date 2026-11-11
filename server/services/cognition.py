@@ -12,11 +12,12 @@ Resolution order: admin, then observed, then declared, then unknown.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import String, cast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.models import AuditLog, Member
+from server.models import AuditLog, Member, Record, RecordPayload
 from server.models.member import COGNITION_LOCATIONS
 from server.services.errors import ServiceError
 
@@ -88,3 +89,96 @@ async def set_admin(session: AsyncSession, member: Member, value, *, admin: str)
             detail={"member": member.name, "source": "admin", "old": old, "new": value},
         ))
     return resolve(member)
+
+
+# --------------------------------------------------------------------------- #
+# Observed (#199): where a robot's decisions are actually made
+# --------------------------------------------------------------------------- #
+MIN_EVENTS = 20
+OBSERVE_BATCH = 500
+OBSERVE_MAX = 20_000
+
+
+def _names_other_agent(value, own: str) -> bool:
+    """True when ``value`` ("agent:seq", or a list of them) names another member's record."""
+    for v in value if isinstance(value, list) else [value]:
+        if isinstance(v, str) and ":" in v:
+            agent, _, seq = v.rpartition(":")
+            if agent and agent != own and seq.isdigit():
+                return True
+    return False
+
+
+async def observe(session: AsyncSession, member: Member, *, days: int = 7,
+                  now: datetime | None = None) -> dict | None:
+    """Measure where this robot's decisions are made over the last ``days`` days.
+
+    Off-board: another member's action with ``payload.endpoint`` starting
+    ``"<robot>/"``; the robot's action whose ``payload.directed_by`` names
+    another member's record; the robot's decision whose ``payload.model`` is a
+    declared model running somewhere other than the robot. On-board: the
+    robot's other decisions and actions. Under MIN_EVENTS (20) events the
+    value is null, with the evidence kept. Writes only ``cognition_observed``.
+    Payloads are read in batches of 500 records, at most 20,000 per member.
+    """
+    if member.kind != "robot":
+        return None
+    now = now or datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+    declared = member.cognition_declared if isinstance(member.cognition_declared, dict) else {}
+    elsewhere = {m["name"] for m in declared.get("models") or []
+                 if isinstance(m, dict) and m.get("runs_on") and m.get("runs_on") != member.name}
+    prefix = f"{member.name}/"
+    # Another member's actions are pre-filtered as text, then checked exactly.
+    endpoint_like = f'%"endpoint": "{prefix}%'
+
+    off = on = 0
+    seen = 0
+    after_id = 0
+    while seen < OBSERVE_MAX:
+        rows = (await session.execute(
+            select(Record.id, Record.agent, Record.type, RecordPayload.body)
+            .outerjoin(RecordPayload, RecordPayload.record_id == Record.id)
+            .where(Record.id > after_id, Record.ts >= since, Record.type.in_(("decision", "action")),
+                   (Record.member_id == member.id)
+                   | ((Record.type == "action") & cast(RecordPayload.body, String).like(endpoint_like)))
+            .order_by(Record.id).limit(OBSERVE_BATCH))).all()
+        if not rows:
+            break
+        for rid, agent, rtype, body in rows:
+            after_id = rid
+            seen += 1
+            body = body if isinstance(body, dict) else {}
+            if agent != member.name:
+                endpoint = body.get("endpoint")
+                if rtype == "action" and isinstance(endpoint, str) and endpoint.startswith(prefix):
+                    off += 1
+                continue
+            if rtype == "action" and _names_other_agent(body.get("directed_by"), member.name):
+                off += 1
+            elif rtype == "decision" and body.get("model") in elsewhere:
+                off += 1
+            else:
+                on += 1
+        if len(rows) < OBSERVE_BATCH:
+            break
+
+    total = off + on
+    share = off / total if total >= MIN_EVENTS else None
+    value = None if share is None else ("offboard" if share >= 0.5 else "onboard")
+    old = member.cognition_observed if isinstance(member.cognition_observed, dict) else {}
+    member.cognition_observed = {"value": value, "offboard_share": share, "evidence": {"off": off, "on": on},
+                                 "days": days, "observed_at": now.isoformat()}
+    if old.get("value") != value:
+        session.add(AuditLog(actor="system:cognition", action="cognition_change", member_id=member.id,
+                             detail={"member": member.name, "source": "observed",
+                                     "old": old.get("value"), "new": value, "offboard_share": share}))
+    return member.cognition_observed
+
+
+async def observe_all(session: AsyncSession, *, days: int = 7) -> dict:
+    """Nightly: observe every active robot."""
+    robots = list(await session.scalars(select(Member).where(Member.kind == "robot", Member.status == "active")))
+    for m in robots:
+        await observe(session, m, days=days)
+    return {"observed": len(robots)}

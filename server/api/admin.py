@@ -154,6 +154,19 @@ async def set_cognition(member_id: str, request: Request, body: dict, admin: Adm
         return enrollment.member_to_dict(m)
 
 
+@router.post("/admin/members/{member_id}/cognition/observe")
+async def observe_cognition(member_id: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    """Measure where a robot's decisions are made, now (#199). Other kinds: 422."""
+    async with transaction(request) as session:
+        m = await session.get(Member, _uuid(member_id))
+        if m is None:
+            raise ServiceError(404, "not_found", "no such member")
+        if m.kind != "robot":
+            raise ServiceError(422, "not_a_robot", "only robots are observed")
+        await cognition.observe(session, m)
+        return enrollment.member_to_dict(m)
+
+
 @router.patch("/admin/members/{member_id}/permissions")
 async def set_permissions(member_id: str, body: PermissionsRequest, request: Request, admin: AdminAuth = ADMIN) -> dict:
     async with transaction(request) as session:
