@@ -18,6 +18,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models import Member, Record, RecordProvenance, Swarm, SwarmMember
 from server.services import cognition, recall
+
+
+from server.models import AuditLog, Member, Record, RecordProvenance, Swarm, SwarmMember
+from server.services import recall
 from server.services.errors import ServiceError
 
 DEFAULT_HOURS = 168
@@ -330,3 +334,186 @@ async def graph(session: AsyncSession, subject: Subject, hours: int) -> dict:
                       "cognition": cognition.resolve(m) if m is not None else None,
                       "is_hub": role == "hub", "swarm": swarm})
     return {"nodes": nodes, "edges": edges, "relays": relays}
+
+
+# Senses (#188): one entry per sensor, from sensed records' payloads
+# --------------------------------------------------------------------------- #
+MAX_SENSED_SCAN = 5000
+SERIES_POINTS = 48
+SERIES_HOURS = 24
+
+
+def _is_number(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _derived_from(refs) -> list[str]:
+    if not isinstance(refs, dict):
+        return []
+    value = refs.get("derived_from")
+    return [v for v in (value if isinstance(value, list) else [value]) if isinstance(v, str)]
+
+
+async def senses(session: AsyncSession, subject: Subject, hours: int) -> dict:
+    """Sensors seen in the subject's sensed records (perceptions tagged telemetry).
+
+    Scans at most the newest MAX_SENSED_SCAN (5,000) sensed records per call,
+    so a busy sensor's ``records`` count is a lower bound beyond that. A sensor
+    is named by ``payload.sensor``, else ``payload.kind`` (docs/sensing.md).
+    ``modality``, ``unit`` and ``rate_hz`` come from its newest payload.
+    ``series`` averages the last 24 h of numeric samples into at most 48
+    points. A record whose payload was purged is counted under a
+    ``sensor: null`` entry for its member and contributes nothing else.
+    """
+    since = _since(hours)
+    where = and_(subject.records(), _in_range(since), Record.type == "perception",
+                 recall._json_list_contains(session, Record.tags, "telemetry"))
+    rows = list(await session.scalars(
+        select(Record).where(where).order_by(Record.ts.desc(), Record.id.desc()).limit(MAX_SENSED_SCAN)))
+    payloads = await recall.fetch_payloads(session, rows)
+
+    now = datetime.now(timezone.utc)
+    series_start = now - timedelta(hours=SERIES_HOURS)
+    bucket = timedelta(hours=SERIES_HOURS) / SERIES_POINTS
+    sensors: dict[tuple, dict] = {}
+    by_record: dict[str, tuple] = {}  # "agent:seq" -> sensor key
+    for r in rows:  # newest first
+        row = payloads.get(r.id)
+        body = row.body if row is not None else None
+        name = None
+        if isinstance(body, dict):
+            name = body.get("sensor") or body.get("kind")
+            name = name if isinstance(name, str) else None
+        key = (r.agent, name)
+        s = sensors.get(key)
+        if s is None:
+            s = sensors[key] = {"member": r.agent, "sensor": name, "modality": None, "unit": None,
+                                "rate_hz": None, "last": None, "_sums": defaultdict(lambda: [0.0, 0]),
+                                "records": 0, "feeds": 0}
+            if name is not None:  # newest payload for this sensor
+                s["modality"], s["unit"], s["rate_hz"] = body.get("modality"), body.get("unit"), body.get("rate_hz")
+        s["records"] += 1
+        if name is None:
+            continue
+        by_record[f"{r.agent}:{r.seq}"] = key
+        samples = [x for x in body.get("samples") or [] if isinstance(x, dict) and "v" in x]
+        ts = r.ts if r.ts.tzinfo else r.ts.replace(tzinfo=timezone.utc)
+        if s["last"] is None and samples:
+            newest = max(samples, key=lambda x: x.get("t") if _is_number(x.get("t")) else 0)
+            t = newest.get("t") if _is_number(newest.get("t")) else 0
+            s["last"] = {"ts": (ts + timedelta(seconds=t)).isoformat(), "value": newest["v"]}
+        for x in samples:
+            t = x.get("t") if _is_number(x.get("t")) else 0
+            at = ts + timedelta(seconds=t)
+            if _is_number(x["v"]) and series_start <= at <= now:
+                i = min(int((at - series_start) / bucket), SERIES_POINTS - 1)
+                s["_sums"][i][0] += x["v"]
+                s["_sums"][i][1] += 1
+
+    # feeds: perceived records (not telemetry) derived from one of the sensor's records
+    if by_record:
+        perceived = await session.execute(
+            select(Record.refs).where(
+                subject.records(), _in_range(since), Record.type == "perception", Record.refs.is_not(None),
+                or_(Record.tags.is_(None), ~recall._json_list_contains(session, Record.tags, "telemetry"))))
+        for (refs,) in perceived.all():
+            for key in {by_record[v] for v in _derived_from(refs) if v in by_record}:
+                sensors[key]["feeds"] += 1
+
+    out = []
+    for s in sorted(sensors.values(), key=lambda s: (s["member"], s["sensor"] is None, s["sensor"] or "")):
+        sums = s.pop("_sums")
+        s["series"] = [{"t": (series_start + bucket * i).isoformat(), "v": total / n}
+                       for i, (total, n) in sorted(sums.items())]
+        out.append(s)
+    return {"sensors": out}
+
+
+# --------------------------------------------------------------------------- #
+# History (#188): membership, learning and admin events, newest first
+# --------------------------------------------------------------------------- #
+MAX_EVENTS = 200
+HISTORY_KINDS = {
+    "enroll_request": "membership", "enroll_auto": "membership", "enroll_approve": "membership",
+    "swarm_join": "membership", "swarm_leave": "membership", "permissions_change": "membership",
+    "cognition_change": "membership", "member_revoke": "membership",
+    "memory_wipe": "admin", "record_delete": "admin", "network_change": "admin",
+}
+WHERE_AI = {"onboard": "on board", "offboard": "off board"}
+
+
+def _event_text(action: str, d: dict, swarm_names: dict) -> tuple[str, str | None]:
+    """(title, detail) for one audit row: short English built from its detail."""
+    d = d if isinstance(d, dict) else {}
+    if action in ("enroll_request", "enroll_auto"):
+        swarm = f" to {d['swarm']}" if d.get("swarm") else ""
+        return (f"Enrolled{swarm}" if action == "enroll_auto" else f"Asked to enroll{swarm}",
+                f"as a {d['kind']}" if d.get("kind") else None)
+    if action == "enroll_approve":
+        perms = ", ".join(d.get("permissions") or []) or "no permissions"
+        return "Enrollment approved", f"with {perms}"
+    if action == "swarm_join":
+        verb = "Moved to" if d.get("moved_from") else "Joined"
+        return f"{verb} {d.get('swarm')}", f"as {d['role']}" if d.get("role") else None
+    if action == "swarm_leave":
+        name = swarm_names.get(d.get("swarm"), d.get("swarm"))
+        return f"Left {name}", None
+    if action == "permissions_change":
+        after = ", ".join(((d.get("after") or {}).get("permissions")) or []) or "none"
+        return "Permissions changed", f"now {after}"
+    if action == "cognition_change":
+        by = {"admin": "set by an admin", "declared": "declared by device", "observed": "observed"}.get(d.get("source"))
+        if d.get("new") is None:
+            return "AI location override cleared", None
+        return f"AI location: {WHERE_AI.get(d['new'], d['new'])}", by
+    if action == "member_revoke":
+        return "Revoked", d.get("reason")
+    if action == "memory_wipe":
+        return "Memory wiped", f"wipe {d['generation']}" if d.get("generation") else None
+    if action == "record_delete":
+        return f"Deleted record {d.get('agent')}:{d.get('seq')}", d.get("reason")
+    if action == "network_change":
+        return "Address changed", f"{d.get('old')} → {d.get('new')}" if d.get("old") else d.get("new")
+    return action.replace("_", " ").capitalize(), None
+
+
+async def history(session: AsyncSession, subject: Subject) -> dict:
+    """The subject's life: audit events for it (or each current swarm member), newest first."""
+    ids, names = subject.member_ids, set(subject.member_names)
+    if not ids:
+        return {"events": []}
+    # record_delete rows name the agent in `detail`, not `member_id`; match as text, then exactly.
+    detail_text = cast(AuditLog.detail, String)
+    deletes = and_(AuditLog.action == "record_delete",
+                   or_(*[detail_text.like(f'%"agent": "{n}"%') for n in names]))
+    rows = list(await session.scalars(
+        select(AuditLog).where(AuditLog.action.in_(list(HISTORY_KINDS)),
+                               or_(AuditLog.member_id.in_(ids), deletes))
+        .order_by(AuditLog.ts.desc(), AuditLog.id.desc()).limit(MAX_EVENTS)))
+    swarm_names = dict((await session.execute(select(Swarm.id, Swarm.name))).all())
+
+    events = []
+    for a in rows:
+        if a.action == "record_delete" and (a.detail or {}).get("agent") not in names and a.member_id not in ids:
+            continue
+        title, detail = _event_text(a.action, a.detail, swarm_names)
+        events.append({"ts": a.ts.isoformat(), "kind": HISTORY_KINDS[a.action], "action": a.action,
+                       "title": title, "detail": detail, "_order": (a.ts, 1)})
+    # learning: each member's first lesson
+    firsts = (await session.execute(
+        select(Record.agent, func.min(Record.id)).where(Record.member_id.in_(ids), Record.type == "lesson")
+        .group_by(Record.agent))).all()
+    for agent, first_id in firsts:
+        r = await session.get(Record, first_id)
+        events.append({"ts": r.ts.isoformat(), "kind": "learning", "action": "first_lesson",
+                       "title": "First lesson" if subject.type == "member" else f"{agent}'s first lesson",
+                       "detail": r.summary, "_order": (r.ts, 0)})
+
+    def when(e):
+        ts = e["_order"][0]
+        return (ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc), e["_order"][1])
+
+    events.sort(key=when, reverse=True)
+    for e in events:
+        e.pop("_order")
+    return {"events": events[:MAX_EVENTS]}

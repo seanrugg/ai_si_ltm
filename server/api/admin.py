@@ -283,6 +283,25 @@ async def profile_graph(request: Request, admin: AdminAuth = ADMIN, member: str 
         return await profile_service.graph(session, subject, hours)
 
 
+@router.get("/admin/profile/senses")
+async def profile_senses(request: Request, admin: AdminAuth = ADMIN, member: str | None = None,
+                         swarm: str | None = None, hours: int | None = None) -> dict:
+    """One entry per sensor in the subject's sensed records (#188)."""
+    hours = profile_service.parse_hours(hours)
+    async with transaction(request) as session:
+        subject = await profile_service.resolve_subject(session, member, swarm)
+        return await profile_service.senses(session, subject, hours)
+
+
+@router.get("/admin/profile/history")
+async def profile_history(request: Request, admin: AdminAuth = ADMIN, member: str | None = None,
+                          swarm: str | None = None) -> dict:
+    """Membership, learning and admin events over the subject's whole life (#188)."""
+    async with transaction(request) as session:
+        subject = await profile_service.resolve_subject(session, member, swarm)
+        return await profile_service.history(session, subject)
+
+
 @router.get("/admin/volume")
 async def volume(
     request: Request, days: int = Query(14, ge=1, le=90), admin: AdminAuth = ADMIN,
