@@ -7,7 +7,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 import httpx
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, false, func, Integer, literal, or_, select
 
@@ -1321,3 +1321,23 @@ async def retire_dataset(dataset_id: str, request: Request, admin: AdminAuth = A
         ds = await datasets_service.get_dataset(session, dataset_id)
         await datasets_service.retire(session, ds, admin=f"admin:{admin.username}")
         return await datasets_service.dataset_dict(session, ds)
+
+
+
+@router.post("/admin/datasets/{dataset_id}/versions/{version}/items")
+async def upload_dataset_items(dataset_id: str, version: int, request: Request,
+                               files: list[UploadFile] = File(...), prefix: str | None = Form(None),
+                               admin: AdminAuth = ADMIN) -> dict:
+    """Upload text files into a pending version (#237). Each file's text is extracted."""
+    async with transaction(request) as session:
+        ds = await datasets_service.get_dataset(session, dataset_id)
+        items = await datasets_service.upload_items(session, request.app.state.config, ds, version, files,
+                                                    prefix=prefix)
+        return {"items": items, "dataset": await datasets_service.dataset_dict(session, ds)}
+
+
+@router.get("/admin/datasets/{dataset_id}/versions/{version}/items")
+async def list_dataset_items(dataset_id: str, version: int, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        ds = await datasets_service.get_dataset(session, dataset_id)
+        return {"items": await datasets_service.list_items(session, ds, version)}

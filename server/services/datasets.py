@@ -7,13 +7,15 @@ Every dataset's scope is ``fleet``.
 """
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.models import AuditLog, Dataset, DatasetVersion
+from server.models import AuditLog, Dataset, DatasetItem, DatasetVersion
+from server.services import dataset_store, extract
 from server.models.dataset import DATASET_KINDS
 from server.services.errors import ServiceError
 
@@ -137,3 +139,74 @@ async def dataset_dict(session: AsyncSession, ds: Dataset) -> dict:
 async def list_datasets(session: AsyncSession) -> list[dict]:
     rows = list(await session.scalars(select(Dataset).order_by(Dataset.name)))
     return [await dataset_dict(session, ds) for ds in rows]
+
+
+
+# --------------------------------------------------------------------------- #
+# Uploads (#237): the text tier
+# --------------------------------------------------------------------------- #
+MAX_KEY = 200
+
+
+def item_key(prefix: str | None, filename: str) -> str:
+    """``prefix/filename``: no ``..``, no leading ``/``, at most 200 characters."""
+    name = (filename or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    prefix = (prefix or "").strip().strip("/")
+    key = f"{prefix}/{name}" if prefix else name
+    parts = key.split("/")
+    if not name or len(key) > MAX_KEY or any(p in ("", ".", "..") for p in parts):
+        raise ServiceError(422, "bad_key", f"bad item key {key[:80]!r}: no '..', no empty parts, at most {MAX_KEY}")
+    return key
+
+
+async def refresh_manifest(session: AsyncSession, v: DatasetVersion) -> None:
+    items = list(await session.scalars(select(DatasetItem).where(DatasetItem.version_id == v.id)
+                                       .order_by(DatasetItem.key)))
+    v.item_count = len(items)
+    v.size_bytes = sum(i.size_bytes for i in items)
+    lines = "".join(f"{i.key}:{i.sha256 or ''}\n" for i in items)
+    v.manifest_hash = hashlib.sha256(lines.encode("utf-8")).hexdigest() if items else None
+
+
+async def upload_items(session: AsyncSession, cfg, ds: Dataset, version: int, files, *,
+                       prefix: str | None = None) -> list[dict]:
+    """Store uploaded files into a pending version. Each file's result is reported separately."""
+    v = await get_version(session, ds, version)
+    if ds.status == "retired":
+        raise ServiceError(409, "retired", "this dataset is retired")
+    if v.status != "pending":
+        raise ServiceError(409, "version_locked", "an approved version can't change; add a new version")
+    max_bytes = cfg.dataset_text_max_mb * 1024 * 1024
+    results = []
+    for f in files:
+        key = item_key(prefix, f.filename)
+        if await session.scalar(select(DatasetItem.id).where(DatasetItem.version_id == v.id,
+                                                             DatasetItem.key == key)):
+            raise ServiceError(409, "key_exists", f"{key!r} is already in this version")
+        try:
+            sha, size, head = await dataset_store.save_stream(cfg.data_dir, f, max_bytes)
+        except dataset_store.TooLarge:
+            raise ServiceError(413, "too_large", f"{key}: over {cfg.dataset_text_max_mb} MB. Large files "
+                               "arrive in a later release; use a catalog integration for big data.") from None
+        media_type = extract.sniff(head, f.filename or key)
+        if media_type not in extract.TEXT_TIER:
+            raise ServiceError(415, "unsupported_type",
+                               f"{key}: {media_type} isn't a text format (txt, md, html, csv, tsv, json, jsonl, "
+                               "yaml, xml). Other types arrive in later releases.")
+        text, meta = extract.extract(dataset_store.read_bytes(cfg.data_dir, sha), media_type)
+        session.add(DatasetItem(version_id=v.id, key=key, media_type=media_type, size_bytes=size, sha256=sha,
+                                tier="text", text=text, meta=meta))
+        results.append({"key": key, "media_type": media_type, "size_bytes": size, "sha256": sha, "meta": meta})
+    await session.flush()
+    await refresh_manifest(session, v)
+    ds.updated_at = _now()
+    await session.flush()
+    return results
+
+
+async def list_items(session: AsyncSession, ds: Dataset, version: int) -> list[dict]:
+    v = await get_version(session, ds, version)
+    return [{"key": i.key, "media_type": i.media_type, "size_bytes": i.size_bytes, "sha256": i.sha256,
+             "tier": i.tier, "meta": i.meta}
+            for i in await session.scalars(select(DatasetItem).where(DatasetItem.version_id == v.id)
+                                           .order_by(DatasetItem.key))]
