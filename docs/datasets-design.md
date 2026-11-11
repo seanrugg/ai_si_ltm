@@ -151,23 +151,21 @@ agents read the same way robots do, logged the same way.
 
 ## xAPI and the LRS
 
-Every row in `dataset_reads` becomes a statement:
+Every row in `dataset_reads` becomes a statement (AIAAP 0.11.0, template `dataset-read`):
 
 - **actor**: the member (the same account as its record statements);
-- **verb**: AIAAP `consulted` ("read reference material");
-- **object**: the item, `{public_base_url}/datasets/{id}/v/{version}/items/{key}`, activity type AIAAP `dataset-item`;
+- **verb**: the existing AIAAP 0.9.0 `read-resource` (no new verb);
+- **object**: the item, `{public_base_url}/datasets/{id}/v/{version}/items/{key}`, activity type `dataset-item`;
 - **context**:
+  - `contextActivities.category`: profile 0.11.0;
   - `contextActivities.parent`: the dataset version, type `dataset`;
-  - `contextActivities.grouping`: the fleet;
+  - `contextActivities.grouping`: the fleet, type `fleet`;
   - `registration`: the dream cycle's uuid, when there is one;
-  - extensions `dataset-version`, `read-source` (`served` or `reported`).
+  - extensions `resource-version` and `resource-hash` (both 0.9.0), and `read-source` (`served` or `reported`, new).
 
 The statement id is UUIDv5(NAMESPACE, `"read:" + <dataset_reads.id>`). Reads
 are forwarded by the existing forwarder as a second stream, batched and
 live-only per endpoint.
-
-The AIAAP terms (`consulted`, `dataset`, `dataset-item`, `dream-cycle`, the two
-extensions) arrive in profile 0.11 (xapi-ai).
 
 ## Dashboard
 
