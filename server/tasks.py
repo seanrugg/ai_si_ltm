@@ -6,7 +6,7 @@ import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from server.services import enrollment, lrs, network, retention
+from server.services import cognition, enrollment, lrs, network, retention
 
 log = logging.getLogger("ltms.tasks")
 
@@ -35,6 +35,8 @@ def start_scheduler(app) -> AsyncIOScheduler:
     sched.add_job(run, "cron", hour=7, minute=15,  # nightly, after the payload purge
                   args=("prune_member_addresses", network.run_prune, cfg))
     if cfg.enable_scheduler:
+        # Where each robot's decisions are made (#199): nightly, after the purge.
+        sched.add_job(run, "cron", hour=7, minute=30, args=("observe_cognition", cognition.observe_all))
         # The forwarder's own HTTP client, with a timeout, one per scheduler.
         http = httpx.AsyncClient(timeout=httpx.Timeout(10.0))
         sched.add_job(run, "interval", seconds=cfg.lrs_forward_seconds,
