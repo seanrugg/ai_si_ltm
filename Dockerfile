@@ -52,7 +52,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends postgresql-clie
     && rm -rf /var/lib/apt/lists/*
 
 # The entrypoint writes a pre-upgrade backup here; it must be writable by ltms.
-RUN mkdir /backups && chown ltms:ltms /backups
+RUN mkdir /backups /data && chown ltms:ltms /backups /data
 
 # /app must be writable by the runtime user (e.g. a sqlite dev database at ./dev.db).
 RUN chown -R ltms:ltms /app

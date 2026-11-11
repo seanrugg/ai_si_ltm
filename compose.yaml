@@ -59,10 +59,12 @@ services:
       LTMS_ENROLLMENT_POLICY_LOCKED: ${LTMS_ENROLLMENT_POLICY_LOCKED:-}
       LTMS_MAX_PENDING_ENROLLMENTS: ${LTMS_MAX_PENDING_ENROLLMENTS:-}
       LTMS_PENDING_ENROLLMENT_TTL_DAYS: ${LTMS_PENDING_ENROLLMENT_TTL_DAYS:-}
+      LTMS_DATA_DIR: /data
     ports:
       - "${LTMS_BIND:-127.0.0.1}:${LTMS_PORT:-8080}:8080"
     volumes:
       - ltms-backups:/backups
+      - ltms-data:/data  # fleet datasets (#237)
 
   # Optional MQTT broker for swarms. Members connect on the local network,
   # so it listens on all interfaces; authentication is required.
@@ -124,3 +126,4 @@ volumes:
   mqtt-data:
   lrs-db-data:
   ltms-backups:
+  ltms-data:

@@ -142,3 +142,12 @@ starts, but only when `LTMS_DATABASE_URL` points at PostgreSQL (SQLite keeps
 inside the container (the `ltms-backups` compose volume). To roll back,
 restore that dump with `pg_restore` into a fresh database and redeploy the
 previous image version.
+
+## Fleet dataset files
+
+Uploaded dataset files (see `docs/datasets-design.md`) are stored by content
+hash under `/data/datasets` inside the container: the `ltms-data` compose
+volume, set by `LTMS_DATA_DIR`. PostgreSQL keeps only the catalog and the
+extracted text, so **back up `ltms-data` along with the database**: a database
+restore without it lists items whose files are missing. Text-tier files are
+limited to 25 MB each (`LTMS_DATASET_TEXT_MAX_MB`).

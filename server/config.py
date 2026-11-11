@@ -172,6 +172,10 @@ class ServerConfig(BaseSettings):
     # LTMS_RETENTION_LOCKED: environment data retention settings win over the dashboard (#155)
     retention_locked: bool = False
 
+    # Fleet datasets (#237): content-addressed files under <data_dir>/datasets.
+    data_dir: str = "./data"
+    dataset_text_max_mb: int = 25
+
     # Optional offline city database for network location estimates (#191).
     # Unset (the default) means no network estimates. Env: LTMS_GEOIP_DB.
     geoip_db_path: str | None = Field(default=None, validation_alias=AliasChoices("geoip_db_path", "LTMS_GEOIP_DB"))

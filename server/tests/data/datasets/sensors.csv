@@ -1,0 +1,3 @@
+sensor,unit,max
+front-tof,mm,2000
+imu0,m/s2,16

@@ -1,0 +1,1 @@
+<?xml version="1.0"?><robot name="z3"><link name="base"/><joint name="j1">spin</joint></robot>

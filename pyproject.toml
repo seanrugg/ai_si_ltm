@@ -22,6 +22,7 @@ dependencies = [
     "httpx>=0.27",
     "cryptography>=42",  # issue #59: encrypted LRS credentials
     "alembic>=1.13",  # issue #97: database migrations
+    "python-multipart>=0.0.9",  # issue #237: dataset uploads (multipart form data)
 ]
 
 [project.optional-dependencies]
