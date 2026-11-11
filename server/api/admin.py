@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy import and_, func, Integer, literal, or_, select
+from sqlalchemy import and_, false, func, Integer, literal, or_, select
 
 from ltms_contract import RECORD_TYPES
 
@@ -176,11 +176,16 @@ def _timeline_type_clause(session, type_param: str | None):
 
     ``sensed`` is a perception tagged telemetry; ``perception`` is one that is
     not. An empty or missing list is today's default: everything except
-    sensed. Each selection is a type condition, plus a tag condition for the
+    sensed; ``none`` alone matches nothing. Each selection is a type condition, plus a tag condition for the
     two perception cases, OR'd together. ``RecordFilter`` and ``build_query``
     keep their plain-type semantics for every other caller.
     """
     wanted = [t.strip() for t in (type_param or "").split(",") if t.strip()]
+    if "none" in wanted:
+        # The Types picker's "None" (issue #205): nothing selected, nothing shown.
+        if len(wanted) > 1:
+            raise ServiceError(422, "bad_type", "type=none can't be combined with other types")
+        return false()
     unknown = [t for t in wanted if t not in RECORD_TYPES and t != "sensed"]
     if unknown:
         raise ServiceError(
@@ -435,6 +440,20 @@ async def record_detail(agent: str, seq: int, request: Request, admin: AdminAuth
         else:
             out["provenance"] = {"swarm": None, "relay": None, "received_at": None}
         return out
+
+
+@router.get("/admin/tombstones")
+async def list_tombstones(request: Request, admin: AdminAuth = ADMIN, agent: str | None = None,
+                          seq_from: int | None = None, seq_to: int | None = None) -> dict:
+    """One member's deleted records in a seq range, newest first (#205).
+
+    The timeline calls this once per page instead of looking up each missing seq.
+    """
+    if not agent:
+        raise ServiceError(422, "bad_agent", "agent is required")
+    async with transaction(request) as session:
+        rows = await records_service.list_tombstones(session, agent, seq_from=seq_from, seq_to=seq_to)
+        return {"tombstones": [records_service.tombstone_to_dict(t) for t in rows]}
 
 
 @router.get("/admin/records/{agent}/{seq}/delete-preview")

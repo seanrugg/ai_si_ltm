@@ -53,3 +53,16 @@ def test_unknown_type_is_422(mesh, admin):
     assert res.status_code == 422
     res = admin.get("/api/admin/timeline", params={"type": "decision,bogus"})
     assert res.status_code == 422
+
+
+def test_type_none_returns_nothing(mesh, admin):
+    """The Types picker's "None" (issue #205)."""
+    _populate(mesh)
+    assert _types(admin, type="none") == set()
+
+
+def test_type_none_with_other_types_is_rejected(mesh, admin):
+    _populate(mesh)
+    res = admin.get("/api/admin/timeline", params={"type": "none,decision"})
+    assert res.status_code == 422
+    assert res.json()["error"]["code"] == "bad_type"
