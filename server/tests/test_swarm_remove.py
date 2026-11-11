@@ -44,7 +44,7 @@ def test_free_members_hide_swarm_keep_records(mesh, admin, db_exec, home):
     r = _remove(admin, "echo-base")
     assert r.status_code == 200, r.text
     assert r.json() == {"id": home.id, "name": "echo-base", "status": "removed", "members": "free",
-                        "released": 2, "revoked": 0, "records": "keep"}
+                        "released": 2, "revoked": 0, "records": "keep", "purged": 0}
     assert "echo-base" not in [s["name"] for s in admin.get("/api/admin/swarms").json()]
     for name in ("z3-r0", "jetson-hub"):
         m = _member(db_exec, name)
@@ -86,7 +86,7 @@ def test_name_reusable_but_not_the_key(mesh, admin, db_exec, home):
 def test_validation(mesh, admin, http, home):
     assert _remove(admin, "echo-base", confirm="nope").json()["error"]["code"] == "bad_confirm"
     assert _remove(admin, "echo-base", members="explode").json()["error"]["code"] == "bad_members"
-    assert _remove(admin, "echo-base", records="purge").json()["error"]["code"] == "bad_records"
+    assert _remove(admin, "echo-base", records="shred").json()["error"]["code"] == "bad_records"
     assert _remove(admin, "echo-base").status_code == 200
     assert _remove(admin, "echo-base").status_code == 404
     r = http.post("/api/admin/swarms/echo-base/remove", json={}, headers={"x-ltms-admin": "1"})

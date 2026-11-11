@@ -140,3 +140,41 @@ async def delete_record(session: AsyncSession, agent: str, seq: int, *, admin: s
         "agent": tomb.agent, "seq": tomb.seq, "hash": tomb.hash, "reason": reason,
     }))
     return tomb
+
+
+PURGE_BATCH = 500
+PURGE_MAX = 100_000
+
+
+def swarm_records_query(swarm_id: str):
+    """IDs of the records that came through a swarm (provenance), oldest first."""
+    return (select(Record.id).join(RecordProvenance, RecordProvenance.record_id == Record.id)
+            .where(RecordProvenance.swarm_id == swarm_id).order_by(Record.id))
+
+
+async def delete_records_bulk(session: AsyncSession, *, swarm_id: str, admin: str, reason: str | None = None,
+                              batch: int = PURGE_BATCH) -> int:
+    """Delete every record that came through a swarm, leaving tombstones (#233).
+
+    The same steps as ``delete_record`` (tombstone first, then payload,
+    provenance and record), in batches, inside the caller's transaction. One
+    ``records_purge`` audit row for the whole purge. At most PURGE_MAX records.
+    """
+    reason = (reason or "").strip() or None
+    if reason is not None and len(reason) > MAX_REASON:
+        raise ServiceError(422, "bad_reason", f"reason is at most {MAX_REASON} characters")
+    ids = list(await session.scalars(swarm_records_query(swarm_id)))
+    if len(ids) > PURGE_MAX:
+        raise ServiceError(422, "too_many", f"purge in steps: {len(ids)} records is over the {PURGE_MAX} limit")
+    for start in range(0, len(ids), batch):
+        chunk = ids[start:start + batch]
+        recs = list(await session.scalars(select(Record).where(Record.id.in_(chunk))))
+        session.add_all([RecordTombstone(member_id=r.member_id, agent=r.agent, seq=r.seq, hash=r.hash,
+                                         prev_hash=r.prev_hash, deleted_by=admin, reason=reason) for r in recs])
+        await session.flush()  # tombstones exist before the trigger sees the DELETEs
+        await session.execute(delete(RecordPayload).where(RecordPayload.record_id.in_(chunk)))
+        await session.execute(delete(RecordProvenance).where(RecordProvenance.record_id.in_(chunk)))
+        await session.execute(delete(Record).where(Record.id.in_(chunk)))
+    session.add(AuditLog(actor=admin, action="records_purge",
+                         detail={"swarm": swarm_id, "count": len(ids), "reason": reason}))
+    return len(ids)

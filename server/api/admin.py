@@ -608,9 +608,16 @@ async def rename_swarm(name: str, request: Request, body: dict, admin: AdminAuth
         return {"id": swarm.id, "name": swarm.name, "status": swarm.status, "home": swarm.is_home}
 
 
+@router.get("/admin/swarms/{name}/remove-preview")
+async def remove_swarm_preview(name: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    """Counts for the Remove swarm dialog (#233): current members, records that came through it."""
+    async with transaction(request) as session:
+        return await swarm_remove.remove_preview(session, await swarms.get_swarm(session, name))
+
+
 @router.post("/admin/swarms/{name}/remove")
 async def remove_swarm(name: str, request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
-    """Remove a swarm (#232): ``{"confirm": name, "members": "free" | "remove", "records": "keep"}``."""
+    """Remove a swarm (#232): ``{"confirm": name, "members": "free" | "remove", "records": "keep" | "purge"}``."""
     async with transaction(request) as session:
         swarm = await swarms.get_swarm(session, name)
         return await swarm_remove.remove_swarm(session, swarm, confirm=body.get("confirm"),

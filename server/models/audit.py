@@ -40,6 +40,7 @@ AUDIT_ACTIONS = (
     "location_change",
     "swarm_rename",
     "swarm_remove",
+    "records_purge",
 )
 
 
