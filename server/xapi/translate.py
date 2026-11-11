@@ -1,4 +1,4 @@
-"""Holocron record -> xAPI statement translator (AIAAP 0.10.0, mapping v1).
+"""Holocron record -> xAPI statement translator (AIAAP 0.10.1, mapping v1).
 
 A pure function: no I/O, no database, no network. The LRS forwarder (#61)
 calls it to turn one LTMS record into one xAPI statement.
@@ -12,22 +12,29 @@ from urllib.parse import quote
 MAPPING_VERSION = "1"
 AI = "https://w3id.org/xapi-ai"
 EXT = AI + "/extensions/"
-PROFILE_VERSION = AI + "/profile/0.10.0"
-# = uuid5(NAMESPACE_URL, PROFILE_VERSION + "/holocron-mapping/1")
+PROFILE_VERSION = AI + "/profile/0.10.1"
+# Derived from the 0.10.0 IRI (uuid5(NAMESPACE_URL,
+# "https://w3id.org/xapi-ai/profile/0.10.0/holocron-mapping/1")) and fixed
+# for mapping version 1: it does not follow PROFILE_VERSION, so statement ids
+# never change (issue #179).
 NAMESPACE = uuid.UUID("19413c7a-d33c-5129-b99b-07d709cef285")
 
 VALID_XAPI_VERSIONS = ("2.0.0", "1.0.3")
 
 GLOSSARY = "https://id.i2idl.org/concepts/"
 SKOS_CONCEPT = "http://www.w3.org/2004/02/skos/core#Concept"
-# record type -> glossary concept; every statement also gets learning-record
+# record type -> glossary concept; every statement also gets learning-record.
+# Perceptions are not listed: a perception tagged telemetry is *sensed* (data
+# from one of the member's sensors) and gets SENSED_CONCEPT; a plain
+# perception is an interpretation and gets no record concept (issue #179).
 RECORD_CONCEPTS = {
-    "perception": "sensor",
     "thought": "metacognition",
     "communication": "social-learning",
     "event": "learning-event",
     "lesson": "experiential-learning",
 }
+SENSED = (AI + "/verbs/sensed", "sensed")
+SENSED_CONCEPT = "sensor"
 
 # record type -> (verb IRI, display)
 VERBS = {
@@ -45,11 +52,18 @@ VERBS = {
 # member kind -> xAPI agent kind; anything not listed -> "ai-agent"
 AGENT_KINDS = {"robot": "robot", "agent": "ai-agent", "assistant": "ai-agent", "relay": "relay"}
 
-_TELEMETRY_KINDS = {"pose", "navigation", "sensor"}
-
 
 def _agent_kind(kind: str) -> str:
     return AGENT_KINDS.get(kind, "ai-agent")
+
+
+def _is_sensed(rec: dict) -> bool:
+    """A perception tagged telemetry: data from one of the member's sensors.
+
+    Any sensor's data translates (issue #179); the record type stays
+    ``perception`` — the tag selects the "sensed" verb.
+    """
+    return rec.get("type") == "perception" and "telemetry" in (rec.get("tags") or [])
 
 
 def _account_agent(base: str, name: str) -> dict:
@@ -77,7 +91,7 @@ def record_to_statement(
         raise ValueError(f"unknown record type: {rtype!r}")
 
     base = base.rstrip("/")
-    verb_iri, verb_display = VERBS[rtype]
+    verb_iri, verb_display = SENSED if _is_sensed(rec) else VERBS[rtype]
 
     statement = {
         "id": str(uuid.uuid5(NAMESPACE, rec["hash"])),
@@ -102,10 +116,11 @@ def record_to_statement(
             "definition": {"type": "http://adlnet.gov/expapi/activities/profile"},
         }
     ]
-    for concept in ("learning-record", RECORD_CONCEPTS.get(rtype)):
-        if concept:
+    concept = SENSED_CONCEPT if _is_sensed(rec) else RECORD_CONCEPTS.get(rtype)
+    for c in ("learning-record", concept):
+        if c:
             category.append(
-                {"objectType": "Activity", "id": GLOSSARY + concept, "definition": {"type": SKOS_CONCEPT}}
+                {"objectType": "Activity", "id": GLOSSARY + c, "definition": {"type": SKOS_CONCEPT}}
             )
     grouping: list[dict] = []
     swarm = rec.get("swarm")
@@ -183,14 +198,14 @@ def record_to_statement(
             result["success"] = outcome == "success"
         result_ext[EXT + "outcome"] = outcome
 
-    # Everything LTMS receives, the LRS receives (Sean, 9 Nov). Known telemetry
-    # goes to result.extensions whole; every other payload goes to
-    # context.extensions as a JSON object; no payload means it was purged.
-    is_telemetry = (rtype == "perception" and "telemetry" in (rec.get("tags") or [])
-                    and isinstance(payload, dict) and payload.get("kind") in _TELEMETRY_KINDS)
+    # Everything LTMS receives, the LRS receives (Sean, 9 Nov). Sensed records
+    # (a perception tagged telemetry) carry their whole payload in the
+    # telemetry extension, whatever its kind (or none) — any sensor's data
+    # translates (issue #179). Every other payload goes to context.extensions
+    # as a JSON object; no payload means it was purged.
     if payload is None:
         extensions[EXT + "holocron/payload-purged"] = True
-    elif is_telemetry:
+    elif _is_sensed(rec) and isinstance(payload, dict):
         result_ext[EXT + "telemetry"] = payload
     else:
         extensions[EXT + "holocron/payload"] = payload

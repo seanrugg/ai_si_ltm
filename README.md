@@ -7,6 +7,7 @@ it to their previous one; the server verifies, stores, and serves it back for re
 * **Design:** `Robot-Mesh-and-Long-Term-Memory-Plan.md`
 * **Implementation plan & status:** `LTMS_ARCHITECTURE_PLAN.md`
 * **Record contract (frozen v1):** `CONTRACT.md`, vectors in `ltms_contract/vectors.json`
+* **Sensing (sensed and perceived records):** `docs/sensing.md`
 * **Deploying to Plesk:** `PLESK_DEPLOYMENT_PLAN.md`
 * **Deployments and platforms:** `docs/platforms.md` and the `examples/echo-base` reference deployment
 * **Rules for coding agents:** `AGENTS.md`
