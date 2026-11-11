@@ -14,16 +14,18 @@ from urllib.parse import urlparse
 
 import httpx
 from cryptography.fernet import Fernet
-from sqlalchemy import func, select
+from sqlalchemy import func, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ltms_contract.record import NAME_RE
 from server.config import ServerConfig
-from server.models import AuditLog, LrsEndpoint, Member, Record, RecordProvenance, Swarm
+from server.models import (
+    AuditLog, LrsEndpoint, Member, Record, RecordProvenance, RecordTombstone, Swarm,
+)
 from server.services.enrollment import _validate_scope
 from server.services.errors import ServiceError
 from server.services.recall import apply_scope, effective_scope, fetch_payloads
-from server.xapi.translate import record_to_statement
+from server.xapi.translate import because_key, record_to_statement
 
 log = logging.getLogger(__name__)
 
@@ -354,6 +356,33 @@ async def forward_once(session: AsyncSession, cfg: ServerConfig, http: httpx.Asy
     return {"forwarded": forwarded}
 
 
+async def _cause_hashes(session: AsyncSession, records: list[Record]) -> dict[str, str]:
+    """``"agent:seq"`` -> hash for every single ``because`` cause in the batch.
+
+    One query for the whole batch (issue #180). A deleted cause still resolves:
+    its tombstone (#173) keeps the hash, and so the statement id.
+    """
+    wanted: set[tuple[str, int]] = set()
+    for r in records:
+        key = because_key(r.refs)
+        if key is None:
+            continue
+        agent, _, seq = key.rpartition(":")
+        if agent and seq.isdigit():
+            wanted.add((agent, int(seq)))
+    if not wanted:
+        return {}
+    agents = sorted({a for a, _ in wanted})
+    seqs = sorted({s for _, s in wanted})
+    live = select(Record.agent, Record.seq, Record.hash).where(
+        Record.agent.in_(agents), Record.seq.in_(seqs))
+    gone = select(RecordTombstone.agent, RecordTombstone.seq, RecordTombstone.hash).where(
+        RecordTombstone.agent.in_(agents), RecordTombstone.seq.in_(seqs))
+    rows = (await session.execute(union_all(live, gone))).all()
+    # The IN filters fetch a superset; keep only the exact (agent, seq) pairs.
+    return {f"{a}:{s}": h for a, s, h in rows if (a, s) in wanted}
+
+
 async def _forward_endpoint(
     session: AsyncSession,
     cfg: ServerConfig,
@@ -396,6 +425,7 @@ async def _forward_endpoint(
     # Every payload goes to the LRS (Sean, 9 Nov); the endpoint's scope still
     # narrows which records are sent.
     payloads = await fetch_payloads(session, records)
+    ref_hashes = await _cause_hashes(session, records)
 
     statements = []
     for r in records:
@@ -411,7 +441,8 @@ async def _forward_endpoint(
         row = payloads.get(r.id)
         payload = json.loads(row.payload_raw) if row is not None else None
         statements.append(record_to_statement(
-            rec, base=cfg.public_base_url, xapi_version=endpoint.xapi_version, payload=payload))
+            rec, base=cfg.public_base_url, xapi_version=endpoint.xapi_version, payload=payload,
+            ref_hashes=ref_hashes))
 
     secret = decrypt_secret(cfg, endpoint)
     if secret is None:
