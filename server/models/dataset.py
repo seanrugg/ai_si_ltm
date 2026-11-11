@@ -15,6 +15,7 @@ from server.models.base import BigIntPK, Base, JSONType, UTCDateTime, utcnow
 
 DATASET_SCOPES = ("fleet",)
 DATASET_KINDS = ("upload", "url", "integration")
+INTEGRATION_KINDS = ("http", "s3", "huggingface", "ollama", "openai", "mcp")
 DATASET_STATUSES = ("pending", "approved", "retired")
 VERSION_STATUSES = ("pending", "approved")
 ITEM_TIERS = ("text", "large", "external")
@@ -41,6 +42,28 @@ class Dataset(Base):
     approved_by: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utcnow)
+    # A ``kind: integration`` dataset's source (#248); its items are ``tier: external``.
+    integration_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("catalog_integrations.id"))
+
+
+class CatalogIntegration(Base):
+    """Where external data or models live (#248). LTMS keeps the metadata and
+    never fetches from it; members fetch and report their reads.
+
+    ``credential_env`` is the **name** of an environment variable on the
+    members' side, never a secret.
+    """
+    __tablename__ = "catalog_integrations"
+    __table_args__ = (CheckConstraint(f"kind IN {INTEGRATION_KINDS}", name="ck_catalog_integrations_kind"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    base_url: Mapped[str] = mapped_column(Text, nullable=False)
+    credential_env: Mapped[str | None] = mapped_column(String(64))
+    description: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utcnow)
 
 
 class DatasetVersion(Base):

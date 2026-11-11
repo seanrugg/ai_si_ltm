@@ -18,6 +18,9 @@ sends records via `cli_agent.client.LTMSClient`, and exposes these tools:
   one is configured), exactly like a robot's read. Cite what you use: put
   `cite_as` in a lesson's `payload.sources` (at most 16). See
   [docs/datasets.md](../docs/datasets.md).
+* `report_read(dataset, version, item, cycle)` — for an **external** item
+  (`read_item` returns its `locator` and `integration`), fetch it from the
+  source yourself, then report the read so it's logged like any other.
 
 ## 1. Generate a member key
 

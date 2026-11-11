@@ -214,5 +214,16 @@ def read_item(client: LTMSClient, dataset: str, key: str, version: int | None = 
     if len(text) > MAX_ITEM_CHARS:
         out["note"] = (f"text truncated to {MAX_ITEM_CHARS:,} of {len(text):,} characters; "
                        "search the dataset to find the part you need")
+    if item.get("tier") == "external":
+        # Not in LTMS: fetch it from the source, then call report_read (#248).
+        out["locator"] = item.get("locator")
+        out["integration"] = item.get("integration")
+        out["note"] = "external item: fetch it from the integration, then call report_read"
     out["cite_as"] = {"dataset": dataset_id, "version": item["version"], "item": item["key"]}
     return out
+
+
+def report_read(client: LTMSClient, dataset: str, version: int, item: str, cycle: str | None = None) -> dict:
+    """Log a read of an item fetched from its source (an external item)."""
+    dataset_id = resolve_dataset(client, dataset)
+    return _dataset_call(client.report_read, dataset_id, version, item, cycle=cycle)

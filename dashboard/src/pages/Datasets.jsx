@@ -5,7 +5,7 @@ import HelpTip from "../components/HelpTip.jsx";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, Loading, PageHeader, StatusBadge } from "../components/ui.jsx";
-import { DATASET_APPROVE, DATASET_LARGE, DATASET_SCOPE } from "../lib/help.js";
+import { DATASET_APPROVE, DATASET_LARGE, DATASET_SCOPE, INTEGRATION_ABOUT, INTEGRATION_CREDENTIAL } from "../lib/help.js";
 import { CHUNKED_ABOVE, FILTERS, filterDatasets, formatBytes, hasPending, sortDatasets, totalSize, uploadFiles } from "../lib/datasets.js";
 import { localTime } from "../lib/format.js";
 
@@ -72,8 +72,144 @@ function FilePicker({ id, datasetId, version, onDone }) {
   );
 }
 
-export function AddDataset({ onCreated }) {
-  const [form, setForm] = useState({ name: "", description: "", licence: "", kind: "upload" });
+export const INTEGRATION_KINDS = ["http", "s3", "huggingface", "ollama", "openai", "mcp"];
+const MODEL_KINDS = ["ollama", "openai"];
+
+export function ExternalItems({ datasetId, version, integrationKind, onDone }) {
+  const empty = { key: "", locator: "", model: "" };
+  const [row, setRow] = useState(empty);
+  const [error, setError] = useState(null);
+  const [added, setAdded] = useState(null);
+  const needsModel = MODEL_KINDS.includes(integrationKind);
+  const set = (k) => (e) => setRow((r) => ({ ...r, [k]: e.target.value }));
+  const fid = `ext-${datasetId}-${version}`;
+
+  async function add() {
+    setError(null);
+    const item = { key: row.key.trim(), locator: row.locator.trim() };
+    if (row.model.trim()) item.model = row.model.trim();
+    try {
+      await api(`/admin/datasets/${encodeURIComponent(datasetId)}/versions/${version}/external`,
+        { method: "POST", body: { items: [item] } });
+      setAdded(item.key);
+      setRow(empty);
+      onDone?.();
+    } catch (err) {
+      setError(err);
+    }
+  }
+
+  return (
+    <form className="mt-3 flex flex-wrap items-end gap-2" aria-label={`Add an external item to version ${version}`}
+          onSubmit={(e) => { e.preventDefault(); add(); }}>
+      <div>
+        <label htmlFor={`${fid}-key`} className="block text-sm text-paper-muted">Key</label>
+        <input id={`${fid}-key`} className="field w-40" value={row.key} onChange={set("key")} required
+               placeholder="demos/pick-place" />
+      </div>
+      <div>
+        <label htmlFor={`${fid}-loc`} className="block text-sm text-paper-muted">Locator</label>
+        <input id={`${fid}-loc`} className="field w-64" value={row.locator} onChange={set("locator")} required
+               placeholder="URL, bucket/key, repo id" />
+      </div>
+      {needsModel && (
+        <div>
+          <label htmlFor={`${fid}-model`} className="block text-sm text-paper-muted">Model</label>
+          <input id={`${fid}-model`} className="field w-40" value={row.model} onChange={set("model")} required
+                 placeholder="qwen3:8b" />
+        </div>
+      )}
+      <button type="submit" className="btn btn-primary"
+              disabled={!row.key.trim() || !row.locator.trim() || (needsModel && !row.model.trim())}>Add item</button>
+      {added && <span className="text-sm text-ok" role="status">Added {added}</span>}
+      <ErrorNote error={error} />
+    </form>
+  );
+}
+
+export function Integrations({ data, onChanged }) {
+  const integrations = data?.integrations || [];
+  const [form, setForm] = useState({ name: "", kind: "huggingface", base_url: "", credential_env: "" });
+  const [error, setError] = useState(null);
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  async function create() {
+    setError(null);
+    try {
+      await api("/admin/integrations", { method: "POST", body: {
+        name: form.name.trim(), kind: form.kind, base_url: form.base_url.trim(),
+        credential_env: form.credential_env.trim() || null,
+      } });
+      setForm((f) => ({ ...f, name: "", base_url: "", credential_env: "" }));
+      onChanged?.();
+    } catch (err) {
+      setError(err);
+    }
+  }
+
+  async function remove(name) {
+    setError(null);
+    try {
+      await api(`/admin/integrations/${encodeURIComponent(name)}`, { method: "DELETE" });
+      onChanged?.();
+    } catch (err) {
+      setError(err);
+    }
+  }
+
+  return (
+    <section className="mb-6 rounded-md border border-ink-line bg-ink p-4" aria-labelledby="integrations-h">
+      <h2 id="integrations-h" className="mb-1 text-lg font-bold">
+        Catalog integrations <HelpTip id="integrations-about" label="About integrations">{INTEGRATION_ABOUT}</HelpTip>
+      </h2>
+      {integrations.length > 0 && (
+        <ul className="mb-3 text-sm" aria-label="Integrations">
+          {integrations.map((i) => (
+            <li key={i.id} className="flex flex-wrap items-center gap-2 py-1">
+              <span className="font-bold">{i.name}</span>
+              <span className="text-paper-muted">{i.kind} · {i.base_url}</span>
+              {i.credential_env && <span className="font-mono text-xs">${i.credential_env}</span>}
+              <button type="button" className="btn" onClick={() => remove(i.name)}>Delete</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form className="flex flex-wrap items-end gap-2" aria-label="Add integration"
+            onSubmit={(e) => { e.preventDefault(); create(); }}>
+        <div>
+          <label htmlFor="int-name" className="block text-sm text-paper-muted">Name</label>
+          <input id="int-name" className="field w-36" value={form.name} onChange={set("name")} required />
+        </div>
+        <div>
+          <label htmlFor="int-kind" className="block text-sm text-paper-muted">Kind</label>
+          <select id="int-kind" className="field" value={form.kind} onChange={set("kind")}>
+            {INTEGRATION_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="int-url" className="block text-sm text-paper-muted">Base URL</label>
+          <input id="int-url" className="field w-64" value={form.base_url} onChange={set("base_url")} required
+                 placeholder="https://huggingface.co" />
+        </div>
+        <div>
+          <span className="flex items-center gap-1">
+            <label htmlFor="int-env" className="block text-sm text-paper-muted">Credential variable</label>
+            <HelpTip id="int-env-help" label="About the credential variable">{INTEGRATION_CREDENTIAL}</HelpTip>
+          </span>
+          <input id="int-env" className="field w-36 font-mono" value={form.credential_env} onChange={set("credential_env")}
+                 placeholder="HF_TOKEN" autoComplete="off" />
+        </div>
+        <button type="submit" className="btn btn-primary" disabled={!form.name.trim() || !form.base_url.trim()}>
+          Add integration
+        </button>
+      </form>
+      <ErrorNote error={error} />
+    </section>
+  );
+}
+
+export function AddDataset({ onCreated, integrations = [] }) {
+  const [form, setForm] = useState({ name: "", description: "", licence: "", kind: "upload", integration: "" });
   const [created, setCreated] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -86,6 +222,7 @@ export function AddDataset({ onCreated }) {
       const ds = await api("/admin/datasets", { method: "POST", body: {
         name: form.name.trim(), description: form.description.trim() || null,
         licence: form.licence.trim(), kind: form.kind,
+        ...(form.kind === "integration" ? { integration: form.integration } : {}),
       } });
       setCreated(ds);
       onCreated?.();
@@ -99,8 +236,13 @@ export function AddDataset({ onCreated }) {
   if (created) {
     return (
       <section className="mb-6 rounded-md border border-ink-line bg-ink p-4" aria-label="Upload files">
-        <h2 className="text-lg font-bold">Upload into {created.name}</h2>
-        <FilePicker id="new-dataset-files" datasetId={created.id} version={1} onDone={onCreated} />
+        <h2 className="text-lg font-bold">{created.kind === "integration" ? "Add items to" : "Upload into"} {created.name}</h2>
+        {created.kind === "integration" ? (
+          <ExternalItems datasetId={created.id} version={1} onDone={onCreated}
+                         integrationKind={integrations.find((i) => i.id === created.integration_id)?.kind} />
+        ) : (
+          <FilePicker id="new-dataset-files" datasetId={created.id} version={1} onDone={onCreated} />
+        )}
         <button type="button" className="btn mt-3" onClick={() => setCreated(null)}>Done</button>
       </section>
     );
@@ -128,13 +270,24 @@ export function AddDataset({ onCreated }) {
           <label htmlFor="ds-kind" className="block text-sm text-paper-muted">Kind</label>
           <select id="ds-kind" className="field" value={form.kind} onChange={set("kind")}>
             <option value="upload">Upload</option>
+            <option value="integration" disabled={integrations.length === 0}>Integration</option>
           </select>
         </div>
+        {form.kind === "integration" && (
+          <div>
+            <label htmlFor="ds-integration" className="block text-sm text-paper-muted">Integration</label>
+            <select id="ds-integration" className="field" value={form.integration} onChange={set("integration")} required>
+              <option value="">Choose…</option>
+              {integrations.map((i) => <option key={i.id} value={i.name}>{i.name} ({i.kind})</option>)}
+            </select>
+          </div>
+        )}
         <p className="w-full text-xs text-paper-muted">
           Scope: fleet <HelpTip id="ds-scope" label="About dataset scope">{DATASET_SCOPE}</HelpTip>
         </p>
         <button type="submit" className="btn btn-primary"
-                disabled={busy || !form.name.trim() || !form.licence.trim()}>Add dataset</button>
+                disabled={busy || !form.name.trim() || !form.licence.trim()
+                  || (form.kind === "integration" && !form.integration)}>Add dataset</button>
       </form>
       <ErrorNote error={error} />
     </section>
@@ -153,7 +306,8 @@ function VersionItems({ datasetId, version }) {
       <thead><tr className="text-left text-paper-muted"><th>Key</th><th>Type</th><th>Size</th></tr></thead>
       <tbody>
         {items.map((it) => (
-          <tr key={it.key}><td className="font-mono">{it.key}</td><td>{it.media_type}</td>
+          <tr key={it.key}><td className="font-mono">{it.key}</td>
+            <td>{it.tier === "external" ? `external: ${it.meta?.model ? `${it.meta.model} @ ` : ""}${it.meta?.locator}` : it.media_type}</td>
             <td>{formatBytes(it.size_bytes)}</td></tr>
         ))}
       </tbody>
@@ -161,7 +315,7 @@ function VersionItems({ datasetId, version }) {
   );
 }
 
-export function DatasetDetail({ dataset, onChanged }) {
+export function DatasetDetail({ dataset, onChanged, integrations = [] }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [retiring, setRetiring] = useState(false);
@@ -211,10 +365,13 @@ export function DatasetDetail({ dataset, onChanged }) {
               )}
             </div>
             {shown === v.version && <VersionItems datasetId={dataset.id} version={v.version} />}
-            {v.status === "pending" && !retired && (
+            {v.status === "pending" && !retired && (dataset.kind === "integration" ? (
+              <ExternalItems datasetId={dataset.id} version={v.version} onDone={onChanged}
+                             integrationKind={integrations.find((i) => i.id === dataset.integration_id)?.kind} />
+            ) : (
               <FilePicker id={`ds-files-${dataset.id}-${v.version}`} datasetId={dataset.id} version={v.version}
                           onDone={onChanged} />
-            )}
+            ))}
           </li>
         ))}
       </ul>
@@ -252,6 +409,8 @@ export function DatasetDetail({ dataset, onChanged }) {
 
 export default function Datasets() {
   const { data, error, loading, reload } = useApi("/admin/datasets");
+  const ints = useApi("/admin/integrations");
+  const integrations = ints.data?.integrations || [];
   const [filter, setFilter] = useState("all");
   const [open, setOpen] = useState(null);
 
@@ -276,7 +435,8 @@ export default function Datasets() {
         Reference material for the whole fleet. Members read approved versions; every read is logged and sent
         to the LRS. LTMS doesn&apos;t train on it.
       </p>
-      <AddDataset onCreated={reload} />
+      <Integrations data={ints.data} onChanged={() => { ints.reload(); reload(); }} />
+      <AddDataset onCreated={reload} integrations={integrations} />
       {list.length === 0 ? (
         <EmptyState title={all.length ? "No datasets match this filter" : "No datasets yet"}>
           Add a dataset, upload its files, then approve the version so members can read it.
@@ -299,7 +459,7 @@ export default function Datasets() {
                   {formatBytes(totalSize(ds))} · {ds.licence}
                 </span>
               </div>
-              {open === ds.id && <DatasetDetail dataset={ds} onChanged={reload} />}
+              {open === ds.id && <DatasetDetail dataset={ds} onChanged={reload} integrations={integrations} />}
             </li>
           ))}
         </ul>

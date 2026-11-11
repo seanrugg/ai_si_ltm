@@ -72,8 +72,15 @@ async def create_dataset(session: AsyncSession, body: dict, *, admin: str) -> Da
         raise ServiceError(422, "bad_licence", "licence is required: say how this data may be used")
     if await session.scalar(select(Dataset.id).where(Dataset.name == name)):
         raise ServiceError(409, "name_taken", f"a dataset named {name!r} already exists")
+    integration_id = None
+    if kind == "integration":
+        from server.services import integrations  # integrations imports this module
+
+        if not body.get("integration"):
+            raise ServiceError(422, "bad_integration", "an integration dataset names its integration (id or name)")
+        integration_id = (await integrations.get(session, body["integration"])).id
     ds = Dataset(name=name, description=(body.get("description") or "").strip() or None, kind=kind,
-                 licence=licence, status="pending", added_by=admin)
+                 licence=licence, status="pending", added_by=admin, integration_id=integration_id)
     session.add(ds)
     await session.flush()
     session.add(DatasetVersion(dataset_id=ds.id, version=1, status="pending", item_count=0, size_bytes=0))
@@ -133,6 +140,7 @@ async def dataset_dict(session: AsyncSession, ds: Dataset) -> dict:
             "licence": ds.licence, "use": ds.use, "status": ds.status, "added_by": ds.added_by,
             "approved_by": ds.approved_by, "created_at": ds.created_at.isoformat(),
             "updated_at": ds.updated_at.isoformat(), "current_version": current,
+            "integration_id": str(ds.integration_id) if ds.integration_id else None,
             "versions": [version_dict(v) for v in versions]}
 
 
@@ -164,7 +172,8 @@ async def refresh_manifest(session: AsyncSession, v: DatasetVersion) -> None:
                                        .order_by(DatasetItem.key)))
     v.item_count = len(items)
     v.size_bytes = sum(i.size_bytes for i in items)
-    lines = "".join(f"{i.key}:{i.sha256 or ''}\n" for i in items)
+    # An external item (#248) has no hash; its locator stands in, so changing one changes the manifest.
+    lines = "".join(f"{i.key}:{i.sha256 or (i.meta or {}).get('locator', '')}\n" for i in items)
     v.manifest_hash = hashlib.sha256(lines.encode("utf-8")).hexdigest() if items else None
 
 
@@ -292,8 +301,14 @@ async def list_for_members(session: AsyncSession) -> list[dict]:
         v = await current_version(session, ds)
         if v is None:
             continue
-        out.append({"id": str(ds.id), "name": ds.name, "description": ds.description, "licence": ds.licence,
-                    "use": ds.use, "scope": ds.scope, "current_version": v.version, "item_count": v.item_count})
+        entry = {"id": str(ds.id), "name": ds.name, "description": ds.description, "licence": ds.licence,
+                 "use": ds.use, "scope": ds.scope, "kind": ds.kind, "current_version": v.version,
+                 "item_count": v.item_count}
+        if ds.kind == "integration":
+            from server.services import integrations
+
+            entry["integration"] = await integrations.integration_of(session, ds)
+        out.append(entry)
     return out
 
 
@@ -393,6 +408,15 @@ async def read_item(session: AsyncSession, *, member_id, dataset_id, key: str, v
     item = await session.scalar(select(DatasetItem).where(DatasetItem.version_id == v.id, DatasetItem.key == key))
     if item is None:
         raise ServiceError(404, "not_found", f"no item {key!r} in version {v.version}")
+    if item.tier == "external":
+        # LTMS doesn't have it: the member fetches from the source, then reports
+        # the read (POST /api/members/me/reads), which is what gets logged (#248).
+        from server.services import integrations
+
+        return {"dataset": str(ds.id), "version": v.version, "key": item.key, "media_type": item.media_type,
+                "tier": "external", "locator": (item.meta or {}).get("locator"), "meta": item.meta,
+                "integration": await integrations.integration_of(session, ds), "text": None,
+                "report_read": "POST /api/members/me/reads"}
     await log_read(session, member_id=member_id, ds=ds, version=v.version, key=key, cycle=cyc)
     return {"dataset": str(ds.id), "version": v.version, "key": item.key, "media_type": item.media_type,
             "tier": item.tier, "sha256": item.sha256, "size_bytes": item.size_bytes, "text": item.text,

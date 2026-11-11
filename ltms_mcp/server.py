@@ -30,6 +30,7 @@ from ltms_mcp import restore as _restore
 from ltms_mcp import search_records as _search_records
 from ltms_mcp import list_datasets as _list_datasets
 from ltms_mcp import read_item as _read_item
+from ltms_mcp import report_read as _report_read
 from ltms_mcp import search_datasets as _search_datasets
 
 mcp = MCPServer(
@@ -128,6 +129,15 @@ def read_item(dataset: str, key: str, version: int | None = None, cycle: str | N
     the result's ``cite_as`` is the entry to add. ``cycle`` is a dream cycle's id.
     """
     return _read_item(_client(), dataset, key, version=version, cycle=cycle)
+
+
+@mcp.tool()
+def report_read(dataset: str, version: int, item: str, cycle: str | None = None) -> dict:
+    """Report reading an external dataset item you fetched from its source (read_item gives the locator).
+
+    Reference material for the fleet. Cite what you use in a lesson's payload.sources.
+    """
+    return _report_read(_client(), dataset, version, item, cycle=cycle)
 
 
 def main() -> None:

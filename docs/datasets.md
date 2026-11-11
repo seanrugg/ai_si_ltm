@@ -39,6 +39,28 @@ print(item["text"])
 Without `version`, you get the dataset's current approved version. Pin a
 version when you need a stable citation.
 
+## External items (catalog integrations)
+
+Some datasets live outside LTMS: a Hugging Face repo, an S3 bucket, a model
+on an Ollama server, an MCP server. Reading one of their items gives
+`tier: "external"`, a `locator`, and the `integration`
+(`{name, kind, base_url, credential_env}`). LTMS never fetches from the
+source and never holds its credentials. The member:
+
+1. fetches the item from `base_url` and `locator`, using the secret in its own
+   environment variable named by `credential_env`;
+2. reports the read so it's logged and sent to the LRS like any other:
+
+```python
+item = client.read_item("<dataset-id>", "demos/pick-place")      # not logged: just the locator
+# ... fetch item["locator"] from item["integration"]["base_url"] ...
+client.report_read("<dataset-id>", item["version"], item["key"])  # logged, source "reported"
+```
+
+In a dream cycle, use `cycle.report(...)` instead, so the read carries the
+cycle. An `mcp` integration names an MCP server that agents connect to
+directly. LTMS doesn't relay MCP calls.
+
 ## Cite what you read
 
 A record can cite up to 16 dataset items in `payload.sources`. Any record type
