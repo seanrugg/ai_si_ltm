@@ -82,3 +82,65 @@ export function wipesOf(events) {
 export function percent(share) {
   return share == null ? null : `${Math.round(share * 100)}%`;
 }
+
+/**
+ * Fit points ({x, y} in a frame's units) into a width × height viewBox with
+ * `pad` (a fraction) of padding on each side, keeping one scale for both axes
+ * so distances look right. Screen y grows downward, so frame y is flipped.
+ * Returns { map(p) -> {x, y}, bounds }.
+ */
+export function makeScaler(points, width, height, pad = 0.1) {
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  let minX = Math.min(...xs);
+  let maxX = Math.max(...xs);
+  let minY = Math.min(...ys);
+  let maxY = Math.max(...ys);
+  if (!points.length) {
+    minX = minY = 0;
+    maxX = maxY = 1;
+  }
+  const spanX = maxX - minX || 1;
+  const spanY = maxY - minY || 1;
+  const innerW = width * (1 - 2 * pad);
+  const innerH = height * (1 - 2 * pad);
+  const k = Math.min(innerW / spanX, innerH / spanY);
+  const offX = width * pad + (innerW - spanX * k) / 2;
+  const offY = height * pad + (innerH - spanY * k) / 2;
+  return {
+    map: (p) => ({ x: offX + (p.x - minX) * k, y: height - (offY + (p.y - minY) * k) }),
+    bounds: { minX, maxX, minY, maxY },
+  };
+}
+
+/** Pose samples from sensed records (`payload.kind == "pose"`), oldest first. */
+export function poseSamples(records) {
+  const out = [];
+  for (const r of records || []) {
+    const p = r.payload;
+    if (!p || p.kind !== "pose") continue;
+    for (const s of p.samples || []) {
+      const x = s.x ?? s.v?.x;
+      const y = s.y ?? s.v?.y;
+      if (typeof x === "number" && typeof y === "number") {
+        const t = typeof s.t === "number" ? s.t : 0;
+        out.push({ agent: r.agent, ts: new Date(Date.parse(r.ts) + t * 1000).toISOString(), x, y, frame: p.frame || "frame" });
+      }
+    }
+  }
+  return out.sort((a, b) => a.ts.localeCompare(b.ts));
+}
+
+/** Action records whose payload carries a pose ({pose: {x, y}} or top-level x, y). */
+export function actionPoses(records) {
+  const out = [];
+  for (const r of records || []) {
+    const p = r.payload || {};
+    const x = p.pose?.x ?? p.x;
+    const y = p.pose?.y ?? p.y;
+    if (typeof x === "number" && typeof y === "number") {
+      out.push({ agent: r.agent, ts: r.ts, x, y, outcome: r.outcome, summary: r.summary });
+    }
+  }
+  return out;
+}
