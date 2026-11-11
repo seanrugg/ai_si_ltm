@@ -6,7 +6,7 @@ import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from server.services import cognition, enrollment, lrs, network, retention
+from server.services import cognition, dataset_uploads, enrollment, lrs, network, retention
 
 log = logging.getLogger("ltms.tasks")
 
@@ -34,6 +34,8 @@ def start_scheduler(app) -> AsyncIOScheduler:
                   args=("prune_audit_log", retention.run_audit_prune, cfg))
     sched.add_job(run, "cron", hour=7, minute=15,  # nightly, after the payload purge
                   args=("prune_member_addresses", network.run_prune, cfg))
+    # Unfinished dataset uploads older than 24 h (#245).
+    sched.add_job(run, "cron", hour=7, minute=20, args=("expire_dataset_uploads", dataset_uploads.purge_stale, cfg))
     if cfg.enable_scheduler:
         # Where each robot's decisions are made (#199): nightly, after the purge.
         sched.add_job(run, "cron", hour=7, minute=30, args=("observe_cognition", cognition.observe_all))

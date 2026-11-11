@@ -168,45 +168,70 @@ async def refresh_manifest(session: AsyncSession, v: DatasetVersion) -> None:
     v.manifest_hash = hashlib.sha256(lines.encode("utf-8")).hexdigest() if items else None
 
 
-async def upload_items(session: AsyncSession, cfg, ds: Dataset, version: int, files, *,
-                       prefix: str | None = None) -> list[dict]:
-    """Store uploaded files into a pending version. Each file's result is reported separately."""
+def too_large(cfg, key: str) -> ServiceError:
+    return ServiceError(413, "too_large", f"{key}: over {cfg.dataset_upload_max_mb} MB; "
+                                          "use a catalog integration for data this large")
+
+
+async def _check_new_key(session: AsyncSession, v: DatasetVersion, key: str) -> None:
+    if await session.scalar(select(DatasetItem.id).where(DatasetItem.version_id == v.id, DatasetItem.key == key)):
+        raise ServiceError(409, "key_exists", f"{key!r} is already in this version")
+
+
+async def writable_version(session: AsyncSession, ds: Dataset, version: int) -> DatasetVersion:
     v = await get_version(session, ds, version)
     if ds.status == "retired":
         raise ServiceError(409, "retired", "this dataset is retired")
     if v.status != "pending":
         raise ServiceError(409, "version_locked", "an approved version can't change; add a new version")
-    max_bytes = cfg.dataset_text_max_mb * 1024 * 1024
-    results = []
-    for f in files:
-        key = item_key(prefix, f.filename)
-        if await session.scalar(select(DatasetItem.id).where(DatasetItem.version_id == v.id,
-                                                             DatasetItem.key == key)):
-            raise ServiceError(409, "key_exists", f"{key!r} is already in this version")
-        try:
-            sha, size, head = await dataset_store.save_stream(cfg.data_dir, f, max_bytes)
-        except dataset_store.TooLarge:
-            raise ServiceError(413, "too_large", f"{key}: over {cfg.dataset_text_max_mb} MB. Large files "
-                               "arrive in a later release; use a catalog integration for big data.") from None
-        media_type = extract.sniff(head, f.filename or key)
-        if media_type in extract.TEXT_TIER:
-            tier = "text"
-            text, meta = extract.extract(dataset_store.read_bytes(cfg.data_dir, sha), media_type)
-        elif media_type in extract.DOCUMENT_TIER:
-            tier = "text"  # served as extracted text, like the text tier
-            text, meta = await extract.extract_document(str(dataset_store.path_for(cfg.data_dir, sha)), media_type)
-        else:
-            raise ServiceError(415, "unsupported_type",
-                               f"{key}: {media_type} isn't a supported format (txt, md, html, csv, tsv, json, "
-                               "jsonl, yaml, xml, pdf, docx, pptx, xlsx, epub). Other types arrive in later "
-                               "releases.")
-        session.add(DatasetItem(version_id=v.id, key=key, media_type=media_type, size_bytes=size, sha256=sha,
-                                tier=tier, text=text, meta=meta))
-        results.append({"key": key, "media_type": media_type, "size_bytes": size, "sha256": sha, "meta": meta})
+    return v
+
+
+async def add_item(session: AsyncSession, cfg, v: DatasetVersion, *, key: str, filename: str, sha: str,
+                   size: int, head: bytes) -> dict:
+    """Add a stored file to a version, choosing its tier (#237, #244, #245).
+
+    Text and document formats up to the text limit are extracted and served as
+    text. Anything else, or anything bigger, is tier ``large``: stored whole,
+    served as a file (``…/content``), no text.
+    """
+    media_type = extract.sniff(head, filename or key)
+    small = size <= cfg.dataset_text_max_mb * 1024 * 1024
+    text, meta, tier = None, {}, "large"
+    if small and media_type in extract.TEXT_TIER:
+        tier = "text"
+        text, meta = extract.extract(dataset_store.read_bytes(cfg.data_dir, sha), media_type)
+    elif small and media_type in extract.DOCUMENT_TIER:
+        tier = "text"  # served as extracted text, like the text tier
+        text, meta = await extract.extract_document(str(dataset_store.path_for(cfg.data_dir, sha)), media_type)
+    session.add(DatasetItem(version_id=v.id, key=key, media_type=media_type, size_bytes=size, sha256=sha,
+                            tier=tier, text=text, meta=meta))
+    return {"key": key, "media_type": media_type, "size_bytes": size, "sha256": sha, "tier": tier, "meta": meta}
+
+
+async def finish_items(session: AsyncSession, ds: Dataset, v: DatasetVersion) -> None:
     await session.flush()
     await refresh_manifest(session, v)
     ds.updated_at = _now()
     await session.flush()
+
+
+async def upload_items(session: AsyncSession, cfg, ds: Dataset, version: int, files, *,
+                       prefix: str | None = None) -> list[dict]:
+    """Store uploaded files into a pending version. Each file's result is reported separately."""
+    v = await writable_version(session, ds, version)
+    max_bytes = cfg.dataset_upload_max_mb * 1024 * 1024
+    results = []
+    for f in files:
+        key = item_key(prefix, f.filename)
+        await _check_new_key(session, v, key)
+        try:
+            sha, size, head = await dataset_store.save_stream(cfg.data_dir, f, max_bytes)
+        except dataset_store.TooLarge:
+            raise too_large(cfg, key) from None
+        results.append(await add_item(session, cfg, v, key=key, filename=f.filename or key,
+                                      sha=sha, size=size, head=head))
+    await finish_items(session, ds, v)
     return results
 
 
@@ -324,6 +349,28 @@ def parse_cycle(cycle: str | None) -> uuid.UUID | None:
         return uuid.UUID(str(cycle))
     except ValueError:
         raise ServiceError(422, "bad_cycle", "cycle must be a UUID") from None
+
+
+async def item_content(session: AsyncSession, cfg, *, member_id, dataset_id, key: str,
+                       version: int | None = None, cycle: str | None = None,
+                       range_start: int | None = None) -> tuple[str, DatasetItem]:
+    """The stored file behind an item (#245), for a range-capable response.
+
+    The read is logged for a whole-file request or a range starting at byte 0,
+    so a client fetching many ranges is one read (deduplicated per cycle too).
+    """
+    cyc = parse_cycle(cycle)
+    ds = await _readable(session, dataset_id)
+    v = await _readable_version(session, ds, version)
+    item = await session.scalar(select(DatasetItem).where(DatasetItem.version_id == v.id, DatasetItem.key == key))
+    if item is None or not item.sha256:
+        raise ServiceError(404, "not_found", f"no stored file for {key!r} in version {v.version}")
+    path = dataset_store.path_for(cfg.data_dir, item.sha256)
+    if not path.exists():
+        raise ServiceError(404, "not_found", f"the file for {key!r} is missing from storage")
+    if not range_start:
+        await log_read(session, member_id=member_id, ds=ds, version=v.version, key=key, cycle=cyc)
+    return str(path), item
 
 
 async def read_item(session: AsyncSession, *, member_id, dataset_id, key: str, version: int | None = None,

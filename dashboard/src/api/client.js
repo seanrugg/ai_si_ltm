@@ -25,10 +25,12 @@ function query(params) {
   return s ? `?${s}` : "";
 }
 
-export async function api(path, { method = "GET", params, body } = {}) {
-  const headers = { Accept: "application/json" };
+export async function api(path, { method = "GET", params, body, headers: extra } = {}) {
+  const headers = { Accept: "application/json", ...(extra || {}) };
   if (method !== "GET") headers["X-LTMS-Admin"] = "1";
-  const form = typeof FormData !== "undefined" && body instanceof FormData;
+  // FormData (multipart) and Blob (raw bytes, e.g. an upload chunk) are sent as they are.
+  const form = (typeof FormData !== "undefined" && body instanceof FormData)
+    || (typeof Blob !== "undefined" && body instanceof Blob);
   if (body !== undefined && !form) headers["Content-Type"] = "application/json";
   const res = await fetch(`/api${path}${query(params)}`, {
     method,

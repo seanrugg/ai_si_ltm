@@ -175,6 +175,9 @@ class ServerConfig(BaseSettings):
     # Fleet datasets (#237): content-addressed files under <data_dir>/datasets.
     data_dir: str = "./data"
     dataset_text_max_mb: int = 25
+    # Largest file an upload may be (#245); above this, use a catalog integration.
+    # Env: LTMS_DATASET_UPLOAD_MAX_MB.
+    dataset_upload_max_mb: int = 500
 
     # Optional offline city database for network location estimates (#191).
     # Unset (the default) means no network estimates. Env: LTMS_GEOIP_DB.

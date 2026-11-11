@@ -106,3 +106,20 @@ class DatasetRead(Base):
     cycle: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="served")
     ts: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utcnow)
+
+
+class DatasetUpload(Base):
+    """A resumable upload in progress (#245). The bytes so far are in
+    ``<data_dir>/datasets/uploads/<id>.part``; unfinished ones expire after 24 h."""
+    __tablename__ = "dataset_uploads"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    version_id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"), ForeignKey("dataset_versions.id"), nullable=False)
+    key: Mapped[str] = mapped_column(String(200), nullable=False)
+    filename: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    received_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utcnow)
