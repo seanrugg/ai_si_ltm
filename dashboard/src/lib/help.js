@@ -18,3 +18,9 @@ export const RECORD_DELETE =
 export const MEMORY_WIPE =
   "Gives the droid a clean slate: it stops recalling anything from before now, from any member. Nothing is deleted, policies still apply, and it can't be undone.";
 export const WIPE_VS_DELETE = "Wipe changes what a droid remembers; delete removes records from the log.";
+export const ADD_SWARM =
+  "Creates the swarm and its root key pair in your browser. The public key goes to LTMS; the private key is shown once, next.";
+export const ROOT_PRIVATE_KEY =
+  "The private root key signs hub appointments for this swarm. It never leaves this page. LTMS can't recover it, and anyone who has it can appoint a hub.";
+export const ROOT_PUBLIC_KEY =
+  "LTMS keeps only the public key. It checks every hub appointment against it. The swarm's ID is a hash of this public key.";
