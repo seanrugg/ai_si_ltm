@@ -41,6 +41,14 @@ DELETE /api/admin/locations/member/<name>
 `lat` and `lon` are optional (give both or neither). Changes are audited
 (`location_change`).
 
+The LTMS server's own location is a declared member entry named
+`ltms-server` (no member needs that name): the dashboard's globe draws it as
+the site every member's data flows to.
+
+```
+PUT /api/admin/locations/member/ltms-server   {"label": "<server room>", "lat": <lat>, "lon": <lon>}
+```
+
 ### Network estimate (optional)
 
 LTMS estimates a city only when **both** are true:

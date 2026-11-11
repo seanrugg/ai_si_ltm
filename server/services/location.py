@@ -28,6 +28,9 @@ from server.services.errors import ServiceError
 log = logging.getLogger("ltms.location")
 
 GPS_SCAN = 200          # newest sensed records looked at per member for a GPS fix
+# The LTMS server's own location: a declared "member" entry with this name,
+# which needs no member row (the globe draws the server as a site, #195).
+SERVER_NAME = "ltms-server"
 DEFAULT_ACCURACY_KM = 50
 
 
@@ -65,6 +68,8 @@ def _declared_dict(d: DeclaredLocation | None) -> dict | None:
 async def _subject_exists(session: AsyncSession, subject_type: str, name: str) -> None:
     if subject_type not in LOCATION_SUBJECTS:
         raise ServiceError(404, "not_found", "locations are for a member or a swarm")
+    if subject_type == "member" and name == SERVER_NAME:
+        return
     model = Member if subject_type == "member" else Swarm
     if await session.scalar(select(model.id).where(model.name == name)) is None:
         raise ServiceError(404, "not_found", f"no {subject_type} {name!r}")
@@ -215,4 +220,6 @@ async def describe(session: AsyncSession, cfg, *, swarm: str | None = None, memb
                     entries.append(_entry("network", hit.get("label"), None, hit.get("lat"), hit.get("lon"),
                                           hit.get("accuracy_km") or DEFAULT_ACCURACY_KM))
         out.append({"name": m.name, "best": entries[0] if entries else None, "all": entries})
-    return {"members": out}
+    server = declared.get(("member", SERVER_NAME))
+    return {"members": out,
+            "server": _entry("declared", server.label, server.room, server.lat, server.lon) if server else None}

@@ -102,3 +102,11 @@ def test_validation_audit_and_admin_only(mesh, admin, http, db_exec):
     assert http.get("/api/admin/locations", headers={"x-ltms-admin": "1"}).status_code == 401
     assert http.put("/api/admin/locations/member/z3-r0", json={"label": "x"},
                     headers={"x-ltms-admin": "1"}).status_code == 401
+
+
+def test_the_server_location_needs_no_member_row(mesh, admin):
+    assert admin.get("/api/admin/locations").json()["server"] is None
+    r = admin.put("/api/admin/locations/member/ltms-server", json={"label": "Rack room", "lat": 1, "lon": 2})
+    assert r.status_code == 200, r.text
+    server = admin.get("/api/admin/locations").json()["server"]
+    assert (server["source"], server["label"], server["lat"]) == ("declared", "Rack room", 1.0)
