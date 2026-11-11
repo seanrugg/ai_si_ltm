@@ -263,6 +263,18 @@ async def summary(session: AsyncSession, subject: Subject, hours: int) -> dict:
         ranked = sorted(per_peer.items(), key=lambda kv: (-sum(kv[1].values()), kv[0]))[:TOP_PEERS]
         peers = [{"name": name, **cats} for name, cats in ranked]
 
+    # Most active members (swarm subject only): the top authors, by category (#192).
+    members = []
+    if subject.type == "swarm":
+        per_member: dict[str, dict] = defaultdict(_zero)
+        for agent, rtype, n in (await session.execute(
+                select(Record.agent, Record.type, func.count()).where(where)
+                .group_by(Record.agent, Record.type))).all():
+            if CATEGORY_OF.get(rtype):
+                per_member[agent][CATEGORY_OF[rtype]] += n
+        ranked = sorted(per_member.items(), key=lambda kv: (-sum(kv[1].values()), kv[0]))[:TOP_PEERS]
+        members = [{"name": name, **cats} for name, cats in ranked]
+
     lessons = [
         {"agent": r.agent, "seq": r.seq, "summary": r.summary, "ts": r.ts.isoformat()}
         for r in await session.scalars(
@@ -280,6 +292,7 @@ async def summary(session: AsyncSession, subject: Subject, hours: int) -> dict:
         "outcomes": outcomes,
         "flow": flow,
         "peers": peers,
+        "members": members,
         "lessons": lessons,
     }
 

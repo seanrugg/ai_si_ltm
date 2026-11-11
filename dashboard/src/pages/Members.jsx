@@ -337,7 +337,11 @@ function MemberRow({ m, swarm, swarms, onDone }) {
   return (
     <li className="border-b border-ink-line px-4 py-3 last:border-b-0">
       <div className="grid grid-cols-1 items-baseline gap-2 md:grid-cols-[12rem_6rem_1fr_7rem_auto]">
-        <Link to={`/?agent=${encodeURIComponent(m.name)}`} className="font-bold hover:underline">{m.name}</Link>
+        <span className="flex items-baseline gap-2">
+          <Link to={`/?agent=${encodeURIComponent(m.name)}`} className="font-bold hover:underline">{m.name}</Link>
+          <Link to={`/members/${encodeURIComponent(m.name)}/profile`} className="text-xs text-paper-muted underline hover:text-paper"
+                aria-label={`Profile of ${m.name}`}>Profile</Link>
+        </span>
         <span><StatusBadge status={m.status} /></span>
         <span className="text-sm text-paper-muted">
           {m.kind}, {m.permissions.join(", ") || "no permissions"}
