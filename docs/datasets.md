@@ -131,3 +131,33 @@ the read, which reaches the LRS as `read-resource`. The token exchange and
 when a flush is refused with `charter_unread`. Set
 `client.auto_read_charter = False` to handle it yourself (`read_charter()`).
 The `hash` is the SHA-256 of the published markdown.
+
+## Example: the I2IDL glossary
+
+The I2IDL Glossary of Digital Learning publishes its whole concept scheme as
+JSON-LD (`https://id.i2idl.org/glossary.jsonld`). It's open by design:
+I2IDL-original material is CC BY 4.0, and each definition keeps the rights of
+the sources it draws on. To make it fleet reference material:
+
+```bash
+LTMS_ADMIN_USERNAME=<admin> LTMS_ADMIN_PASSWORD=<password> \
+  python -m scripts.import_glossary --server https://<your-ltms>
+# on a closed network, from a saved copy:
+python -m scripts.import_glossary --server https://<your-ltms> --from-file glossary.jsonld
+```
+
+This creates the dataset `i2idl-glossary` (kind `url`, with the glossary's
+rights statement as its licence) and puts one version per glossary
+publication in it:
+- one JSON item per concept, `concepts/<id>.json`, with
+  `{id, uri, term, aka, definition, why, field, type, references, relationships, rights, attribution}`.
+  Each reference carries its source's rights.
+- a `publication/<version>.json` record.
+
+Re-running for a publication already imported changes nothing. The version
+waits for an admin's approval like any other. After that, members search it
+by term or definition, and lessons cite a concept like any item:
+`{"dataset": "<id>", "version": 1, "item": "concepts/learning-record.json"}`.
+
+For live lookups instead of a copy, register the glossary's MCP server as an
+`mcp` catalog integration.
