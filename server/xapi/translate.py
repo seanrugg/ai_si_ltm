@@ -81,8 +81,25 @@ def _activity(base: str, path: str, type_iri: str, name: str | None = None) -> d
     return activity
 
 
+def because_key(refs) -> str | None:
+    """The single ``"agent:seq"`` cause in ``refs["because"]``, or None.
+
+    A cause is linked with a StatementRef only when there is exactly one
+    (a string or a one-item list); several causes stay in ``holocron/refs``.
+    """
+    if not isinstance(refs, dict):
+        return None
+    because = refs.get("because")
+    if isinstance(because, list) and len(because) == 1:
+        because = because[0]
+    if isinstance(because, str) and ":" in because:
+        return because
+    return None
+
+
 def record_to_statement(
-    rec: dict, *, base: str, xapi_version: str = "2.0.0", payload: dict | None = None
+    rec: dict, *, base: str, xapi_version: str = "2.0.0", payload: dict | None = None,
+    ref_hashes: dict[str, str] | None = None,
 ) -> dict:
     if xapi_version not in VALID_XAPI_VERSIONS:
         raise ValueError(f"unsupported xAPI version: {xapi_version!r}")
@@ -137,6 +154,15 @@ def record_to_statement(
     context: dict = {"contextActivities": {"category": category}}
     if grouping:
         context["contextActivities"]["grouping"] = grouping
+
+    # Cause and effect (issue #180): a single "because" becomes the standard
+    # xAPI link to the cause's statement, whose id derives from its hash.
+    key = because_key(rec.get("refs"))
+    if key is not None and ref_hashes and key in ref_hashes:
+        context["statement"] = {
+            "objectType": "StatementRef",
+            "id": str(uuid.uuid5(NAMESPACE, ref_hashes[key])),
+        }
 
     context_agents: list[dict] = []
     if xapi_version == "2.0.0":

@@ -7,18 +7,19 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import uuid
 
 import httpx
 import pytest
 from cryptography.fernet import Fernet
-from sqlalchemy import delete, select
+from sqlalchemy import delete, event, select
 
 from ltms_contract.canonical import canonicalize
 from server.config import load_config
 from server.models import AuditLog, LrsEndpoint, Record, RecordPayload
 from server.services import lrs as lrs_service
 from server.tests.conftest import ADMIN_PASS, ADMIN_USER
-from server.xapi.translate import EXT
+from server.xapi.translate import EXT, NAMESPACE
 
 
 @pytest.fixture
@@ -400,3 +401,66 @@ def test_every_payload_and_the_signed_header_are_sent(admin, mesh, http, app, db
         assert json.loads(header)["payload_hash"] == e[EXT + "holocron/payload-hash"]
     for e in ext[:2]:
         assert hashlib.sha256(canonicalize(e[EXT + "holocron/payload"])).hexdigest() == e[EXT + "holocron/payload-hash"]
+
+
+# --- cause and effect: StatementRef (issue #180) ---
+
+def _statement_ref(st):
+    return (st["context"].get("statement") or {}).get("id")
+
+
+def test_a_decision_links_to_the_perception_that_caused_it(admin, mesh, http, app, db_exec):
+    app.state.config.lrs_max_batches_per_run = 20
+    _endpoint(admin, "lrs-all", scope={"types": ["perception", "decision"]})
+    z3 = mesh.member("z3-r0")
+    seen = z3.append("perception", summary="wall ahead", payload={"distance_m": 0.3})
+    z3.append("decision", summary="stop", payload={"choice": "stop"},
+              refs={"because": f"z3-r0:{seen['seq']}"})
+    z3.flush()
+
+    sent = []
+    assert _forward(app, http, lambda req: sent.extend(json.loads(req.content)) or httpx.Response(200)) == {"forwarded": 2}
+    perception, decision = sent
+    assert _statement_ref(decision) == perception["id"]
+    assert decision["context"]["statement"]["objectType"] == "StatementRef"
+    assert decision["context"]["extensions"][EXT + "holocron/refs"] == {"because": f"z3-r0:{seen['seq']}"}
+    assert "statement" not in perception["context"]
+
+
+def test_a_deleted_cause_still_resolves_through_its_tombstone(admin, mesh, http, app, db_exec):
+    _endpoint(admin, "lrs-dec", scope={"types": ["decision"]})
+    z3 = mesh.member("z3-r0")
+    seen = z3.append("perception", summary="wall ahead", payload={"distance_m": 0.3})
+    z3.append("decision", summary="stop", refs={"because": f"z3-r0:{seen['seq']}"})
+    z3.flush()
+    r = admin.request("DELETE", f"/api/admin/records/z3-r0/{seen['seq']}", json={"reason": "test"})
+    assert r.status_code == 200, r.text
+
+    sent = []
+    _forward(app, http, lambda req: sent.extend(json.loads(req.content)) or httpx.Response(200))
+    assert len(sent) == 1
+    assert _statement_ref(sent[0]) == str(uuid.uuid5(NAMESPACE, seen["hash"]))
+
+
+def test_causes_are_looked_up_once_per_batch(admin, mesh, http, app, db_exec):
+    app.state.config.lrs_batch_size = 50
+    _endpoint(admin, "lrs-dec", scope={"types": ["decision"]})
+    z3 = mesh.member("z3-r0")
+    causes = [z3.append("perception", summary=f"p{i}") for i in range(50)]
+    for c in causes:
+        z3.append("decision", summary="d", refs={"because": f"z3-r0:{c['seq']}"})
+    z3.flush()
+
+    lookups = []
+    def count(conn, cursor, statement, params, context, executemany):
+        if "record_tombstones" in statement and "UNION" in statement.upper():
+            lookups.append(statement)
+    engine = app.state.engine.sync_engine
+    event.listen(engine, "before_cursor_execute", count)
+    try:
+        sent = []
+        assert _forward(app, http, lambda req: sent.extend(json.loads(req.content)) or httpx.Response(200)) == {"forwarded": 50}
+    finally:
+        event.remove(engine, "before_cursor_execute", count)
+    assert len(lookups) == 1
+    assert [_statement_ref(s) for s in sent] == [str(uuid.uuid5(NAMESPACE, c["hash"])) for c in causes]

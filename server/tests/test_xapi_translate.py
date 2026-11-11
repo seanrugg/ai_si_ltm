@@ -222,3 +222,42 @@ def test_header_raw_is_passed_through_as_the_exact_string():
     raw = '{"agent":"robot-1","seq":1}'
     st = record_to_statement(_base_rec(type="thought", header_raw=raw), base="https://x.example", payload={})
     assert st["context"]["extensions"][E + "holocron/header"] == raw
+
+
+# --- cause and effect: StatementRef (issue #180) ---
+
+PERCEPTION = {**BASE_CASE["record"], "type": "perception", "seq": 41, "hash": "a" * 64, "refs": None}
+
+
+def _decision(refs, ref_hashes):
+    rec = _base_rec(type="decision", seq=42, hash="b" * 64, refs=refs)
+    return record_to_statement(rec, base="https://x.example", payload={"x": 1}, ref_hashes=ref_hashes)
+
+
+def test_because_links_to_the_cause_statement():
+    cause = record_to_statement(PERCEPTION, base="https://x.example", payload={"x": 1})
+    for refs in ({"because": "robot-1:41"}, {"because": ["robot-1:41"]}):
+        st = _decision(refs, {"robot-1:41": "a" * 64})
+        assert st["context"]["statement"] == {"objectType": "StatementRef", "id": cause["id"]}
+        assert st["context"]["extensions"][E + "holocron/refs"] == refs
+
+
+def test_unknown_or_several_causes_get_no_statementref():
+    hashes = {"robot-1:41": "a" * 64, "robot-1:40": "c" * 64}
+    for refs in (
+        {"because": "robot-1:99"},                    # not resolved
+        {"because": ["robot-1:41", "robot-1:40"]},    # several causes
+        {"derived_from": "robot-1:41"},               # not a cause
+        {"because": 41},                              # not "agent:seq"
+    ):
+        st = _decision(refs, hashes)
+        assert "statement" not in st["context"], refs
+        assert st["context"]["extensions"][E + "holocron/refs"] == refs
+    assert "statement" not in _decision({"because": "robot-1:41"}, None)["context"]
+
+
+def test_statementref_does_not_change_the_statement_id():
+    with_ref = _decision({"because": "robot-1:41"}, {"robot-1:41": "a" * 64})
+    without = _decision({"because": "robot-1:41"}, None)
+    assert with_ref["id"] == without["id"] == str(uuid.uuid5(uuid.UUID(
+        "19413c7a-d33c-5129-b99b-07d709cef285"), "b" * 64))
