@@ -1,20 +1,26 @@
 /** Design tokens. Ink-blue night console with amber "status LED" accent:
  *  the dashboard is the window into a house full of small robots. */
+const v = (name) => `rgb(var(--c-${name}) / <alpha-value>)`;
+
 export default {
   content: ["./index.html", "./src/**/*.{js,jsx}"],
   theme: {
     extend: {
+      // Colors are CSS variables (src/index.css) so themes can swap them (#198).
+      // Classic's values are the defaults; role, kind and category colors
+      // (lib/visual.js) never change with the theme.
       colors: {
-        ink: { DEFAULT: "#0F1828", raised: "#162236", line: "#26344F", hover: "#1C2A42" },
-        paper: { DEFAULT: "#E7EAF0", muted: "#93A0B8", faint: "#5E6B85" },
-        led: { DEFAULT: "#F2B544", dim: "#8A6A2B" },
-        ok: "#5BC28A",
-        warn: "#E8A23A",
-        bad: "#F0605D",
+        ink: { DEFAULT: v("ink"), raised: v("ink-raised"), line: v("ink-line"), hover: v("ink-hover") },
+        paper: { DEFAULT: v("paper"), muted: v("paper-muted"), faint: v("paper-faint") },
+        led: { DEFAULT: v("led"), dim: v("led-dim") },
+        ok: v("ok"),
+        warn: v("warn"),
+        bad: v("bad"),
       },
       fontFamily: {
-        sans: ['"Atkinson Hyperlegible"', "system-ui", "sans-serif"],
-        mono: ['"JetBrains Mono"', "ui-monospace", "monospace"],
+        sans: ["var(--font-sans)", "system-ui", "sans-serif"],
+        mono: ["var(--font-mono)", "ui-monospace", "monospace"],
+        display: ["var(--font-display)", "system-ui", "sans-serif"],
       },
       fontSize: {
         xs: ["0.78rem", { lineHeight: "1.15rem" }],

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useAdmin } from "../App.jsx";
 import { useApi } from "../api/useApi.js";
+import { THEMES, getTheme, setTheme } from "../lib/theme.js";
 
 const NAV = [
   { to: "/activity", label: "Activity" },
@@ -48,6 +49,18 @@ function Nav({ pending, onPick }) {
   );
 }
 
+function ThemeSelect() {
+  const [theme, setCurrent] = useState(getTheme);
+  return (
+    <label className="flex items-center gap-2">
+      Theme
+      <select className="field py-1" value={theme} onChange={(e) => setCurrent(setTheme(e.target.value))}>
+        {THEMES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+      </select>
+    </label>
+  );
+}
+
 export default function Shell({ children }) {
   const { username, logout } = useAdmin();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -69,7 +82,8 @@ export default function Shell({ children }) {
         <div className={`${menuOpen ? "block" : "hidden"} px-2 pb-4 md:block`}>
           <Nav pending={pending} onPick={() => setMenuOpen(false)} />
           <div className="mt-6 border-t border-ink-line px-3 pt-4 text-sm text-paper-muted">
-            <p>Signed in as {username}</p>
+            <ThemeSelect />
+            <p className="mt-3">Signed in as {username}</p>
             <button className="mt-2 underline hover:text-paper" onClick={logout}>
               Sign out
             </button>
