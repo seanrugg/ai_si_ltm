@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import HelpTip from "../components/HelpTip.jsx";
+import LocationForm from "../components/LocationForm.jsx";
 import { SWARM_ROLE, MEMORY_WIPE, WIPE_VS_DELETE } from "../lib/help.js";
 import { Link } from "react-router-dom";
 import { api } from "../api/client.js";
@@ -298,7 +299,7 @@ function RoleControl({ swarm, member, busy, act }) {
   );
 }
 
-function SwarmCard({ swarm, swarms, allMembers, onReload }) {
+function SwarmCard({ swarm, swarms, allMembers, location, onReload }) {
   const members = swarm.members || [];
   const revoked = swarm.status === "revoked";
   // allMembers is already filtered to active, so this counts who the wipe would reach.
@@ -373,6 +374,8 @@ function SwarmCard({ swarm, swarms, allMembers, onReload }) {
               className="ml-3 text-sm font-normal text-paper-muted underline hover:text-paper"
               aria-label={`Profile of ${swarm.name}`}>Profile</Link>
       </h2>
+      <LocationForm key={JSON.stringify(location)} subjectType="swarm" name={swarm.name} current={location}
+                    title="Home location" onDone={onReload} />
       <p className="mb-3 text-xs text-paper-muted">
         <StatusBadge status={swarm.status} /> {swarm.home && <span className="ml-2">home swarm</span>}
         {swarm.description && <span className="ml-2">— {swarm.description}</span>}
@@ -492,6 +495,7 @@ function SwarmCard({ swarm, swarms, allMembers, onReload }) {
 
 export default function Swarms() {
   const { data, error, loading, reload } = useApi("/admin/swarms");
+  const locations = useApi("/admin/locations");
   const { data: membersData } = useApi("/admin/members");
   const swarms = data || [];
   const allMembers = (membersData?.members || []).filter((m) => m.status === "active");
@@ -511,7 +515,9 @@ export default function Swarms() {
       )}
       <CreateSwarm onCreated={reload} />
       <ul className="panel" aria-label="Swarms">
-        {swarms.map((s) => <SwarmCard key={s.id} swarm={s} swarms={swarms} allMembers={allMembers} onReload={reload} />)}
+        {swarms.map((s) => <SwarmCard key={s.id} swarm={s} swarms={swarms} allMembers={allMembers}
+                                     location={locations.data?.swarms?.[s.name] ?? null}
+                                     onReload={() => { reload(); locations.reload(); }} />)}
       </ul>
     </>
   );

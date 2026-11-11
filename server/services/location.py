@@ -221,5 +221,8 @@ async def describe(session: AsyncSession, cfg, *, swarm: str | None = None, memb
                                           hit.get("accuracy_km") or DEFAULT_ACCURACY_KM))
         out.append({"name": m.name, "best": entries[0] if entries else None, "all": entries})
     server = declared.get(("member", SERVER_NAME))
-    return {"members": out,
+    # Declared swarm locations, for the dashboard's location forms (#228).
+    swarms = {name: _entry("declared", d.label, d.room, d.lat, d.lon)
+              for (kind, name), d in sorted(declared.items()) if kind == "swarm"}
+    return {"members": out, "swarms": swarms,
             "server": _entry("declared", server.label, server.room, server.lat, server.lon) if server else None}
