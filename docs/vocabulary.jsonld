@@ -126,16 +126,6 @@
       ]
     },
     {
-      "@id": "https://w3id.org/xapi-ai/ltms/telemetry-window",
-      "@type": "skos:Concept",
-      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
-      "prefLabel": "Telemetry window",
-      "definition": "A perception record tagged telemetry that summarizes a window of samples.",
-      "closeMatch": [
-        "https://id.i2idl.org/concepts/streaming-learning-data"
-      ]
-    },
-    {
       "@id": "https://w3id.org/xapi-ai/ltms/lrs-forwarder",
       "@type": "skos:Concept",
       "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
@@ -186,14 +176,22 @@
       ]
     },
     {
+      "@id": "https://w3id.org/xapi-ai/ltms/sensed",
+      "@type": "skos:Concept",
+      "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
+      "prefLabel": "Sensed record",
+      "definition": "A perception record tagged telemetry: data from one of the member's sensors.",
+      "relatedMatch": [
+        "https://id.i2idl.org/concepts/sensor",
+        "https://id.i2idl.org/concepts/streaming-learning-data"
+      ]
+    },
+    {
       "@id": "https://w3id.org/xapi-ai/ltms/perception",
       "@type": "skos:Concept",
       "inScheme": "https://w3id.org/xapi-ai/ltms/vocabulary",
       "prefLabel": "Perception record",
-      "definition": "Record type: something the member sensed.",
-      "broadMatch": [
-        "https://id.i2idl.org/concepts/sensor"
-      ]
+      "definition": "Record type: an interpretation of what the member sensed, about the world or its own state."
     },
     {
       "@id": "https://w3id.org/xapi-ai/ltms/thought",

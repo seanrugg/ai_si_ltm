@@ -85,16 +85,28 @@ def test_perception_without_telemetry_has_no_result():
         "hash": "0" * 64,
         "summary": "Obstacle 12 cm ahead",
     }
+    payload = {"kind": "pose", "samples": []}
     stmt = record_to_statement(
-        rec, payload={"kind": "pose", "samples": []}, base="https://ltms.example.org"
+        rec, payload=payload, base="https://ltms.example.org"
     )
     assert "result" not in stmt
+    # An untagged perception is an interpretation: "perceived", payload in
+    # holocron/payload, no sensor concept (issue #179).
+    assert stmt["verb"]["id"] == "https://w3id.org/xapi-ai/verbs/perceived"
+    assert stmt["context"]["extensions"]["https://w3id.org/xapi-ai/extensions/holocron/payload"] == payload
+    categories = [c["id"] for c in stmt["context"]["contextActivities"]["category"]]
+    assert GLOSSARY + "sensor" not in categories
+    assert GLOSSARY + "learning-record" in categories
 
 
-def test_namespace_matches_profile_iri():
-    import uuid
+def test_namespace_is_fixed_for_mapping_version_1():
+    # Derived from the 0.10.0 IRI and fixed for mapping version 1, so
+    # statement ids are unchanged even after PROFILE_VERSION moved to 0.10.1
+    # (issue #179).
     from server.xapi import translate
-    assert translate.NAMESPACE == uuid.uuid5(uuid.NAMESPACE_URL, translate.PROFILE_VERSION + "/holocron-mapping/1")
+    assert translate.NAMESPACE == uuid.uuid5(
+        uuid.NAMESPACE_URL, "https://w3id.org/xapi-ai/profile/0.10.0/holocron-mapping/1"
+    )
 
 
 def test_place_with_spaces_is_percent_encoded():
@@ -123,6 +135,8 @@ def test_category_has_profile_then_learning_record_then_type_concept():
     decision = _stmt(type="decision")["context"]["contextActivities"]["category"]
     assert [c["id"] for c in decision][1:] == [GLOSSARY + "learning-record"]
     assert len(decision) == 2
+    # The profile IRI is the AIAAP version the mapping targets (issue #179).
+    assert decision[0]["id"] == "https://w3id.org/xapi-ai/profile/0.10.1"
     lesson = _stmt(type="lesson")["context"]["contextActivities"]["category"]
     assert len(lesson) == 3
     assert lesson[2]["id"] == GLOSSARY + "experiential-learning"
@@ -180,11 +194,16 @@ def test_telemetry_over_16kb_is_sent_whole():
     assert E + "holocron/payload" not in st["context"]["extensions"]
 
 
-def test_telemetry_of_unknown_kind_goes_to_holocron_payload():
-    p = {"kind": "lidar-raw", "points": 3}
+def test_telemetry_of_any_kind_goes_to_the_telemetry_extension():
+    # Any sensor's data translates, whatever its kind (issue #179); v may be
+    # a list.
+    p = {"kind": "thermal-array", "sensor": "ir-blanket", "unit": "K",
+         "samples": [{"t": 0.0, "v": [310.2, 309.8]}, {"t": 0.1, "v": [311.5, 310.1]}]}
     st = record_to_statement(_base_rec(type="perception", tags=["telemetry"]), base="https://x.example", payload=p)
-    assert st["context"]["extensions"][E + "holocron/payload"] == p
-    assert "result" not in st
+    assert st["result"]["extensions"][E + "telemetry"] == p
+    assert E + "holocron/payload" not in st["context"]["extensions"]
+    assert st["verb"]["id"] == "https://w3id.org/xapi-ai/verbs/sensed"
+    assert GLOSSARY + "sensor" in [c["id"] for c in st["context"]["contextActivities"]["category"]]
 
 
 def test_missing_payload_is_marked_purged():

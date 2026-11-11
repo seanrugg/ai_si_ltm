@@ -59,7 +59,7 @@
      "category": [
       {
        "objectType": "Activity",
-       "id": "https://w3id.org/xapi-ai/profile/0.10.0",
+       "id": "https://w3id.org/xapi-ai/profile/0.10.1",
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
@@ -95,22 +95,6 @@
       }
      ]
     },
-    "extensions": {
-     "https://w3id.org/xapi-ai/extensions/holocron/seq": 42,
-     "https://w3id.org/xapi-ai/extensions/holocron/hash": "1111111111111111111111111111111111111111111111111111111111111111",
-     "https://w3id.org/xapi-ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-     "https://w3id.org/xapi-ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-     "https://w3id.org/xapi-ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-     "https://w3id.org/xapi-ai/extensions/holocron/record-type": "action",
-     "https://w3id.org/xapi-ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
-     "https://w3id.org/xapi-ai/extensions/holocron/mapping-version": "1",
-     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot",
-     "https://w3id.org/xapi-ai/extensions/holocron/refs": {
-      "because": "robot-1:41"
-     },
-     "https://w3id.org/xapi-ai/extensions/software": "z3 0.4.1",
-     "https://w3id.org/xapi-ai/extensions/holocron/payload-purged": true
-    },
     "contextAgents": [
      {
       "objectType": "contextAgent",
@@ -141,7 +125,23 @@
        "https://w3id.org/xapi-ai/activity-type/swarm"
       ]
      }
-    ]
+    ],
+    "extensions": {
+     "https://w3id.org/xapi-ai/extensions/holocron/seq": 42,
+     "https://w3id.org/xapi-ai/extensions/holocron/hash": "1111111111111111111111111111111111111111111111111111111111111111",
+     "https://w3id.org/xapi-ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "https://w3id.org/xapi-ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "https://w3id.org/xapi-ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "https://w3id.org/xapi-ai/extensions/holocron/record-type": "action",
+     "https://w3id.org/xapi-ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
+     "https://w3id.org/xapi-ai/extensions/holocron/mapping-version": "1",
+     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot",
+     "https://w3id.org/xapi-ai/extensions/holocron/refs": {
+      "because": "robot-1:41"
+     },
+     "https://w3id.org/xapi-ai/extensions/software": "z3 0.4.1",
+     "https://w3id.org/xapi-ai/extensions/holocron/payload-purged": true
+    }
    },
    "result": {
     "success": true,
@@ -200,7 +200,7 @@
      "category": [
       {
        "objectType": "Activity",
-       "id": "https://w3id.org/xapi-ai/profile/0.10.0",
+       "id": "https://w3id.org/xapi-ai/profile/0.10.1",
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
@@ -293,7 +293,7 @@
      "category": [
       {
        "objectType": "Activity",
-       "id": "https://w3id.org/xapi-ai/profile/0.10.0",
+       "id": "https://w3id.org/xapi-ai/profile/0.10.1",
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
@@ -325,18 +325,6 @@
        }
       }
      ]
-    },
-    "extensions": {
-     "https://w3id.org/xapi-ai/extensions/holocron/seq": 44,
-     "https://w3id.org/xapi-ai/extensions/holocron/hash": "3333333333333333333333333333333333333333333333333333333333333333",
-     "https://w3id.org/xapi-ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-     "https://w3id.org/xapi-ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-     "https://w3id.org/xapi-ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-     "https://w3id.org/xapi-ai/extensions/holocron/record-type": "communication",
-     "https://w3id.org/xapi-ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
-     "https://w3id.org/xapi-ai/extensions/holocron/mapping-version": "1",
-     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot",
-     "https://w3id.org/xapi-ai/extensions/holocron/payload-purged": true
     },
     "contextAgents": [
      {
@@ -394,7 +382,19 @@
        "https://w3id.org/xapi-ai/activity-type/swarm"
       ]
      }
-    ]
+    ],
+    "extensions": {
+     "https://w3id.org/xapi-ai/extensions/holocron/seq": 44,
+     "https://w3id.org/xapi-ai/extensions/holocron/hash": "3333333333333333333333333333333333333333333333333333333333333333",
+     "https://w3id.org/xapi-ai/extensions/holocron/prev-hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "https://w3id.org/xapi-ai/extensions/holocron/payload-hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "https://w3id.org/xapi-ai/extensions/holocron/signature": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "https://w3id.org/xapi-ai/extensions/holocron/record-type": "communication",
+     "https://w3id.org/xapi-ai/extensions/holocron/received-at": "2026-10-31T14:02:11.412000+00:00",
+     "https://w3id.org/xapi-ai/extensions/holocron/mapping-version": "1",
+     "https://w3id.org/xapi-ai/extensions/agent-kind": "robot",
+     "https://w3id.org/xapi-ai/extensions/holocron/payload-purged": true
+    }
    }
   }
  },
@@ -456,7 +456,7 @@
      "category": [
       {
        "objectType": "Activity",
-       "id": "https://w3id.org/xapi-ai/profile/0.10.0",
+       "id": "https://w3id.org/xapi-ai/profile/0.10.1",
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
@@ -554,9 +554,9 @@
     }
    },
    "verb": {
-    "id": "https://w3id.org/xapi-ai/verbs/perceived",
+    "id": "https://w3id.org/xapi-ai/verbs/sensed",
     "display": {
-     "en": "perceived"
+     "en": "sensed"
     }
    },
    "object": {
@@ -576,7 +576,7 @@
      "category": [
       {
        "objectType": "Activity",
-       "id": "https://w3id.org/xapi-ai/profile/0.10.0",
+       "id": "https://w3id.org/xapi-ai/profile/0.10.1",
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
@@ -675,9 +675,9 @@
     }
    },
    "verb": {
-    "id": "https://w3id.org/xapi-ai/verbs/perceived",
+    "id": "https://w3id.org/xapi-ai/verbs/sensed",
     "display": {
-     "en": "perceived"
+     "en": "sensed"
     }
    },
    "object": {
@@ -694,7 +694,7 @@
      "category": [
       {
        "objectType": "Activity",
-       "id": "https://w3id.org/xapi-ai/profile/0.10.0",
+       "id": "https://w3id.org/xapi-ai/profile/0.10.1",
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
@@ -727,8 +727,12 @@
      "https://w3id.org/xapi-ai/extensions/agent-kind": "robot",
      "https://w3id.org/xapi-ai/extensions/holocron/tags": [
       "telemetry"
-     ],
-     "https://w3id.org/xapi-ai/extensions/holocron/payload": {
+     ]
+    }
+   },
+   "result": {
+    "extensions": {
+     "https://w3id.org/xapi-ai/extensions/telemetry": {
       "kind": "lidar",
       "points": [
        1,
@@ -795,7 +799,7 @@
      "category": [
       {
        "objectType": "Activity",
-       "id": "https://w3id.org/xapi-ai/profile/0.10.0",
+       "id": "https://w3id.org/xapi-ai/profile/0.10.1",
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
@@ -803,13 +807,6 @@
       {
        "objectType": "Activity",
        "id": "https://id.i2idl.org/concepts/learning-record",
-       "definition": {
-        "type": "http://www.w3.org/2004/02/skos/core#Concept"
-       }
-      },
-      {
-       "objectType": "Activity",
-       "id": "https://id.i2idl.org/concepts/sensor",
        "definition": {
         "type": "http://www.w3.org/2004/02/skos/core#Concept"
        }
@@ -891,7 +888,7 @@
      "category": [
       {
        "objectType": "Activity",
-       "id": "https://w3id.org/xapi-ai/profile/0.10.0",
+       "id": "https://w3id.org/xapi-ai/profile/0.10.1",
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
@@ -984,7 +981,7 @@
      "category": [
       {
        "objectType": "Activity",
-       "id": "https://w3id.org/xapi-ai/profile/0.10.0",
+       "id": "https://w3id.org/xapi-ai/profile/0.10.1",
        "definition": {
         "type": "http://adlnet.gov/expapi/activities/profile"
        }
