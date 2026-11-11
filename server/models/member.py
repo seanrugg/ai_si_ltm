@@ -11,6 +11,7 @@ from server.models.base import Base, JSONType, UTCDateTime, utcnow
 
 MEMBER_KINDS = ("robot", "agent", "assistant", "relay")
 MEMBER_STATUSES = ("pending", "active", "revoked", "rejected")
+COGNITION_LOCATIONS = ("onboard", "offboard")
 # "relay": submit records written by other members of the same swarm, unchanged.
 # Granted together with the swarm's hub role (see server/services/swarms.py).
 PERMISSIONS = ("contribute", "recall", "recall:scoped", "policy", "relay")
@@ -21,6 +22,8 @@ class Member(Base):
     __table_args__ = (
         CheckConstraint(f"kind IN {MEMBER_KINDS}", name="ck_members_kind"),
         CheckConstraint(f"status IN {MEMBER_STATUSES}", name="ck_members_status"),
+        CheckConstraint(f"cognition_admin IS NULL OR cognition_admin IN {COGNITION_LOCATIONS}",
+                        name="ck_members_cognition_admin"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -49,4 +52,10 @@ class Member(Base):
     # generation counts wipes so a device can tell it was wiped.
     recall_floor_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
     memory_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # Where the member's AI runs (issue #185): a robot whose AI is off board is
+    # Hybrid. Three sources, resolved admin > observed > declared
+    # (server/services/cognition.py). `cognition_observed` is written by #199.
+    cognition_admin: Mapped[str | None] = mapped_column(String(16))
+    cognition_declared: Mapped[dict | None] = mapped_column(JSONType)
+    cognition_observed: Mapped[dict | None] = mapped_column(JSONType)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utcnow)

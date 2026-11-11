@@ -12,12 +12,16 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import json
+import logging
 import os
 
 import httpx
 from typing import Callable
 
 from ltms_contract import GENESIS_HASH, auth_signing_message, build_record, load_key, public_key_hex
+
+
+log = logging.getLogger(__name__)
 
 
 class LTMSError(Exception):
@@ -136,7 +140,20 @@ class LTMSClient:
         self._check_generation(head["memory_generation"])
         return head
 
-    # ------------------------------------------------------------------ write
+    def report_cognition(self, location: str, models: list[dict] | None = None) -> dict | None:
+        """Tell LTMS where this device's AI runs: "onboard" or "offboard" (#185).
+
+        ``models`` is up to four ``{"name", "runs_on"}``. Never raises: a robot
+        shouldn't stop because a report failed. Returns the resolved value, or None.
+        """
+        try:
+            return self._call("PUT", "/api/members/me/cognition",
+                              json={"location": location, "models": models or []})["cognition"]
+        except Exception as exc:  # noqa: BLE001 - reporting is best effort
+            log.warning("report_cognition failed: %s", exc)
+            return None
+
+        # ------------------------------------------------------------------ write
     def append(self, type: str, *, payload: dict | None = None, ts: str | None = None, **header) -> dict:
         """Sign the next record locally and queue it. Works offline."""
         prev_seq = self.outbox[-1]["seq"] if self.outbox else self.seq

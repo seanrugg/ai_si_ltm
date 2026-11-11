@@ -238,6 +238,57 @@ export function MembershipForm({ name, current, swarms, onDone }) {
   );
 }
 
+// Where a robot's AI runs (issue #185), with the source that decided it.
+export function cognitionText(c) {
+  if (!c || !c.value) return "Unknown";
+  const where = c.value === "offboard" ? "Off board" : "On board";
+  if (c.source === "admin") return `${where}, set by an admin`;
+  if (c.source === "declared") return `${where}, declared by device`;
+  if (c.source === "observed") {
+    return c.offboard_share == null
+      ? `${where}, observed`
+      : `${where}, observed: ${Math.round(c.offboard_share * 100)}% of decisions`;
+  }
+  return where;
+}
+
+export function CognitionControl({ m, onDone }) {
+  const current = m.cognition?.source === "admin" ? m.cognition.value : "";
+  const [value, setValue] = useState(current);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const id = `cognition-${m.id}`;
+
+  async function apply(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/admin/members/${m.id}/cognition`, { method: "PATCH", body: { cognition: value || null } });
+      onDone();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={apply} className="mt-2 flex flex-wrap items-center gap-2 text-sm"
+          aria-label={`AI location for ${m.name}`}>
+      <span className="text-paper-muted">AI location: <span className="text-paper">{cognitionText(m.cognition)}</span></span>
+      <label htmlFor={id} className="sr-only">AI location override for {m.name}</label>
+      <select id={id} className="field" value={value} onChange={(e) => setValue(e.target.value)}>
+        <option value="">No override</option>
+        <option value="onboard">On board</option>
+        <option value="offboard">Off board</option>
+      </select>
+      <button className="btn" disabled={busy || value === current}>Apply</button>
+      <ErrorNote error={error} />
+    </form>
+  );
+}
+
 function MemberRow({ m, swarm, swarms, onDone }) {
   const [mode, setMode] = useState(null); // null | "edit" | "revoke" | "wipe"
   const [reason, setReason] = useState("");
@@ -310,6 +361,9 @@ function MemberRow({ m, swarm, swarms, onDone }) {
       {m.status === "active" && mode === null && (
         <MembershipForm key={`${swarm?.swarm ?? ""}:${swarm?.role ?? ""}`} name={m.name} current={swarm ?? null}
                         swarms={swarms} onDone={onDone} />
+      )}
+      {m.status === "active" && mode === null && m.kind === "robot" && (
+        <CognitionControl key={`${m.cognition?.source ?? ""}:${m.cognition?.value ?? ""}`} m={m} onDone={onDone} />
       )}
       {mode === "edit" && (
         <PermissionEditor initial={m.permissions} initialScope={m.scope} saveLabel="Save permissions" busy={busy}
