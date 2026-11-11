@@ -26,6 +26,7 @@ from server.services import conversation as conversation_service, enrollment, in
 from server.services import export as export_service
 from server.services import records as records_service
 from server.services import cognition, memory_wipe
+from server.services import profile as profile_service
 from server.services.errors import ServiceError
 
 router = APIRouter(prefix="/api", tags=["admin"])
@@ -251,6 +252,16 @@ async def timeline(
         payloads = await recall.fetch_payloads(session, rows)
         records = [recall.to_wire(r, payloads.get(r.id)) for r in rows]
         return {"records": records, "count": len(records), "limit": limit, "offset": offset}
+
+
+@router.get("/admin/profile/summary")
+async def profile_summary(request: Request, admin: AdminAuth = ADMIN, member: str | None = None,
+                          swarm: str | None = None, hours: int | None = None) -> dict:
+    """Categories, trend, places, outcomes and flow for one member or swarm (#186)."""
+    hours = profile_service.parse_hours(hours)
+    async with transaction(request) as session:
+        subject = await profile_service.resolve_subject(session, member, swarm)
+        return await profile_service.summary(session, subject, hours)
 
 
 @router.get("/admin/volume")
