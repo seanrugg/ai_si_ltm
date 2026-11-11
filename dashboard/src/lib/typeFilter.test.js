@@ -36,6 +36,19 @@ describe("serializeTypes", () => {
   });
 });
 
+describe("the empty selection (None)", () => {
+  it("serializes to \"none\" and parses back to the empty set", () => {
+    expect(serializeTypes(new Set())).toBe("none");
+    expect(parseTypes("none").size).toBe(0);
+    expect(serializeTypes(parseTypes("none"))).toBe("none");
+  });
+
+  it("keeps \"\" and a missing param meaning the default", () => {
+    expect(parseTypes("").size).toBe(DEFAULT_TYPES.length);
+    expect(parseTypes(undefined).size).toBe(DEFAULT_TYPES.length);
+  });
+});
+
 describe("summary", () => {
   it("names the empty, default and full selections", () => {
     expect(summary(new Set())).toBe("No types");
