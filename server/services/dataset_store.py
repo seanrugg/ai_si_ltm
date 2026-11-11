@@ -70,7 +70,7 @@ def save_file(data_dir: str, fh, max_bytes: int, *, head: bytes = b"") -> tuple[
     fd, tmp = tempfile.mkstemp(dir=base, prefix=".upload-")
     try:
         with os.fdopen(fd, "wb") as out:
-            chunk = head
+            chunk = head or fh.read(CHUNK)
             while chunk:
                 size += len(chunk)
                 if size > max_bytes:

@@ -178,6 +178,10 @@ class ServerConfig(BaseSettings):
     # Largest file an upload may be (#245); above this, use a catalog integration.
     # Env: LTMS_DATASET_UPLOAD_MAX_MB.
     dataset_upload_max_mb: int = 500
+    # URL datasets (#249): hosts LTMS may snapshot from, comma-separated, exact
+    # ("docs.ros.org") or "*.example.org". Empty (the default) means off.
+    # Env: LTMS_DATASET_URL_ALLOW.
+    dataset_url_allow: str = ""
 
     # Optional offline city database for network location estimates (#191).
     # Unset (the default) means no network estimates. Env: LTMS_GEOIP_DB.

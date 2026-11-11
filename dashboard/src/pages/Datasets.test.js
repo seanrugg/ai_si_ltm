@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
-import Datasets, { AddDataset, DatasetDetail, ExternalItems, Integrations } from "./Datasets.jsx";
+import Datasets, { AddDataset, DatasetDetail, ExternalItems, Integrations, SnapshotUrl } from "./Datasets.jsx";
 import { api } from "../api/client.js";
 import { filterDatasets, formatBytes, sortDatasets, uploadFiles } from "../lib/datasets.js";
 
@@ -185,5 +185,28 @@ describe("catalog integrations (#248)", () => {
     render(React.createElement(DatasetDetail, { dataset: ds, integrations: [{ id: "i1", kind: "huggingface" }] }));
     expect(screen.getByRole("form", { name: "Add an external item to version 1" })).toBeDefined();
     expect(screen.queryByLabelText("Files for version 1")).toBeNull();
+  });
+});
+
+describe("URL snapshots (#249)", () => {
+  it("posts the URL and reports the new version", async () => {
+    api.mockResolvedValueOnce({ version: 2, item: { key: "docs.example.org/guide.html" } });
+    render(React.createElement(SnapshotUrl, { datasetId: "u1" }));
+    const go = screen.getByRole("button", { name: "Snapshot URL" });
+    fireEvent.change(screen.getByLabelText("URL"), { target: { value: "http://docs.example.org/guide" } });
+    expect(go.disabled).toBe(true); // https only
+    fireEvent.change(screen.getByLabelText("URL"), { target: { value: "https://docs.example.org/guide" } });
+    fireEvent.click(go);
+    await screen.findByText("Saved docs.example.org/guide.html as version 2");
+    expect(api).toHaveBeenCalledWith("/admin/datasets/u1/snapshot", { method: "POST",
+      body: { url: "https://docs.example.org/guide" } });
+  });
+
+  it("shows the snapshot form on url datasets, not a file picker", () => {
+    const ds = { id: "u1", name: "ROS docs", kind: "url", status: "approved", current_version: 1,
+      versions: [{ version: 1, status: "approved", item_count: 1, size_bytes: 10 }] };
+    render(React.createElement(DatasetDetail, { dataset: ds }));
+    expect(screen.getByRole("form", { name: "Snapshot URL" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "New version" })).toBeNull();
   });
 });

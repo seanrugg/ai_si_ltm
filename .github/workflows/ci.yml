@@ -36,7 +36,7 @@ jobs:
           python-version: ${{ matrix.python }}
           allow-prereleases: true
           cache: pip
-      - run: pip install -e '.[dev]'
+      - run: pip install -e '.[dev,docs,media]'
       - name: pytest (SQLite)
         run: pytest
       - name: pytest (PostgreSQL 16)

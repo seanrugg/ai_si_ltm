@@ -5,7 +5,7 @@ import HelpTip from "../components/HelpTip.jsx";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, Loading, PageHeader, StatusBadge } from "../components/ui.jsx";
-import { DATASET_APPROVE, DATASET_LARGE, DATASET_SCOPE, INTEGRATION_ABOUT, INTEGRATION_CREDENTIAL } from "../lib/help.js";
+import { DATASET_APPROVE, DATASET_LARGE, DATASET_SCOPE, INTEGRATION_ABOUT, INTEGRATION_CREDENTIAL, URL_SNAPSHOT } from "../lib/help.js";
 import { CHUNKED_ABOVE, FILTERS, filterDatasets, formatBytes, hasPending, sortDatasets, totalSize, uploadFiles } from "../lib/datasets.js";
 import { localTime } from "../lib/format.js";
 
@@ -127,6 +127,49 @@ export function ExternalItems({ datasetId, version, integrationKind, onDone }) {
   );
 }
 
+export function SnapshotUrl({ datasetId, onDone }) {
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [done, setDone] = useState(null);
+  const fid = `snap-${datasetId}`;
+
+  async function snap() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api(`/admin/datasets/${encodeURIComponent(datasetId)}/snapshot`,
+        { method: "POST", body: { url: url.trim() } });
+      setDone(res);
+      setUrl("");
+      onDone?.();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="mt-3 flex flex-wrap items-end gap-2" aria-label="Snapshot URL"
+          onSubmit={(e) => { e.preventDefault(); snap(); }}>
+      <div>
+        <span className="flex items-center gap-1">
+          <label htmlFor={fid} className="block text-sm text-paper-muted">URL</label>
+          <HelpTip id={`${fid}-help`} label="About URL snapshots">{URL_SNAPSHOT}</HelpTip>
+        </span>
+        <input id={fid} className="field w-80" type="url" value={url} onChange={(e) => setUrl(e.target.value)}
+               placeholder="https://docs.example.org/guide" required />
+      </div>
+      <button type="submit" className="btn btn-primary" disabled={busy || !url.trim().startsWith("https://")}>
+        {busy ? "Fetching…" : "Snapshot URL"}
+      </button>
+      {done && <span className="text-sm text-ok" role="status">Saved {done.item.key} as version {done.version}</span>}
+      <ErrorNote error={error} />
+    </form>
+  );
+}
+
 export function Integrations({ data, onChanged }) {
   const integrations = data?.integrations || [];
   const [form, setForm] = useState({ name: "", kind: "huggingface", base_url: "", credential_env: "" });
@@ -236,8 +279,12 @@ export function AddDataset({ onCreated, integrations = [] }) {
   if (created) {
     return (
       <section className="mb-6 rounded-md border border-ink-line bg-ink p-4" aria-label="Upload files">
-        <h2 className="text-lg font-bold">{created.kind === "integration" ? "Add items to" : "Upload into"} {created.name}</h2>
-        {created.kind === "integration" ? (
+        <h2 className="text-lg font-bold">
+          {created.kind === "url" ? "Snapshot into" : created.kind === "integration" ? "Add items to" : "Upload into"} {created.name}
+        </h2>
+        {created.kind === "url" ? (
+          <SnapshotUrl datasetId={created.id} onDone={onCreated} />
+        ) : created.kind === "integration" ? (
           <ExternalItems datasetId={created.id} version={1} onDone={onCreated}
                          integrationKind={integrations.find((i) => i.id === created.integration_id)?.kind} />
         ) : (
@@ -270,6 +317,7 @@ export function AddDataset({ onCreated, integrations = [] }) {
           <label htmlFor="ds-kind" className="block text-sm text-paper-muted">Kind</label>
           <select id="ds-kind" className="field" value={form.kind} onChange={set("kind")}>
             <option value="upload">Upload</option>
+            <option value="url">URL snapshot</option>
             <option value="integration" disabled={integrations.length === 0}>Integration</option>
           </select>
         </div>
@@ -365,7 +413,7 @@ export function DatasetDetail({ dataset, onChanged, integrations = [] }) {
               )}
             </div>
             {shown === v.version && <VersionItems datasetId={dataset.id} version={v.version} />}
-            {v.status === "pending" && !retired && (dataset.kind === "integration" ? (
+            {v.status === "pending" && !retired && dataset.kind !== "url" && (dataset.kind === "integration" ? (
               <ExternalItems datasetId={dataset.id} version={v.version} onDone={onChanged}
                              integrationKind={integrations.find((i) => i.id === dataset.integration_id)?.kind} />
             ) : (
@@ -375,9 +423,12 @@ export function DatasetDetail({ dataset, onChanged, integrations = [] }) {
           </li>
         ))}
       </ul>
+      {!retired && dataset.kind === "url" && !(pending && pending.item_count > 0) && (
+        <SnapshotUrl datasetId={dataset.id} onDone={onChanged} />
+      )}
       {!retired && (
         <div className="mt-3 flex flex-wrap items-end gap-2">
-          {!pending && (
+          {!pending && dataset.kind !== "url" && (
             <button type="button" className="btn" disabled={busy}
                     onClick={() => act(`/admin/datasets/${id}/versions`)}>New version</button>
           )}
