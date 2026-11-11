@@ -81,12 +81,28 @@ def _looks_binary(head: bytes) -> bool:
 
 def sniff(head: bytes, filename: str) -> str:
     """The media type, from the content first."""
+    suffix = PurePosixPath(filename.lower()).suffix
+    if head.startswith(b"SQLite format 3\x00") and suffix == ".db3":
+        return "application/x-ros2-db3"
+    if head.startswith(b"ply\n") or head.startswith(b"ply\r\n"):
+        return "application/x-ply"
+    if suffix == ".pcd" and (head.startswith(b"# .PCD") or head.startswith(b"VERSION")):
+        return "application/x-pcd"
+    if suffix in (".tfrecord", ".tfrecords"):
+        return "application/x-tfrecord"
+    if head.startswith(b"RIFF") and head[8:12] == b"WEBP":
+        return "image/webp"
+    if head.startswith((b"II*\x00", b"MM\x00*")):
+        return "image/tiff"
+    if head.startswith(b"OggS"):
+        return "audio/ogg"
     if head.startswith(b"PK\x03\x04"):
         # A zip: the name says which Office/epub format it claims to be; the
         # extractor then fails cleanly if it isn't.
-        suffix = PurePosixPath(filename.lower()).suffix
         if suffix in (".docx", ".pptx", ".xlsx", ".epub"):
             return DOC_TYPES[suffix]
+        if suffix == ".npz":
+            return "application/x-npz"
         return "application/zip"
     for sig, mtype in MAGIC:
         if head.startswith(sig):
@@ -97,9 +113,12 @@ def sniff(head: bytes, filename: str) -> str:
         return "application/x-tar"
     if head[4:8] == b"ftyp":
         return "video/mp4"
+    if head[:2] == b"\xff\xfb" or head[:2] == b"\xff\xf3" or head[:2] == b"\xff\xf2":
+        return "audio/mpeg"  # an MP3 frame with no ID3 tag
     if _looks_binary(head):
         return "application/octet-stream"
-    suffix = PurePosixPath(filename.lower()).suffix
+    if suffix in (".urdf", ".sdf", ".xacro"):
+        return "application/xml"
     if suffix in TEXT_TYPES:
         return TEXT_TYPES[suffix]
     stripped = head.lstrip()
@@ -158,6 +177,24 @@ def _keys(value) -> list[str] | str:
     return type(value).__name__
 
 
+def robot_description(root) -> dict:
+    """URDF (``<robot>``) or SDF (``<sdf>``): the robot's name and link and joint counts (#247)."""
+    if root.tag == "robot":
+        model = root
+        fmt = "urdf"
+    elif root.tag == "sdf":
+        model = root.find("model")
+        if model is None:
+            model = root.find("world/model")
+        fmt = "sdf"
+        if model is None:
+            return {"format": "sdf"}
+    else:
+        return {}
+    return {"format": fmt, "robot": model.get("name"),
+            "links": len(model.findall(".//link")), "joints": len(model.findall(".//joint"))}
+
+
 def extract(data: bytes, media_type: str) -> tuple[str | None, dict]:
     """``(text, meta)`` for a text-tier file. A file that fails to parse keeps its text with ``meta.parse_error``."""
     text = decode(data)
@@ -183,6 +220,7 @@ def extract(data: bytes, media_type: str) -> tuple[str | None, dict]:
                 raise ValueError("XML entity declarations aren't accepted")
             rootel = ElementTree.fromstring(data)  # noqa: S314 - expat doesn't expand external entities
             meta = {"root": rootel.tag, "children": len(rootel)}
+            meta.update(robot_description(rootel))
             text = " ".join(t.strip() for t in rootel.itertext() if t.strip())
     except (ValueError, yaml.YAMLError, ElementTree.ParseError, csv.Error) as exc:
         meta = {"parse_error": str(exc)[:200]}
@@ -208,6 +246,25 @@ def _cap(text: str | None, meta: dict) -> tuple[str | None, dict]:
     return text, meta
 
 
+async def _run_child(module: str, path: str, media_type: str, timeout: float | None) -> dict:
+    """Run ``python -m <module> <path> <type>`` with the sandbox limits; its JSON result, or an error."""
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", module, path, media_type,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        preexec_fn=_limit_memory if sys.platform.startswith("linux") else None,
+    )
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=DOC_TIMEOUT_S if timeout is None else timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        return {"error": "timeout"}
+    try:
+        return json.loads(out.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {"error": f"crashed (exit {proc.returncode})"}
+
+
 async def extract_document(path: str, media_type: str, *, timeout: float | None = None) -> tuple[str | None, dict]:
     """``(text, meta)`` for a document-tier file, extracted in a child process.
 
@@ -217,21 +274,19 @@ async def extract_document(path: str, media_type: str, *, timeout: float | None 
     module = DOC_MODULES.get(media_type)
     if module is not None and importlib.util.find_spec(module) is None:
         return None, {"extract_error": "install ltms[docs]"}
-    proc = await asyncio.create_subprocess_exec(
-        sys.executable, "-m", "server.services.doc_extract", path, media_type,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
-        preexec_fn=_limit_memory if sys.platform.startswith("linux") else None,
-    )
-    try:
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=DOC_TIMEOUT_S if timeout is None else timeout)
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.wait()
-        return None, {"extract_error": "timeout"}
-    try:
-        result = json.loads(out.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return None, {"extract_error": f"crashed (exit {proc.returncode})"}
+    result = await _run_child("server.services.doc_extract", path, media_type, timeout)
     if "error" in result:
         return None, {"extract_error": result["error"]}
     return _cap(result.get("text"), result.get("meta") or {})
+
+
+async def extract_media(path: str, media_type: str, *, timeout: float | None = None) -> dict:
+    """Metadata for a robotics, sensor or media file (#247), in the same sandbox. Never raises."""
+    from server.services.media_meta import MEDIA_TYPES
+
+    if media_type not in MEDIA_TYPES:
+        return {}
+    result = await _run_child("server.services.media_meta", path, media_type, timeout)
+    if "error" in result:
+        return {"extract_error": result["error"]}
+    return result.get("meta") or {}

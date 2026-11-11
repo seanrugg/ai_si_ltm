@@ -160,6 +160,12 @@ Limits:
   uploads live in `/data/datasets/uploads`, and those unfinished after 24 hours
   are deleted nightly.
 
+The image includes the `docs` and `media` extras, so documents get their text
+extracted, and bags, arrays, images and audio get their metadata. Video
+metadata needs `ffprobe`, which the image leaves out to keep it small: video
+items are stored with `meta.extract_error` until you add ffmpeg. Parquet
+metadata needs `pyarrow`, also not included.
+
 Behind a reverse proxy, allow request bodies of at least 26 MB on
 `/api/admin/datasets/`. `deploy/nginx-directives.conf` does this; the default
 there is 2 MB for everything else.
