@@ -1,4 +1,4 @@
-"""Removing a swarm (issue #232).
+"""Removing a swarm (issues #232, #233).
 
 The swarm row stays, for history: records, provenance and audit rows point at
 its ID. Its status becomes ``removed``, it leaves the swarm list, and its name
@@ -9,14 +9,15 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.models import Swarm
-from server.services import enrollment, swarms
+from server.models import Swarm, SwarmMember
+from server.services import enrollment, records as records_service, swarms
 from server.services.errors import ServiceError
 
 MEMBER_CHOICES = ("free", "remove")
-RECORD_CHOICES = ("keep",)  # "purge" arrives with #233
+RECORD_CHOICES = ("keep", "purge")
 
 
 async def remove_swarm(session: AsyncSession, swarm: Swarm, *, confirm, members: str, records: str = "keep",
@@ -32,6 +33,10 @@ async def remove_swarm(session: AsyncSession, swarm: Swarm, *, confirm, members:
 
     now = datetime.now(timezone.utc)
     name = swarm.name
+    purged = 0
+    if records == "purge":  # first, so a too_many refusal changes nothing
+        purged = await records_service.delete_records_bulk(session, swarm_id=swarm.id, admin=f"admin:{admin}",
+                                                           reason=f"swarm {name} removed")
     released = await swarms.release_members(session, swarm, now)
     revoked = 0
     if members == "remove":
@@ -44,7 +49,16 @@ async def remove_swarm(session: AsyncSession, swarm: Swarm, *, confirm, members:
     swarm.status, swarm.removed_at, swarm.is_home = "removed", now, False
     swarms._audit(session, f"admin:{admin}", "swarm_remove",
                   {"swarm": swarm.id, "name": name, "members": members, "count": len(released),
-                   "revoked": revoked, "records": records})
+                   "revoked": revoked, "records": records, "purged": purged})
     await session.flush()
     return {"id": swarm.id, "name": name, "status": "removed", "members": members,
-            "released": len(released), "revoked": revoked, "records": records}
+            "released": len(released), "revoked": revoked, "records": records, "purged": purged}
+
+
+async def remove_preview(session: AsyncSession, swarm: Swarm) -> dict:
+    """What removing the swarm would touch: current members and records that came through it."""
+    members = await session.scalar(select(func.count()).select_from(SwarmMember).where(
+        SwarmMember.swarm_id == swarm.id, SwarmMember.left_at.is_(None)))
+    records = await session.scalar(select(func.count()).select_from(
+        records_service.swarm_records_query(swarm.id).order_by(None).subquery()))
+    return {"members": members or 0, "records": records or 0}
