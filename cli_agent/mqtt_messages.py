@@ -11,6 +11,8 @@ from typing import Any
 
 _RECORDS_SUFFIX = "records"
 _ACKS_SUFFIX = "acks"
+_HELLO_SUFFIX = "hello"
+MAX_HELLO_ADDRESSES = 8
 
 
 def records_topic(agent: str, swarm: str) -> str:
@@ -21,6 +23,45 @@ def records_topic(agent: str, swarm: str) -> str:
 def acks_topic(agent: str, swarm: str) -> str:
     """hub -> robot: LTMS's acknowledged head for that agent."""
     return f"{swarm}/{agent}/acks"
+
+
+def hello_topic(agent: str, swarm: str) -> str:
+    """robot -> hub, once per connect: who it is and its LAN addresses (#216)."""
+    return f"{swarm}/{agent}/{_HELLO_SUFFIX}"
+
+
+def topic_kind(topic: str) -> str:
+    """The last topic segment: "records", "acks" or "hello"."""
+    return topic.rsplit("/", 1)[-1]
+
+
+def agent_from_hello_topic(topic: str, swarm: str) -> str:
+    parts = topic.split("/")
+    if len(parts) != 3 or parts[0] != swarm or parts[2] != _HELLO_SUFFIX:
+        raise ValueError(f"not a hello topic for swarm {swarm!r}: {topic!r}")
+    return parts[1]
+
+
+def encode_hello(agent: str, network: list[dict] | None = None) -> bytes:
+    msg: dict = {"agent": agent}
+    if network:
+        msg["network"] = [{"ip": a["ip"], "interface": a.get("interface")} for a in network[:MAX_HELLO_ADDRESSES]]
+    return json.dumps(msg, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+def decode_hello(data: bytes, expected_agent: str) -> dict:
+    msg = json.loads(data)
+    if not isinstance(msg, dict):
+        raise ValueError("hello must be a JSON object")
+    if msg.get("agent") != expected_agent:
+        raise ValueError(f"hello agent {msg.get('agent')!r} != expected {expected_agent!r}")
+    network = msg.get("network")
+    if network is not None:
+        if not isinstance(network, list) or len(network) > MAX_HELLO_ADDRESSES:
+            raise ValueError(f"hello network must be a list of at most {MAX_HELLO_ADDRESSES}")
+        if not all(isinstance(a, dict) and isinstance(a.get("ip"), str) for a in network):
+            raise ValueError("each hello address needs an ip")
+    return msg
 
 
 def agent_from_topic(topic: str, swarm: str) -> str:

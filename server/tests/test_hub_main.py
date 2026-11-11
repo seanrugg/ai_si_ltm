@@ -146,7 +146,7 @@ def test_make_on_connect_subscribes_with_qos_one():
     client = FakeMqttClient()
     on_connect = make_on_connect("echo-base")
     on_connect(client, None, {}, 0, None)
-    assert client.subscribes == [("echo-base/+/records", 1)]
+    assert client.subscribes == [("echo-base/+/records", 1), ("echo-base/+/hello", 1)]
 
 
 def test_make_publish_always_uses_qos_one():

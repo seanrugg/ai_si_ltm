@@ -16,6 +16,7 @@ from typing import Mapping
 
 from cli_agent.client import LTMSClient
 from cli_agent.hub import Hub
+from cli_agent.mqtt_messages import topic_kind
 from cli_agent.outbox import Outbox
 from ltms_contract import load_key
 
@@ -85,6 +86,10 @@ def records_subscription(swarm: str) -> str:
     return f"{swarm}/+/records"
 
 
+def hello_subscription(swarm: str) -> str:
+    return f"{swarm}/+/hello"
+
+
 def make_publish(mqtt_client):
     def publish(topic: str, payload: bytes, retain: bool = False) -> None:
         mqtt_client.publish(topic, payload, qos=1, retain=retain)
@@ -95,7 +100,10 @@ def make_publish(mqtt_client):
 def make_on_message(hub):
     def on_message(client, userdata, msg) -> None:
         try:
-            hub.on_record(msg.topic, msg.payload)
+            if topic_kind(msg.topic) == "hello":
+                hub.on_hello(msg.topic, msg.payload)
+            else:
+                hub.on_record(msg.topic, msg.payload)
         except Exception:  # a bad message must never kill the MQTT thread
             logging.exception("Hub: on_message failed for %s", getattr(msg, "topic", None))
 
@@ -106,10 +114,12 @@ def make_on_connect(swarm: str):
     def on_connect(client, userdata, flags, reason_code, properties) -> None:
         try:
             client.subscribe(records_subscription(swarm), qos=1)
+            client.subscribe(hello_subscription(swarm), qos=1)
             logging.info(
-                "Hub: MQTT connected (reason %s), subscribed to %s",
+                "Hub: MQTT connected (reason %s), subscribed to %s and %s",
                 reason_code,
                 records_subscription(swarm),
+                hello_subscription(swarm),
             )
         except Exception:  # never let a reconnect handler raise
             logging.exception("Hub: on_connect failed")

@@ -117,3 +117,17 @@ Every stored record gets a `record_provenance` row: the author's swarm at that
 moment (null for free agents) and the relay that delivered it (null when sent
 directly, including the hub's own records). Moving a member later doesn't
 change the provenance of what it already sent.
+
+## MQTT topics
+
+| Topic | Who publishes | What |
+|---|---|---|
+| `<swarm>/<agent>/records` | the member | one signed record per message |
+| `<swarm>/<agent>/acks` | the hub (retained) | LTMS's acknowledged head for that member |
+| `<swarm>/<agent>/hello` | the member, on every connect | `{"agent", "network": [{"ip", "interface"}]}`: its LAN addresses (at most 8) |
+
+The hub reports each hello's addresses to LTMS on its next tick
+(`PUT /api/relay/network/<agent>`), where they show as reported and unverified.
+The broker's ACL should let each member publish only under its own
+`<swarm>/<agent>/` topics, and let the hub subscribe to `<swarm>/+/records`
+and `<swarm>/+/hello`.

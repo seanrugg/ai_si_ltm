@@ -168,3 +168,21 @@ def test_make_on_connect_subscribes_and_sets_event():
     on_connect(client, None, {}, 0, None)
     assert wanted.is_set()
     assert client.subscribes == [("echo-base/z3-r0/acks", 1)]
+
+
+def test_on_connect_publishes_hello_when_given():
+    class FakeClient:
+        def __init__(self) -> None:
+            self.subscribes, self.publishes = [], []
+
+        def subscribe(self, topic, qos=0):
+            self.subscribes.append((topic, qos))
+
+        def publish(self, topic, payload, qos=0, retain=False):
+            self.publishes.append((topic, payload, qos, retain))
+
+    client = FakeClient()
+    on_connect = make_on_connect(acks_topic("z3-r0", "echo-base"), threading.Event(),
+                                 lambda: ("echo-base/z3-r0/hello", b'{"agent":"z3-r0"}'))
+    on_connect(client, None, {}, 0, None)
+    assert client.publishes == [("echo-base/z3-r0/hello", b'{"agent":"z3-r0"}', 1, False)]
