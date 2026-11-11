@@ -26,6 +26,7 @@ from server.services import conversation as conversation_service, enrollment, in
 from server.services import export as export_service
 from server.services import records as records_service
 from server.services import cognition, memory_wipe
+from server.services import location as location_service
 from server.services import network as network_service
 from server.services import profile as profile_service
 from server.services.errors import ServiceError
@@ -300,6 +301,28 @@ async def profile_history(request: Request, admin: AdminAuth = ADMIN, member: st
     async with transaction(request) as session:
         subject = await profile_service.resolve_subject(session, member, swarm)
         return await profile_service.history(session, subject)
+
+
+@router.get("/admin/locations")
+async def locations(request: Request, admin: AdminAuth = ADMIN, swarm: str | None = None,
+                    member: str | None = None) -> dict:
+    """Where each member is: gps, declared, network, with the best first (#191). Admin only."""
+    async with transaction(request) as session:
+        return await location_service.describe(session, request.app.state.config, swarm=swarm, member=member)
+
+
+@router.put("/admin/locations/{subject_type}/{name}")
+async def set_location(subject_type: str, name: str, request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    """Declare a member's or a swarm's location: ``{label, room, lat, lon}`` (#191)."""
+    async with transaction(request) as session:
+        return await location_service.set_declared(session, subject_type, name, body, admin=f"admin:{admin.username}")
+
+
+@router.delete("/admin/locations/{subject_type}/{name}")
+async def delete_location(subject_type: str, name: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        deleted = await location_service.delete_declared(session, subject_type, name, admin=f"admin:{admin.username}")
+        return {"deleted": deleted}
 
 
 @router.get("/admin/volume")

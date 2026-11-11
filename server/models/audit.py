@@ -37,6 +37,7 @@ AUDIT_ACTIONS = (
     "memory_wipe",
     "cognition_change",
     "network_change",
+    "location_change",
 )
 
 
