@@ -11,9 +11,11 @@ copy this: it is the whole member side of the protocol in ~150 lines.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import ipaddress
 import json
 import logging
 import os
+import socket
 
 import httpx
 from typing import Callable
@@ -22,6 +24,18 @@ from ltms_contract import GENESIS_HASH, auth_signing_message, build_record, load
 
 
 log = logging.getLogger(__name__)
+
+
+def local_addresses() -> list[dict]:
+    """This host's non-loopback, non-link-local addresses, via socket.getaddrinfo."""
+    found: dict[str, dict] = {}
+    for family, *_rest, sockaddr in socket.getaddrinfo(socket.gethostname(), None):
+        if family not in (socket.AF_INET, socket.AF_INET6):
+            continue
+        ip = ipaddress.ip_address(sockaddr[0].split("%")[0])
+        if not (ip.is_loopback or ip.is_link_local or ip.is_unspecified):
+            found[str(ip)] = {"ip": str(ip), "interface": None}
+    return list(found.values())
 
 
 class LTMSError(Exception):
@@ -153,7 +167,22 @@ class LTMSClient:
             log.warning("report_cognition failed: %s", exc)
             return None
 
-        # ------------------------------------------------------------------ write
+    def report_network(self, addresses: list[dict] | None = None) -> list[dict] | None:
+        """Tell LTMS this device's LAN addresses (#190); LTMS labels them unverified.
+
+        ``addresses`` is up to eight ``{"ip", "interface"}``. With None, collect
+        this host's non-loopback IPv4 and IPv6 addresses (standard library only).
+        Never raises: returns what LTMS stored, or None after logging the error.
+        """
+        try:
+            if addresses is None:
+                addresses = local_addresses()
+            return self._call("PUT", "/api/members/me/network", json={"addresses": addresses[:8]})["addresses"]
+        except Exception as exc:  # noqa: BLE001 - reporting is best effort
+            log.warning("report_network failed: %s", exc)
+            return None
+
+    # ------------------------------------------------------------------ write
     def append(self, type: str, *, payload: dict | None = None, ts: str | None = None, **header) -> dict:
         """Sign the next record locally and queue it. Works offline."""
         prev_seq = self.outbox[-1]["seq"] if self.outbox else self.seq
