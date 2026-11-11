@@ -273,6 +273,16 @@ async def network(request: Request, admin: AdminAuth = ADMIN, swarm: str | None 
         return await network_service.describe(session, swarm=swarm, member=member)
 
 
+@router.get("/admin/profile/graph")
+async def profile_graph(request: Request, admin: AdminAuth = ADMIN, member: str | None = None,
+                        swarm: str | None = None, hours: int | None = None) -> dict:
+    """Who exchanges what with whom: nodes, per-category edges and hub relays (#187)."""
+    hours = profile_service.parse_hours(hours)
+    async with transaction(request) as session:
+        subject = await profile_service.resolve_subject(session, member, swarm)
+        return await profile_service.graph(session, subject, hours)
+
+
 @router.get("/admin/volume")
 async def volume(
     request: Request, days: int = Query(14, ge=1, le=90), admin: AdminAuth = ADMIN,

@@ -17,7 +17,7 @@ from sqlalchemy import String, and_, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models import Member, Record, RecordProvenance, Swarm, SwarmMember
-from server.services import recall
+from server.services import cognition, recall
 from server.services.errors import ServiceError
 
 DEFAULT_HOURS = 168
@@ -278,3 +278,55 @@ async def summary(session: AsyncSession, subject: Subject, hours: int) -> dict:
         "peers": peers,
         "lessons": lessons,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Interaction graph (#187)
+# --------------------------------------------------------------------------- #
+async def graph(session: AsyncSession, subject: Subject, hours: int) -> dict:
+    """Nodes, per-category edges and hub relays for the Interactions tab.
+
+    Edges are undirected (``a`` < ``b``), one per pair and category. A record
+    relayed by a hub that isn't its author is a ``relays`` entry, never an edge.
+    For a swarm, edges touching any current member are included, so outside
+    members it talks to appear too.
+    """
+    since = _since(hours)
+    edges = [{"a": a, "b": b, "category": cat, "count": n}
+             for (a, b, cat), n in sorted((await edge_counts(session, subject, since)).items())]
+
+    relays = []
+    if subject.member_ids:
+        hub = Member.__table__.alias("hub")
+        author = Member.__table__.alias("author")
+        rows = (await session.execute(
+            select(hub.c.name, author.c.name, func.count())
+            .select_from(Record)
+            .join(RecordProvenance, RecordProvenance.record_id == Record.id)
+            .join(hub, hub.c.id == RecordProvenance.relay_member_id)
+            .join(author, author.c.id == Record.member_id)
+            .where(_in_range(since), RecordProvenance.relay_member_id.is_not(None),
+                   RecordProvenance.relay_member_id != Record.member_id,
+                   or_(Record.member_id.in_(subject.member_ids),
+                       RecordProvenance.relay_member_id.in_(subject.member_ids)))
+            .group_by(hub.c.name, author.c.name).order_by(hub.c.name, author.c.name))).all()
+        relays = [{"hub": h, "member": m, "count": n} for h, m, n in rows]
+
+    names = sorted({e["a"] for e in edges} | {e["b"] for e in edges}
+                   | {r["hub"] for r in relays} | {r["member"] for r in relays} | set(subject.member_names))
+    members = {m.name: m for m in await session.scalars(select(Member).where(Member.name.in_(names)))} if names else {}
+    memberships = {}
+    if members:
+        for row, swarm_name in (await session.execute(
+                select(SwarmMember, Swarm.name).join(Swarm, Swarm.id == SwarmMember.swarm_id)
+                .where(SwarmMember.member_id.in_([m.id for m in members.values()]),
+                       SwarmMember.left_at.is_(None)))).all():
+            memberships[row.member_id] = (row.role, swarm_name)
+    nodes = []
+    for name in names:
+        m = members.get(name)
+        role, swarm = memberships.get(m.id, ("free", None)) if m is not None else ("free", None)
+        nodes.append({"name": name, "role": role, "kind": m.kind if m is not None else None,
+                      "cognition": cognition.resolve(m) if m is not None else None,
+                      "is_hub": role == "hub", "swarm": swarm})
+    return {"nodes": nodes, "edges": edges, "relays": relays}
