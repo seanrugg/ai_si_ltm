@@ -16,6 +16,8 @@ from server.models import AuditLog, Member, MemberAddress, Record, RecordProvena
 from server.services.errors import ServiceError
 
 HISTORY_LIMIT = 20
+MAX_REPORTED = 8
+MAX_INTERFACE = 32
 
 
 def _now() -> datetime:
@@ -49,6 +51,53 @@ async def record_seen(session: AsyncSession, member: Member, ip: str | None) -> 
                              detail={"source": "seen", "old": newest.ip, "new": ip}))
 
 
+def _validate_reported(body) -> list[dict]:
+    addresses = body.get("addresses") if isinstance(body, dict) else None
+    if not isinstance(addresses, list) or len(addresses) > MAX_REPORTED:
+        raise ServiceError(422, "bad_network", f"addresses must be a list of at most {MAX_REPORTED}")
+    clean: dict[str, dict] = {}
+    for a in addresses:
+        if not isinstance(a, dict) or not isinstance(a.get("ip"), str):
+            raise ServiceError(422, "bad_network", "each address needs an ip")
+        try:
+            ip = str(ipaddress.ip_address(a["ip"].strip()))
+        except ValueError:
+            raise ServiceError(422, "bad_network", f"not an IP address: {a['ip'][:64]!r}") from None
+        interface = a.get("interface")
+        if interface is not None and (not isinstance(interface, str) or len(interface) > MAX_INTERFACE):
+            raise ServiceError(422, "bad_network", f"interface is a string of at most {MAX_INTERFACE} characters")
+        clean[ip] = {"ip": ip, "interface": interface}
+    return list(clean.values())
+
+
+async def record_reported(session: AsyncSession, member: Member, body, *, source: str) -> list[dict]:
+    """Store the LAN addresses a member (``reported``) or its hub (``hub``) reports.
+
+    Unverified: LTMS can't check them. The new set replaces the previous one as
+    the current set; old rows keep their ``last_seen`` and age out by pruning.
+    A different set from last time writes ``network_change``.
+    """
+    addresses = _validate_reported(body)
+    now = _now()
+    existing = {r.ip: r for r in await session.scalars(select(MemberAddress).where(
+        MemberAddress.member_id == member.id, MemberAddress.source == source))}
+    # The current set is the rows refreshed by the latest report (same last_seen).
+    newest = max((r.last_seen for r in existing.values()), default=None)
+    previous = sorted(ip for ip, r in existing.items() if newest is not None and r.last_seen == newest)
+    for a in addresses:
+        row = existing.get(a["ip"])
+        if row is None:
+            session.add(MemberAddress(member_id=member.id, ip=a["ip"], source=source, interface=a["interface"],
+                                      first_seen=now, last_seen=now, count=1))
+        else:
+            row.last_seen, row.interface, row.count = now, a["interface"], (row.count or 0) + 1
+    current = sorted(a["ip"] for a in addresses)
+    if current != previous:
+        session.add(AuditLog(member_id=member.id, actor="system:network", action="network_change",
+                             detail={"source": source, "old": previous, "new": current}))
+    return [{**a, "source": source} for a in addresses]
+
+
 async def prune(session: AsyncSession, days: int, now: datetime | None = None) -> int:
     """Delete address rows not seen for ``days`` days."""
     cutoff = (now or _now()) - timedelta(days=days)
@@ -60,9 +109,17 @@ async def run_prune(session: AsyncSession, cfg) -> int:
     return await prune(session, cfg.address_history_days)
 
 
-def _address(row: MemberAddress) -> dict:
-    return {"ip": row.ip, "source": row.source, "interface": row.interface, "private": is_private(row.ip),
-            "first_seen": row.first_seen.isoformat(), "last_seen": row.last_seen.isoformat()}
+def _current_reported(addrs: list[MemberAddress]) -> list[dict]:
+    """The latest reported set from each source (#190), newest source first. Unverified."""
+    out = []
+    for source in ("reported", "hub"):
+        rows = [a for a in addrs if a.source == source]
+        if not rows:
+            continue
+        newest = max(a.last_seen for a in rows)
+        out += [{"ip": a.ip, "interface": a.interface, "source": a.source, "last_seen": a.last_seen.isoformat()}
+                for a in rows if a.last_seen == newest]
+    return out
 
 
 async def describe(session: AsyncSession, *, swarm: str | None = None, member: str | None = None) -> dict:
@@ -114,7 +171,7 @@ async def describe(session: AsyncSession, *, swarm: str | None = None, member: s
             "path": f"via {hub_names[relay]}" if relay is not None and relay != m.id and relay in hub_names else "direct",
             "seen": {"ip": seen.ip, "private": is_private(seen.ip), "last_seen": seen.last_seen.isoformat()}
             if seen else None,
-            "reported": [_address(a) for a in addrs if a.source in ("reported", "hub")],
+            "reported": _current_reported(addrs),
             "history": [{"ip": a.ip, "source": a.source, "first_seen": a.first_seen.isoformat(),
                          "last_seen": a.last_seen.isoformat()} for a in addrs[:HISTORY_LIMIT]],
         })

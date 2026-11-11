@@ -67,6 +67,28 @@ async def put_cognition(request: Request, body: dict, auth: MemberAuth = Depends
         return {"cognition": await cognition.declare(session, member, body)}
 
 
+@router.put("/members/me/network")
+async def put_network(request: Request, body: dict, auth: MemberAuth = Depends(current_member)) -> dict:
+    """LAN addresses this member reports (#190). Unverified, and labelled so."""
+    async with transaction(request) as session:
+        member = await session.get(Member, auth.member_id)
+        return {"addresses": await network.record_reported(session, member, body, source="reported")}
+
+
+@router.put("/relay/network/{agent}")
+async def put_relay_network(agent: str, request: Request, body: dict,
+                            auth: MemberAuth = Depends(current_member)) -> dict:
+    """A hub reports the LAN addresses of a member of its swarm (#190)."""
+    async with transaction(request) as session:
+        hub = await session.get(Member, auth.member_id)
+        relay_swarm = await swarms.hub_swarm_id(session, hub)
+        other = await session.scalar(select(Member).where(Member.name == agent))
+        row = await swarms.open_membership(session, other.id) if other is not None else None
+        if relay_swarm is None or row is None or row.swarm_id != relay_swarm:
+            raise ServiceError(403, "not_in_swarm", f"{agent!r} is not a member of this relay's swarm")
+        return {"addresses": await network.record_reported(session, other, body, source="hub")}
+
+
 async def _member_scope(session, auth: MemberAuth) -> recall.Scope:
     member = await session.get(Member, auth.member_id)
     try:
