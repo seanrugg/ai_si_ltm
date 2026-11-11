@@ -39,9 +39,12 @@ def _audit(session, admin: str, action: str, detail: dict) -> None:
 
 
 async def get_dataset(session: AsyncSession, dataset_id) -> Dataset:
+    """A dataset for the admin dataset endpoints. The charter is managed on its own (#255)."""
     ds = await session.get(Dataset, _uuid(dataset_id))
     if ds is None:
         raise ServiceError(404, "not_found", "no such dataset")
+    if ds.kind == "charter":
+        raise ServiceError(409, "charter", "the fleet charter is managed at /api/admin/charter")
     return ds
 
 
@@ -65,8 +68,12 @@ async def create_dataset(session: AsyncSession, body: dict, *, admin: str) -> Da
     if not name or len(name) > MAX_NAME:
         raise ServiceError(422, "bad_name", f"name is required, at most {MAX_NAME} characters")
     kind = body.get("kind", "upload")
+    if kind == "charter":
+        raise ServiceError(422, "bad_kind", "the fleet charter is published at /api/admin/charter")
     if kind not in DATASET_KINDS:
         raise ServiceError(422, "bad_kind", f"kind must be one of {', '.join(DATASET_KINDS)}")
+    if name == "fleet-charter":
+        raise ServiceError(409, "name_taken", "fleet-charter is reserved for the fleet charter")
     licence = (body.get("licence") or "").strip()
     if not licence or len(licence) > MAX_LICENCE:
         raise ServiceError(422, "bad_licence", "licence is required: say how this data may be used")
@@ -145,7 +152,8 @@ async def dataset_dict(session: AsyncSession, ds: Dataset) -> dict:
 
 
 async def list_datasets(session: AsyncSession) -> list[dict]:
-    rows = list(await session.scalars(select(Dataset).order_by(Dataset.name)))
+    # The fleet charter is a reserved dataset with its own page (#255).
+    rows = list(await session.scalars(select(Dataset).where(Dataset.kind != "charter").order_by(Dataset.name)))
     return [await dataset_dict(session, ds) for ds in rows]
 
 
@@ -297,7 +305,8 @@ async def _readable_version(session: AsyncSession, ds: Dataset, version: int | N
 
 async def list_for_members(session: AsyncSession) -> list[dict]:
     out = []
-    for ds in await session.scalars(select(Dataset).where(Dataset.status == "approved").order_by(Dataset.name)):
+    for ds in await session.scalars(select(Dataset).where(Dataset.status == "approved", Dataset.kind != "charter")
+                                    .order_by(Dataset.name)):
         v = await current_version(session, ds)
         if v is None:
             continue

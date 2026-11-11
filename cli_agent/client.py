@@ -144,7 +144,24 @@ class LTMSClient:
         self.permissions = tok["permissions"]
         self.seq, self.last_hash = tok["last_ack_seq"], tok["last_hash"]
         self._check_generation(tok["memory_generation"])
+        self._maybe_read_charter(tok.get("charter"))
         return tok
+
+    # ------------------------------------------------------------------ charter (#255)
+    auto_read_charter = True
+
+    def read_charter(self) -> dict | None:
+        """Read the fleet charter (logged by the server). Never raises; None on failure."""
+        try:
+            self.charter = self._call("GET", "/api/charter")
+            return self.charter
+        except Exception as exc:  # noqa: BLE001 - reading is best effort; writes say if it's needed
+            log.warning("read_charter failed: %s", exc)
+            return None
+
+    def _maybe_read_charter(self, status: dict | None) -> None:
+        if self.auto_read_charter and isinstance(status, dict) and status.get("read") is False:
+            self.read_charter()
 
     def _ensure_token(self) -> None:
         if self.token is None or self.token_expires is None or \
@@ -156,6 +173,7 @@ class LTMSClient:
         self.seq, self.last_hash = head["last_ack_seq"], head["last_hash"]
         self.outbox.clear()
         self._check_generation(head["memory_generation"])
+        self._maybe_read_charter(head.get("charter"))
         return head
 
     def report_cognition(self, location: str, models: list[dict] | None = None) -> dict | None:
@@ -199,6 +217,7 @@ class LTMSClient:
     def flush(self, batch_size: int = 100) -> list[dict]:
         """Send queued records. Stops at the first rejection and raises."""
         responses = []
+        charter_retried = False
         while self.outbox:
             batch = self.outbox[:batch_size]
             res = self._call("POST", "/api/records", json={"records": batch})
@@ -207,6 +226,11 @@ class LTMSClient:
             self.outbox = [r for r in self.outbox if r["seq"] > self.seq]
             if not res["ok"]:
                 bad = next(r for r in res["results"] if r["status"] == "rejected")
+                if bad["code"] == "charter_unread" and self.auto_read_charter and not charter_retried:
+                    # The charter changed (or was never read): read it, then send again (#255).
+                    charter_retried = True
+                    if self.read_charter() is not None:
+                        continue
                 raise LTMSError(422, bad["code"], f"seq {bad['seq']}: {bad['message']}")
         return responses
 

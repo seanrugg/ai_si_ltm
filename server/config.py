@@ -182,6 +182,9 @@ class ServerConfig(BaseSettings):
     # ("docs.ros.org") or "*.example.org". Empty (the default) means off.
     # Env: LTMS_DATASET_URL_ALLOW.
     dataset_url_allow: str = ""
+    # Fleet charter (#255): days existing members have to read a new version
+    # before their writes pause. Env: LTMS_CHARTER_GRACE_DAYS.
+    charter_grace_days: int = 14
 
     # Optional offline city database for network location estimates (#191).
     # Unset (the default) means no network estimates. Env: LTMS_GEOIP_DB.

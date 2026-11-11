@@ -111,3 +111,23 @@ A cycle:
 
 Records are signed and queued locally, so a cycle's writes work offline. Reads
 need the server.
+
+## The fleet charter
+
+The charter is the fleet's governance: its terms, constitution or rules. An
+admin publishes it as markdown, and every member must read it:
+
+- **A new member** reads the current version before its first record is
+  accepted.
+- **After an update**, existing members have 14 days (`LTMS_CHARTER_GRACE_DAYS`)
+  to read the new version. After that, their writes pause until they do.
+  Recall and reading never pause.
+- A relayed record is checked against its **author**, not the hub.
+
+`GET /api/charter` returns `{version, hash, published_at, markdown}` and logs
+the read, which reaches the LRS as `read-resource`. The token exchange and
+`GET /api/records/head` include `charter: {version, hash, read, due}`.
+`LTMSClient` reads the charter by itself when that says `read: false`, or
+when a flush is refused with `charter_unread`. Set
+`client.auto_read_charter = False` to handle it yourself (`read_charter()`).
+The `hash` is the SHA-256 of the published markdown.
