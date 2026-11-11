@@ -28,6 +28,9 @@ from ltms_mcp import remember as _remember
 from ltms_mcp import recall_context as _recall_context
 from ltms_mcp import restore as _restore
 from ltms_mcp import search_records as _search_records
+from ltms_mcp import list_datasets as _list_datasets
+from ltms_mcp import read_item as _read_item
+from ltms_mcp import search_datasets as _search_datasets
 
 mcp = MCPServer(
     name="ltms-mcp",
@@ -97,6 +100,34 @@ def search_records(
 ) -> list[dict]:
     """Return records matching the filters; limit is capped at 100."""
     return _search_records(_client(), type=type, agent=agent, place=place, limit=limit)
+
+
+@mcp.tool()
+def list_datasets() -> list[dict]:
+    """List the fleet's approved datasets (id, name, description, current version, licence).
+
+    Reference material for the fleet. Cite what you use in a lesson's payload.sources.
+    """
+    return _list_datasets(_client())
+
+
+@mcp.tool()
+def search_datasets(dataset: str, query: str, limit: int = 10) -> list[dict]:
+    """Search one dataset (by id or name); returns ranked hits with a key and snippet.
+
+    Reference material for the fleet. Cite what you use in a lesson's payload.sources.
+    """
+    return _search_datasets(_client(), dataset, query, limit=limit)
+
+
+@mcp.tool()
+def read_item(dataset: str, key: str, version: int | None = None, cycle: str | None = None) -> dict:
+    """Read one dataset item's text (max 20,000 characters). The read is logged.
+
+    Reference material for the fleet. Cite what you use in a lesson's payload.sources:
+    the result's ``cite_as`` is the entry to add. ``cycle`` is a dream cycle's id.
+    """
+    return _read_item(_client(), dataset, key, version=version, cycle=cycle)
 
 
 def main() -> None:

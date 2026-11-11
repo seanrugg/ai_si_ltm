@@ -3,12 +3,21 @@
 `ltms_mcp` lets agent frameworks (Claude Code, Hermes, OpenClaw and others)
 join LTMS as members **without the model ever handling a private key or
 building signed records**. The MCP server holds the member's key, signs and
-sends records via `cli_agent.client.LTMSClient`, and exposes three tools:
+sends records via `cli_agent.client.LTMSClient`, and exposes these tools:
 
 * `remember(type, summary, payload, place, peers, tags)` — sign and send one
   record, returns `{"seq", "hash"}`.
 * `recall_context(intent, target, place)` — the context pack the member may see.
 * `search_records(type, agent, place, limit)` — records matching the filters.
+* `list_datasets()` — the fleet's approved datasets (reference material).
+* `search_datasets(dataset, query, limit)` — ranked hits with snippets; `dataset`
+  is an id or a name.
+* `read_item(dataset, key, version, cycle)` — one item's text, truncated to
+  20,000 characters with a note when longer, plus `version`, `media_type`,
+  `sha256` and `cite_as`. Every read is logged by LTMS (and sent to the LRS if
+  one is configured), exactly like a robot's read. Cite what you use: put
+  `cite_as` in a lesson's `payload.sources` (at most 16). See
+  [docs/datasets.md](../docs/datasets.md).
 
 ## 1. Generate a member key
 

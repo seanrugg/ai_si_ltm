@@ -164,3 +164,55 @@ def search_records(
     if place is not None:
         params["place"] = place
     return client.records(**params)
+
+
+# ---------------------------------------------------------------- datasets (#241)
+DATASET_NOTE = "Reference material for the fleet. Cite what you use in a lesson's payload.sources."
+MAX_ITEM_CHARS = 20_000
+
+
+def _dataset_call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except LTMSError as exc:
+        raise ToolError(exc.code, exc.message) from None
+
+
+def resolve_dataset(client: LTMSClient, dataset: str) -> str:
+    """A dataset id or name -> its id. Names match case-insensitively."""
+    listed = _dataset_call(client.datasets)
+    for ds in listed:
+        if ds["id"] == dataset:
+            return ds["id"]
+    wanted = dataset.strip().casefold()
+    for ds in listed:
+        if ds["name"].casefold() == wanted:
+            return ds["id"]
+    raise ToolError("not_found", f"no approved dataset {dataset!r}; call list_datasets")
+
+
+def list_datasets(client: LTMSClient) -> list[dict[str, Any]]:
+    """The fleet's approved datasets: id, name, description, current version, licence."""
+    keep = ("id", "name", "description", "kind", "licence", "current_version", "item_count")
+    return [{k: ds.get(k) for k in keep if k in ds} for ds in _dataset_call(client.datasets)]
+
+
+def search_datasets(client: LTMSClient, dataset: str, query: str, limit: int = 10) -> list[dict[str, Any]]:
+    """Ranked hits (key, snippet) in one dataset's current version."""
+    dataset_id = resolve_dataset(client, dataset)
+    return _dataset_call(client.search_dataset, dataset_id, query, limit=max(1, min(int(limit), 50)))
+
+
+def read_item(client: LTMSClient, dataset: str, key: str, version: int | None = None,
+              cycle: str | None = None) -> dict[str, Any]:
+    """One item's text (at most 20,000 characters) with its version and hash. Logged as a read."""
+    dataset_id = resolve_dataset(client, dataset)
+    item = _dataset_call(client.read_item, dataset_id, key, version=version, cycle=cycle)
+    text = item.get("text") or ""
+    out = {"dataset": dataset_id, "key": item["key"], "version": item["version"],
+           "media_type": item.get("media_type"), "sha256": item.get("sha256"), "text": text[:MAX_ITEM_CHARS]}
+    if len(text) > MAX_ITEM_CHARS:
+        out["note"] = (f"text truncated to {MAX_ITEM_CHARS:,} of {len(text):,} characters; "
+                       "search the dataset to find the part you need")
+    out["cite_as"] = {"dataset": dataset_id, "version": item["version"], "item": item["key"]}
+    return out
