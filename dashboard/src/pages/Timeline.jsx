@@ -1,15 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client.js";
 import RecordRow, { TombstoneRow } from "../components/RecordRow.jsx";
+import TypePicker from "../components/TypePicker.jsx";
 import { EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui.jsx";
 import { localTime } from "../lib/format.js";
+import { LABELS, parseTypes } from "../lib/typeFilter.js";
 import { missingSeqs } from "../lib/tombstones.js";
 
-const TYPES = ["communication", "thought", "decision", "action", "event", "perception", "lesson", "policy", "system"];
 const OUTCOMES = ["success", "partial", "reflex_stop", "stuck", "abandoned", "failed"];
 const PAGE = 50;
 const FILTERS = ["agent", "type", "outcome", "place", "q", "since"];
+// Text fields apply after typing stops; selects and the Types picker apply at once.
+const TEXT_APPLY_DELAY_MS = 400;
 
 export default function Timeline() {
   const [params, setParams] = useSearchParams();
@@ -21,16 +24,15 @@ export default function Timeline() {
   const [loading, setLoading] = useState(true);
   const [more, setMore] = useState(false);
   const [auto, setAuto] = useState(false);
-  const [draft, setDraft] = useState(filters);
 
-  function removeSince() {
+  function setParam(key, value) {
     setParams((prev) => {
-      prev.delete("since");
-      return prev;
+      const next = new URLSearchParams(prev);
+      if (value) next.set(key, value);
+      else next.delete(key);
+      return next;
     });
   }
-  // off by default: telemetry is hidden unless the box is checked
-  const [showTelemetry, setShowTelemetry] = useState(false);
 
   async function load(offset = 0) {
     setLoading(true);
@@ -45,7 +47,6 @@ export default function Timeline() {
           limit: PAGE,
           offset,
           ...(since ? { from: since } : {}),
-          ...(showTelemetry ? {} : { exclude_tag: "telemetry" }),
         },
       });
       setRecords((prev) => (offset ? [...prev, ...res.records] : res.records));
@@ -58,7 +59,6 @@ export default function Timeline() {
   }
 
   useEffect(() => {
-    setDraft(filters);
     load(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterKey]);
@@ -70,9 +70,35 @@ export default function Timeline() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auto, filterKey]);
 
+  // Text fields (member, place, summary) hold local drafts and apply 400 ms
+  // after typing stops. A URL change (chips, Clear all, reload) re-syncs them.
+  const [drafts, setDrafts] = useState(null);
+  const applyTimer = useRef(null);
+  useEffect(() => {
+    setDrafts(null);
+    return () => clearTimeout(applyTimer.current);
+  }, [filterKey]);
+  const textValue = (key) => (drafts ? drafts[key] ?? "" : filters[key]);
+  function onTextChange(e, key) {
+    const value = e.target.value;
+    setDrafts((d) => ({ ...(d || {}), [key]: value }));
+    clearTimeout(applyTimer.current);
+    applyTimer.current = setTimeout(() => setParam(key, value), TEXT_APPLY_DELAY_MS);
+  }
+
+  // Active filters become chips under the filter row; the default type
+  // selection (everything except sensed, i.e. no `type` param) shows no chip.
+  const active = [];
+  if (filters.type) active.push({ key: "type", label: `Type: ${[...parseTypes(filters.type)].map((t) => LABELS[t]).join(", ")}` });
+  if (filters.agent) active.push({ key: "agent", label: `Member: ${filters.agent}` });
+  if (filters.outcome) active.push({ key: "outcome", label: `Outcome: ${filters.outcome.replace("_", " ")}` });
+  if (filters.place) active.push({ key: "place", label: `Place: ${filters.place}` });
+  if (filters.q) active.push({ key: "q", label: `Summary contains: ${filters.q}` });
+  if (filters.since) active.push({ key: "since", label: `Since: ${localTime(filters.since)}` });
+
   // A member's own timeline (only the Member filter set): where a seq is
   // missing, look it up, and show a tombstone if an admin deleted it (#174).
-  // Seqs hidden by the telemetry toggle come back as ordinary records and are skipped.
+  // Seqs hidden by a type filter come back as ordinary records and are skipped.
   const memberOnly = Boolean(filters.agent) && !filters.type && !filters.outcome && !filters.place && !filters.q;
   const [tombstones, setTombstones] = useState([]);
   const recordSeqs = records.map((r) => `${r.agent}:${r.seq}`).join(" ");
@@ -105,15 +131,11 @@ export default function Timeline() {
     rows.splice(at === -1 ? rows.length : at, 0, t);
   }
 
-  function apply(e) {
-    e.preventDefault();
-    const next = {};
-    for (const [k, v] of Object.entries(draft)) if (v) next[k] = v.trim();
-    if (!showTelemetry) next.exclude_tag = "telemetry";
-    setParams(next);
-  }
-
-  const filtered = FILTERS.some((k) => filters[k]);
+  const countText = records.length === 0
+    ? "No records match"
+    : records.length === 1
+      ? "1 record"
+      : `${records.length} records`;
 
   return (
     <>
@@ -127,60 +149,42 @@ export default function Timeline() {
         </button>
       </PageHeader>
 
-      <form onSubmit={apply} className="mb-4 flex flex-wrap items-end gap-2" aria-label="Filter records">
-        <input className="field w-36" placeholder="Member" value={draft.agent}
-               onChange={(e) => setDraft({ ...draft, agent: e.target.value })} aria-label="Member" />
-        <div className="flex flex-wrap gap-2 items-end" aria-label="Type">
-          <span className="text-xs text-paper-muted">Type</span>
-          {TYPES.map((t) => {
-            const checked = (draft.type || "").split(",").includes(t);
-            return (
-              <label key={t} className="flex items-center gap-1 text-sm cursor-pointer">
-                <input type="checkbox" checked={checked} className="accent-led"
-                       onChange={(e) => {
-                         const sel = (draft.type || "").split(",").filter(Boolean);
-                         if (e.target.checked) sel.push(t); else sel.splice(sel.indexOf(t), 1);
-                         setDraft({ ...draft, type: sel.join(",") });
-                       }} />
-                {t}
-              </label>
-            );
-          })}
-        </div>
-        <label className="flex items-center gap-2 text-sm text-paper-muted cursor-pointer">
-          <input type="checkbox" checked={showTelemetry} className="accent-led"
-                 onChange={(e) => setShowTelemetry(e.target.checked)} />
-          Show telemetry
-        </label>
-        <select className="field" value={draft.outcome} onChange={(e) => setDraft({ ...draft, outcome: e.target.value })} aria-label="Outcome">
+      <form className="mb-2 flex flex-wrap items-center gap-2" aria-label="Filter records"
+            onSubmit={(e) => e.preventDefault()}>
+        <input className="field w-36" placeholder="Member" value={textValue("agent")}
+               onChange={(e) => onTextChange(e, "agent")} aria-label="Member" />
+        <select className="field" value={filters.outcome}
+                onChange={(e) => setParam("outcome", e.target.value)} aria-label="Outcome">
           <option value="">Any outcome</option>
           {OUTCOMES.map((o) => <option key={o} value={o}>{o.replace("_", " ")}</option>)}
         </select>
-        <input className="field w-36" placeholder="Place" value={draft.place}
-               onChange={(e) => setDraft({ ...draft, place: e.target.value })} aria-label="Place" />
-        <input className="field w-48" placeholder="Summary contains" value={draft.q}
-               onChange={(e) => setDraft({ ...draft, q: e.target.value })} aria-label="Summary contains" />
-        <button className="btn btn-primary">Filter</button>
-        {filtered && (
-          <button type="button" className="btn" onClick={() => setParams({})}>
-            Clear
-          </button>
-        )}
-        {filters.since && (
-          <span className="flex items-center gap-2 rounded border border-ink-line bg-ink-raised px-2.5 py-1.5 text-xs">
-            <span className="text-paper-muted">Since</span>
-            <span className="font-mono">{localTime(filters.since)}</span>
-            <button
-              type="button"
-              onClick={removeSince}
-              className="min-h-[44px] min-w-[44px] rounded border border-ink-line hover:bg-ink-hover"
-              aria-label="Remove since filter"
-            >
-              &times;
-            </button>
-          </span>
-        )}
+        <input className="field w-36" placeholder="Place" value={textValue("place")}
+               onChange={(e) => onTextChange(e, "place")} aria-label="Place" />
+        <input className="field w-48" placeholder="Summary contains" value={textValue("q")}
+               onChange={(e) => onTextChange(e, "q")} aria-label="Summary contains" />
+        <TypePicker value={filters.type} onChange={(raw) => setParam("type", raw)} />
       </form>
+
+      {active.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2" role="group" aria-label="Active filters">
+          {active.map(({ key, label }) => (
+            <button key={key} type="button"
+                    className="flex items-center gap-1.5 rounded-full border border-ink-line bg-ink-raised px-3 py-1.5 text-sm hover:bg-ink-hover"
+                    aria-label={`Remove filter ${label}`}
+                    onClick={() => setParam(key, "")}>
+              {label}
+              <span aria-hidden="true" className="text-paper-muted">&times;</span>
+            </button>
+          ))}
+          <button type="button" className="btn" onClick={() => setParams({})}>
+            Clear all
+          </button>
+        </div>
+      )}
+
+      {!loading && !error && (
+        <p className="mb-2 text-sm text-paper-muted" role="status">{countText}</p>
+      )}
 
       <ErrorNote error={error} onRetry={() => load(0)} />
       {records.length > 0 && (
@@ -192,8 +196,8 @@ export default function Timeline() {
       )}
       {loading && <Loading what="Loading records" />}
       {!loading && !error && records.length === 0 && (
-        <EmptyState title={filtered ? "No records match these filters" : "No records yet"}>
-          {filtered
+        <EmptyState title={active.length > 0 ? "No records match these filters" : "No records yet"}>
+          {active.length > 0
             ? "Try clearing a filter."
             : "Records appear here once an approved member sends them. Approve a member on the Members page, then run `python -m cli_agent send`."}
         </EmptyState>
