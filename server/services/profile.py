@@ -530,3 +530,74 @@ async def history(session: AsyncSession, subject: Subject) -> dict:
     for e in events:
         e.pop("_order")
     return {"events": events[:MAX_EVENTS]}
+
+
+# --------------------------------------------------------------------------- #
+# What it read (#243): dataset reads and dream cycles
+# --------------------------------------------------------------------------- #
+NEWEST_CYCLES = 20
+CYCLE_TAG = "dream_cycle"
+
+
+async def reading(session: AsyncSession, subject: Subject, hours: int) -> dict:
+    """Datasets the subject read, and its newest dream cycles with their lessons.
+
+    Reads belong to members, so a swarm's reads are its current members'. Cycles
+    come from the subject's ``event`` records tagged ``dream_cycle``; a cycle's
+    lessons are the subject's lessons whose ``payload.cycle`` matches.
+    """
+    from server.models import Dataset, DatasetRead  # local: profile predates datasets
+
+    since = _since(hours)
+    datasets: list[dict] = []
+    if subject.member_ids:
+        stmt = (select(DatasetRead.dataset_id, Dataset.name, func.count(DatasetRead.id),
+                       func.count(func.distinct(DatasetRead.item_key)), func.max(DatasetRead.ts))
+                .join(Dataset, Dataset.id == DatasetRead.dataset_id)
+                .where(DatasetRead.member_id.in_(subject.member_ids))
+                .group_by(DatasetRead.dataset_id, Dataset.name))
+        if since is not None:
+            stmt = stmt.where(DatasetRead.ts >= since)
+        for did, name, reads, items, last in (await session.execute(stmt)).all():
+            datasets.append({"dataset": str(did), "name": name, "reads": int(reads), "items": int(items),
+                             "last_read": last.isoformat() if last else None})
+        datasets.sort(key=lambda d: (-d["reads"], d["name"]))
+
+    # Cycle events, newest first. The tag test is a text match on the JSON list,
+    # which works the same on SQLite and PostgreSQL.
+    events = list(await session.scalars(
+        select(Record).where(subject.records(), _in_range(since), Record.type == "event",
+                             cast(Record.tags, String).like(f'%"{CYCLE_TAG}"%'))
+        .order_by(Record.ts.desc(), Record.id.desc()).limit(NEWEST_CYCLES * 4)))
+    payloads = await recall.fetch_payloads(session, events)
+    cycles: dict[str, dict] = {}
+    for ev in events:
+        body = payloads[ev.id].body if ev.id in payloads else {}
+        cid = body.get("cycle") if isinstance(body, dict) else None
+        if not isinstance(cid, str):
+            continue
+        c = cycles.setdefault(cid, {"cycle": cid, "agent": ev.agent, "started": None, "ended": None,
+                                    "items_read": None, "lessons": []})
+        if body.get("phase") == "start":
+            c["started"] = ev.ts.isoformat()
+        elif body.get("phase") == "end":
+            c["ended"] = ev.ts.isoformat()
+            if isinstance(body.get("items_read"), int):
+                c["items_read"] = body["items_read"]
+    newest = sorted(cycles.values(), key=lambda c: c["started"] or c["ended"] or "", reverse=True)[:NEWEST_CYCLES]
+    wanted = {c["cycle"]: c for c in newest}
+
+    if wanted:
+        oldest = min((c["started"] or c["ended"]) for c in newest)
+        lessons = list(await session.scalars(
+            select(Record).where(subject.records(), Record.type == "lesson",
+                                 Record.ts >= datetime.fromisoformat(oldest))
+            .order_by(Record.ts, Record.id)))
+        lesson_payloads = await recall.fetch_payloads(session, lessons)
+        for rec in lessons:
+            body = lesson_payloads[rec.id].body if rec.id in lesson_payloads else {}
+            cid = body.get("cycle") if isinstance(body, dict) else None
+            if cid in wanted:
+                wanted[cid]["lessons"].append({"agent": rec.agent, "seq": rec.seq, "summary": rec.summary})
+
+    return {"subject": subject.as_dict(), "hours": hours, "datasets": datasets, "cycles": newest}
