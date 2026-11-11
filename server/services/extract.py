@@ -6,9 +6,12 @@ txt, md, html, csv, tsv, json, jsonl, yaml, xml. Standard library plus PyYAML.
 """
 from __future__ import annotations
 
+import asyncio
 import csv
+import importlib.util
 import io
 import json
+import sys
 from html.parser import HTMLParser
 from pathlib import PurePosixPath
 from xml.etree import ElementTree
@@ -48,6 +51,23 @@ TEXT_TYPES = {
 }
 TEXT_TIER = set(TEXT_TYPES.values())
 
+# Documents tier (#244): extracted in a child process with time and memory limits.
+DOC_TYPES = {
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".epub": "application/epub+zip",
+}
+DOCUMENT_TIER = set(DOC_TYPES.values())
+# The import each type needs; epub needs only the standard library.
+DOC_MODULES = {
+    DOC_TYPES[".pdf"]: "pypdf", DOC_TYPES[".docx"]: "docx",
+    DOC_TYPES[".pptx"]: "pptx", DOC_TYPES[".xlsx"]: "openpyxl",
+}
+DOC_TIMEOUT_S = 30
+DOC_MEMORY_BYTES = 512 * 1024 * 1024
+
 
 def _looks_binary(head: bytes) -> bool:
     if b"\x00" in head[:4096]:
@@ -61,6 +81,13 @@ def _looks_binary(head: bytes) -> bool:
 
 def sniff(head: bytes, filename: str) -> str:
     """The media type, from the content first."""
+    if head.startswith(b"PK\x03\x04"):
+        # A zip: the name says which Office/epub format it claims to be; the
+        # extractor then fails cleanly if it isn't.
+        suffix = PurePosixPath(filename.lower()).suffix
+        if suffix in (".docx", ".pptx", ".xlsx", ".epub"):
+            return DOC_TYPES[suffix]
+        return "application/zip"
     for sig, mtype in MAGIC:
         if head.startswith(sig):
             if mtype == "audio/wav" and head[8:12] != b"WAVE":
@@ -161,3 +188,48 @@ def extract(data: bytes, media_type: str) -> tuple[str | None, dict]:
         meta["truncated"] = True
         text = text[:TEXT_CAP]
     return text, meta
+
+
+def _limit_memory() -> None:  # pragma: no cover - runs in the child
+    try:
+        import resource
+
+        resource.setrlimit(resource.RLIMIT_AS, (DOC_MEMORY_BYTES, DOC_MEMORY_BYTES))
+    except (ImportError, ValueError, OSError):
+        pass  # not Linux, or the limit can't be lowered: the timeout still applies
+
+
+def _cap(text: str | None, meta: dict) -> tuple[str | None, dict]:
+    if text is not None and len(text) > TEXT_CAP:
+        meta["truncated"] = True
+        text = text[:TEXT_CAP]
+    return text, meta
+
+
+async def extract_document(path: str, media_type: str, *, timeout: float | None = None) -> tuple[str | None, dict]:
+    """``(text, meta)`` for a document-tier file, extracted in a child process.
+
+    Never raises: a missing extra, an encrypted PDF, a crash or a timeout gives
+    ``text=None`` and ``meta.extract_error``, and the upload still succeeds.
+    """
+    module = DOC_MODULES.get(media_type)
+    if module is not None and importlib.util.find_spec(module) is None:
+        return None, {"extract_error": "install ltms[docs]"}
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "server.services.doc_extract", path, media_type,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        preexec_fn=_limit_memory if sys.platform.startswith("linux") else None,
+    )
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=DOC_TIMEOUT_S if timeout is None else timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        return None, {"extract_error": "timeout"}
+    try:
+        result = json.loads(out.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None, {"extract_error": f"crashed (exit {proc.returncode})"}
+    if "error" in result:
+        return None, {"extract_error": result["error"]}
+    return _cap(result.get("text"), result.get("meta") or {})
