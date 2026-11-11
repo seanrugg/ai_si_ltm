@@ -28,12 +28,14 @@ function query(params) {
 export async function api(path, { method = "GET", params, body } = {}) {
   const headers = { Accept: "application/json" };
   if (method !== "GET") headers["X-LTMS-Admin"] = "1";
-  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const form = typeof FormData !== "undefined" && body instanceof FormData;
+  if (body !== undefined && !form) headers["Content-Type"] = "application/json";
   const res = await fetch(`/api${path}${query(params)}`, {
     method,
     headers,
     credentials: "same-origin",
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    // A FormData body is sent as multipart; the browser sets the boundary.
+    body: body === undefined ? undefined : form ? body : JSON.stringify(body),
   });
   let data = null;
   try {

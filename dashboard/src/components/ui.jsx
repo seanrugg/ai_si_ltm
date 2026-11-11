@@ -21,6 +21,7 @@ const STATUS_STYLES = {
   ok: "text-ok border-ok/40",
   success: "text-ok border-ok/40",
   pending: "text-led border-led/50",
+  approved: "text-ok border-ok/40",
   partial: "text-warn border-warn/40",
   empty: "text-paper-muted border-ink-line",
   revoked: "text-paper-muted border-ink-line",

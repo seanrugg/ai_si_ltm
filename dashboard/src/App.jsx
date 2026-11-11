@@ -9,6 +9,7 @@ import Integrity from "./pages/Integrity.jsx";
 import Lessons from "./pages/Lessons.jsx";
 import Volume from "./pages/Volume.jsx";
 import Swarms from "./pages/Swarms.jsx";
+import Datasets from "./pages/Datasets.jsx";
 import Retention from "./pages/Retention.jsx";
 import Login from "./pages/Login.jsx";
 import Members from "./pages/Members.jsx";
@@ -79,6 +80,7 @@ const router = createHashRouter([
       { path: "/retention", element: <Retention /> },
       { path: "/volume", element: <Volume /> },
       { path: "/swarms", element: <Swarms /> },
+      { path: "/datasets", element: <Datasets /> },
       { path: "/members/:name/profile", element: <Profile key="member" subject="member" /> },
       { path: "/swarms/:name/profile", element: <Profile key="swarm" subject="swarm" /> },
       { path: "/record/:agent/:seq", element: <RecordPage /> },
