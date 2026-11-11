@@ -30,7 +30,7 @@ from server.services import location as location_service
 from server.services import network as network_service
 from server.services import profile as profile_service
 from server.services import datasets as datasets_service
-from server.services import dataset_uploads, integrations
+from server.services import dataset_uploads, integrations, url_snapshot
 from server.services import swarm_remove
 from server.services.errors import ServiceError
 
@@ -1377,6 +1377,21 @@ async def add_external_items(dataset_id: str, version: int, request: Request, bo
         ds = await datasets_service.get_dataset(session, dataset_id)
         items = await integrations.add_external_items(session, ds, version, body.get("items"))
         return {"items": items, "dataset": await datasets_service.dataset_dict(session, ds)}
+
+
+@router.post("/admin/datasets/{dataset_id}/snapshot")
+async def snapshot_dataset_url(dataset_id: str, request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    """``{url}``: fetch once into a pending version of a ``kind: url`` dataset (#249). Off unless
+    LTMS_DATASET_URL_ALLOW lists hosts."""
+    async with transaction(request) as session:
+        ds = await datasets_service.get_dataset(session, dataset_id)
+        out = await url_snapshot.snapshot(
+            session, request.app.state.config, ds, body.get("url"), admin=f"admin:{admin.username}",
+            # Test hooks; unset in production (a real transport and the system resolver).
+            transport=getattr(request.app.state, "url_snapshot_transport", None),
+            resolve=getattr(request.app.state, "url_snapshot_resolve", None))
+        out["dataset"] = await datasets_service.dataset_dict(session, ds)
+        return out
 
 
 # Resumable uploads (#245): start, PUT chunks with Content-Range, finish.

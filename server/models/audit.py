@@ -48,6 +48,7 @@ AUDIT_ACTIONS = (
     "dataset_upload_expire",
     "integration_create",
     "integration_delete",
+    "dataset_snapshot",
 )
 
 
