@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, Integer, literal, or_, select
+from sqlalchemy import and_, func, Integer, literal, or_, select
 
 from ltms_contract import RECORD_TYPES
 
@@ -171,6 +171,41 @@ async def bulk_members(request: Request, body: BulkMembersRequest, admin: AdminA
 # --------------------------------------------------------------------------- #
 # Views
 # --------------------------------------------------------------------------- #
+def _timeline_type_clause(session, type_param: str | None):
+    """The ``type`` filter for /admin/timeline only (issue #181).
+
+    ``sensed`` is a perception tagged telemetry; ``perception`` is one that is
+    not. An empty or missing list is today's default: everything except
+    sensed. Each selection is a type condition, plus a tag condition for the
+    two perception cases, OR'd together. ``RecordFilter`` and ``build_query``
+    keep their plain-type semantics for every other caller.
+    """
+    wanted = [t.strip() for t in (type_param or "").split(",") if t.strip()]
+    unknown = [t for t in wanted if t not in RECORD_TYPES and t != "sensed"]
+    if unknown:
+        raise ServiceError(
+            422, "bad_type",
+            f"unknown type(s): {', '.join(unknown)}; must be one of {', '.join(RECORD_TYPES)}, sensed",
+        )
+    groups = wanted or list(RECORD_TYPES)  # empty = everything except sensed
+    conds = []
+    for t in groups:
+        if t == "sensed":
+            conds.append(and_(
+                Record.type == "perception",
+                recall._json_list_contains(session, Record.tags, "telemetry"),
+            ))
+        elif t == "perception":
+            # tags may be SQL NULL; "NOT (NULL @> ...)" is NULL, so keep untagged rows
+            conds.append(and_(
+                Record.type == "perception",
+                or_(Record.tags.is_(None), ~recall._json_list_contains(session, Record.tags, "telemetry")),
+            ))
+        else:
+            conds.append(Record.type == t)
+    return or_(*conds)
+
+
 @router.get("/admin/timeline")
 async def timeline(
     request: Request,
@@ -188,10 +223,15 @@ async def timeline(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ) -> dict:
-    f = recall.RecordFilter(type=type, agent=agent, place=place, peer=peer, tag=tag, exclude_tag=exclude_tag,
+    f = recall.RecordFilter(agent=agent, place=place, peer=peer, tag=tag, exclude_tag=exclude_tag,
                             outcome=outcome, since=since, until=until, q=q, limit=limit, offset=offset)
     async with transaction(request) as session:
-        records = await recall.query_records(session, f, recall.Scope())
+        # `type` is handled here (not by build_query) so it can accept `sensed`.
+        stmt = recall.build_query(session, f, recall.Scope()).where(_timeline_type_clause(session, type))
+        stmt = stmt.order_by(Record.ts.desc(), Record.id.desc()).limit(limit).offset(offset)
+        rows = list(await session.scalars(stmt))
+        payloads = await recall.fetch_payloads(session, rows)
+        records = [recall.to_wire(r, payloads.get(r.id)) for r in rows]
         return {"records": records, "count": len(records), "limit": limit, "offset": offset}
 
 
