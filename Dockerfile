@@ -43,7 +43,7 @@ COPY . .
 # aiosqlite is not a declared dependency of the package, but the documented
 # smoke test (docker run with LTMS_DATABASE_URL=sqlite+aiosqlite:///./dev.db)
 # needs it; a real deployment overrides LTMS_DATABASE_URL with Postgres.
-RUN pip install --no-cache-dir . "aiosqlite>=0.20"
+RUN pip install --no-cache-dir ".[docs]" "aiosqlite>=0.20"
 
 # pg_dump is needed for the pre-upgrade backup the entrypoint takes (issue #99).
 # Trixie's client is newer than the Postgres 16 server, so pg_dump supports it;

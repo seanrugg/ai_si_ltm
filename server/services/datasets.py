@@ -189,13 +189,19 @@ async def upload_items(session: AsyncSession, cfg, ds: Dataset, version: int, fi
             raise ServiceError(413, "too_large", f"{key}: over {cfg.dataset_text_max_mb} MB. Large files "
                                "arrive in a later release; use a catalog integration for big data.") from None
         media_type = extract.sniff(head, f.filename or key)
-        if media_type not in extract.TEXT_TIER:
+        if media_type in extract.TEXT_TIER:
+            tier = "text"
+            text, meta = extract.extract(dataset_store.read_bytes(cfg.data_dir, sha), media_type)
+        elif media_type in extract.DOCUMENT_TIER:
+            tier = "text"  # served as extracted text, like the text tier
+            text, meta = await extract.extract_document(str(dataset_store.path_for(cfg.data_dir, sha)), media_type)
+        else:
             raise ServiceError(415, "unsupported_type",
-                               f"{key}: {media_type} isn't a text format (txt, md, html, csv, tsv, json, jsonl, "
-                               "yaml, xml). Other types arrive in later releases.")
-        text, meta = extract.extract(dataset_store.read_bytes(cfg.data_dir, sha), media_type)
+                               f"{key}: {media_type} isn't a supported format (txt, md, html, csv, tsv, json, "
+                               "jsonl, yaml, xml, pdf, docx, pptx, xlsx, epub). Other types arrive in later "
+                               "releases.")
         session.add(DatasetItem(version_id=v.id, key=key, media_type=media_type, size_bytes=size, sha256=sha,
-                                tier="text", text=text, meta=meta))
+                                tier=tier, text=text, meta=meta))
         results.append({"key": key, "media_type": media_type, "size_bytes": size, "sha256": sha, "meta": meta})
     await session.flush()
     await refresh_manifest(session, v)

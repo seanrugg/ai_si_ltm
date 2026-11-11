@@ -30,6 +30,8 @@ dev = ["pytest>=8.0", "aiosqlite>=0.20"]
 hub = ["paho-mqtt>=2,<3"]  # Jetson hub entrypoint: cli_agent.hub_main
 mcp = ["mcp>=2,<3"]  # ltms_mcp uses MCPServer, added in mcp 2.0
 geo = ["maxminddb>=2.5"]  # optional offline network location estimates (#191)
+# Dataset documents (#244): pdf, docx, pptx, xlsx text extraction (epub needs none).
+docs = ["pypdf>=4", "python-docx>=1.1", "python-pptx>=0.6.23", "openpyxl>=3.1"]
 
 [tool.setuptools.packages.find]
 include = ["ltms_contract*", "server*", "cli_agent*", "ltms_mcp*"]
