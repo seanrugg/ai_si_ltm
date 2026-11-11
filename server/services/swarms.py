@@ -116,7 +116,10 @@ async def create_swarm(session: AsyncSession, *, name: str, public_key_hex: str,
         public_key = b""
     if len(public_key) != 32:
         raise ServiceError(422, "bad_key", "public key must be 64 hex characters (Ed25519)")
-    if await session.scalar(select(Swarm).where((Swarm.name == name) | (Swarm.public_key == public_key))):
+    existing = await session.scalar(select(Swarm).where((Swarm.name == name) | (Swarm.public_key == public_key)))
+    if existing is not None:
+        if existing.status == "removed" and existing.public_key == public_key:
+            raise ServiceError(409, "swarm_exists", "a removed swarm used this key; generate a new one")
         raise ServiceError(409, "swarm_exists", "a swarm with that name or key already exists")
     if is_home and await session.scalar(select(Swarm).where(Swarm.is_home.is_(True), Swarm.status == "active")):
         raise ServiceError(409, "home_exists", "there is already an active home swarm")
@@ -144,13 +147,24 @@ async def rename_swarm(session: AsyncSession, swarm: Swarm, new_name: str, *, ac
     MQTT topics use the name, so hubs, members and the broker ACL need updating
     by the operator.
     """
-    old = swarm.name
+    if swarm.status == "removed":
+        raise ServiceError(404, "no_swarm", "that swarm was removed")
     if not NAME_RE.match(new_name or ""):
         raise ServiceError(422, "bad_name", "swarm name: lowercase letters, digits, '.', '_' or '-', up to 64")
-    if new_name == old:
+    if new_name == swarm.name:
         return swarm
     if await session.scalar(select(Swarm).where(Swarm.name == new_name)):
         raise ServiceError(409, "name_taken", f"a swarm named {new_name!r} already exists")
+    old = swarm.name
+    await _move_name(session, swarm, new_name)
+    _audit(session, actor, "swarm_rename", {"swarm": swarm.id, "old": old, "new": new_name})
+    await session.flush()
+    return swarm
+
+
+async def _move_name(session: AsyncSession, swarm: Swarm, new_name: str) -> None:
+    """Give the swarm a new name; stored scopes and its declared location follow."""
+    old = swarm.name
     swarm.name = new_name
     for model in (Member, McpToken, LrsEndpoint):
         for row in await session.scalars(select(model).where(model.scope.is_not(None))):
@@ -166,9 +180,25 @@ async def rename_swarm(session: AsyncSession, swarm: Swarm, new_name: str, *, ac
         DeclaredLocation.subject_type == "swarm", DeclaredLocation.subject_name == old))
     if loc is not None:
         loc.subject_name = new_name
-    _audit(session, actor, "swarm_rename", {"swarm": swarm.id, "old": old, "new": new_name})
     await session.flush()
-    return swarm
+
+
+async def release_members(session: AsyncSession, swarm: Swarm, now: datetime) -> list[Member]:
+    """Close every open membership of the swarm (the hub loses relay). Returns the members."""
+    rows = list(await session.scalars(select(SwarmMember).where(
+        SwarmMember.swarm_id == swarm.id, SwarmMember.left_at.is_(None))))
+    released = []
+    for row in rows:
+        member = await session.get(Member, row.member_id)
+        await _close(session, row, member, now)
+        released.append(member)
+    return released
+
+
+def removed_name(swarm: Swarm) -> str:
+    """Where a removed swarm's name goes, so the name can be reused: ``<name>.removed.<id[:8]>``."""
+    suffix = f".removed.{swarm.id[:8]}"
+    return swarm.name[:64 - len(suffix)] + suffix
 
 
 def _validate_open_permissions(perms: list[str]) -> list[str]:
@@ -310,10 +340,7 @@ async def revoke_swarm(session: AsyncSession, swarm: Swarm, *, actor: str = "cli
     Records keep the provenance they were stored with.
     """
     now = _now(now)
-    rows = list(await session.scalars(select(SwarmMember).where(
-        SwarmMember.swarm_id == swarm.id, SwarmMember.left_at.is_(None))))
-    for row in rows:
-        await _close(session, row, await session.get(Member, row.member_id), now)
+    rows = await release_members(session, swarm, now)
     swarm.status, swarm.revoked_at = "revoked", now
     _audit(session, actor, "swarm_revoke", {"swarm": swarm.name, "members_released": len(rows)})
     await session.flush()
@@ -322,7 +349,7 @@ async def revoke_swarm(session: AsyncSession, swarm: Swarm, *, actor: str = "cli
 
 async def describe(session: AsyncSession) -> list[dict]:
     out = []
-    for swarm in await session.scalars(select(Swarm).order_by(Swarm.created_at)):
+    for swarm in await session.scalars(select(Swarm).where(Swarm.status != "removed").order_by(Swarm.created_at)):
         rows = await session.execute(
             select(SwarmMember.role, Member.name, SwarmMember.joined_at)
             .join(Member, Member.id == SwarmMember.member_id)

@@ -36,7 +36,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from server.models.base import Base, BigIntPK, JSONType, UTCDateTime, utcnow
 
-SWARM_STATUSES = ("active", "revoked")
+SWARM_STATUSES = ("active", "revoked", "removed")
 SWARM_ROLES = ("hub", "member", "observer")
 ENROLLMENT_MODES = ("approval", "invite", "open")
 
@@ -65,6 +65,11 @@ class Swarm(Base):
         JSONType, nullable=False, default=lambda: ["contribute"], server_default='["contribute"]')
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utcnow)
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # Removal (#232): a removed swarm keeps its row and ID for history, but its
+    # name is moved aside (``<name>.removed.<id prefix>``) so the name can be
+    # reused; ``former_name`` keeps what it was called.
+    removed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    former_name: Mapped[str | None] = mapped_column(String(64))
 
 
 class SwarmMember(Base):
