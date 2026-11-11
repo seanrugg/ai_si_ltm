@@ -15,7 +15,11 @@ import ipaddress
 import json
 import logging
 import os
+import random
 import socket
+import time
+import uuid
+from urllib.parse import quote
 
 import httpx
 from typing import Callable
@@ -229,3 +233,82 @@ class LTMSClient:
     def context(self, intent: str | None = None, target: str | None = None, place: str | None = None) -> dict:
         params = {k: v for k, v in {"intent": intent, "target": target, "place": place}.items() if v}
         return self._call("GET", "/api/recall/context", params=params)
+
+
+    # ------------------------------------------------------------------ datasets (#238, #240)
+    def datasets(self) -> list[dict]:
+        """The fleet's approved datasets (reference material)."""
+        return self._call("GET", "/api/datasets")["datasets"]
+
+    def search_dataset(self, dataset_id: str, q: str, *, version: int | None = None, limit: int = 20) -> list[dict]:
+        params = {"q": q, "limit": limit}
+        if version is not None:
+            params["version"] = version
+        return self._call("GET", f"/api/datasets/{dataset_id}/search", params=params)["hits"]
+
+    def read_item(self, dataset_id: str, key: str, *, version: int | None = None, cycle: str | None = None) -> dict:
+        """Read one item; the server logs the read (and sends it to the LRS)."""
+        params = {k: v for k, v in {"version": version, "cycle": cycle}.items() if v is not None}
+        return self._call("GET", f"/api/datasets/{dataset_id}/items/{quote(key, safe='/')}", params=params)
+
+    def dream_cycle(self, *, jitter_s: float = 900, sleep: Callable[[float], None] = time.sleep) -> "DreamCycle":
+        """``with client.dream_cycle() as cycle:`` - a reading-and-reflection cycle."""
+        return DreamCycle(self, jitter_s=jitter_s, sleep=sleep)
+
+
+class DreamCycle:
+    """A dream cycle (#240): start event, reads and lessons, end event.
+
+    Entering waits a random 0..``jitter_s`` seconds (so a fleet doesn't read in
+    lockstep), then queues the start ``event``. ``read`` reads with the cycle id;
+    ``lesson`` queues a lesson citing its sources. Leaving always queues the end
+    event with the counts, even if the body raised, and flushes. Records are
+    appended locally, so a cycle works offline until the flush.
+    """
+
+    TAG = "dream_cycle"
+
+    def __init__(self, client: LTMSClient, *, jitter_s: float = 900,
+                 sleep: Callable[[float], None] = time.sleep) -> None:
+        self.client = client
+        self.jitter_s = jitter_s
+        self._sleep = sleep
+        self.id = str(uuid.uuid4())
+        self.items_read = 0
+        self.lessons = 0
+
+    def __enter__(self) -> "DreamCycle":
+        if self.jitter_s and self.jitter_s > 0:
+            self._sleep(random.uniform(0, self.jitter_s))
+        self.client.append("event", summary="Dream cycle started", tags=[self.TAG],
+                           payload={"cycle": self.id, "phase": "start"})
+        return self
+
+    def read(self, dataset_id: str, key: str, *, version: int | None = None) -> dict:
+        item = self.client.read_item(dataset_id, key, version=version, cycle=self.id)
+        self.items_read += 1
+        return item
+
+    def lesson(self, summary: str, *, sources: list[dict] | None = None, refs: dict | None = None,
+               payload: dict | None = None, **header) -> dict:
+        """Queue a lesson. ``sources``: up to 16 ``{"dataset", "version", "item"}``."""
+        body = dict(payload or {})
+        body["cycle"] = self.id
+        if sources:
+            body["sources"] = sources
+        if refs is not None:
+            header["refs"] = refs
+        rec = self.client.append("lesson", summary=summary, payload=body, **header)
+        self.lessons += 1
+        return rec
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        payload = {"cycle": self.id, "phase": "end", "items_read": self.items_read, "lessons": self.lessons}
+        if exc_type is not None:
+            payload["error"] = exc_type.__name__
+        self.client.append("event", summary="Dream cycle ended", tags=[self.TAG], payload=payload)
+        try:
+            self.client.flush()
+        except Exception as flush_exc:  # noqa: BLE001 - records stay queued in the outbox
+            log.warning("dream cycle flush failed; records stay queued: %s", flush_exc)
+        return False
