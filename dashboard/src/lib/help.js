@@ -43,3 +43,8 @@ export const DATASET_LARGE = "Large files served to many members at once slow LT
 export const INTEGRATION_ABOUT = "Data or models that stay where they are. LTMS keeps the catalog entry and never fetches from the source; members fetch it themselves and report what they read.";
 export const INTEGRATION_CREDENTIAL = "The NAME of an environment variable on each member, like HF_TOKEN. Never paste the secret itself: LTMS doesn't store credentials.";
 export const URL_SNAPSHOT = "LTMS fetches the page or file once and keeps it as a new version, never a live link, so lessons that cite it stay checkable. Only https hosts on LTMS_DATASET_URL_ALLOW; off when that's empty.";
+
+// Fleet charter (#256)
+export const CHARTER = "The charter is the fleet's governance: every member reads it when it joins and whenever it changes. Reads are logged and sent to the LRS.";
+// "{days}" is replaced with the server's grace period.
+export const CHARTER_GRACE = "Members must read this version. After {days} days, members who haven't read it can't write records until they do.";
