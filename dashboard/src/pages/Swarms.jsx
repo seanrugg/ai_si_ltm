@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import HelpTip from "../components/HelpTip.jsx";
 import LocationForm from "../components/LocationForm.jsx";
+import RemoveSwarmDialog from "../components/RemoveSwarmDialog.jsx";
 import { ADD_SWARM, MEMORY_WIPE, ROOT_PRIVATE_KEY, ROOT_PUBLIC_KEY, SWARM_ROLE, WIPE_VS_DELETE } from "../lib/help.js";
-
-
 import RenameSwarm from "../components/RenameSwarm.jsx";
 import { Link } from "react-router-dom";
 import { api } from "../api/client.js";
@@ -336,6 +335,7 @@ function SwarmCard({ swarm, swarms, allMembers, location, onReload }) {
   const [wipeOpen, setWipeOpen] = useState(false);
   const [confirmWipe, setConfirmWipe] = useState("");
   const [wipeNotice, setWipeNotice] = useState(null);
+  const [removeOpen, setRemoveOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -471,6 +471,12 @@ function SwarmCard({ swarm, swarms, allMembers, location, onReload }) {
             <button className="btn btn-danger" onClick={() => showWipe(true)}>Wipe swarm memory</button>
             <HelpTip id={`wipe-swarm-help-${swarm.name}`} label="About wiping swarm memory">{MEMORY_WIPE}</HelpTip>
           </div>
+          <div className="mt-2">
+            <button type="button" className="btn btn-danger" onClick={() => setRemoveOpen(true)}>Remove swarm</button>
+          </div>
+          {removeOpen && (
+            <RemoveSwarmDialog name={swarm.name} onClose={() => setRemoveOpen(false)} onRemoved={onReload} />
+          )}
           <p className={wipeNotice ? "mt-2 text-sm" : "sr-only"} role="status">{wipeNotice}</p>
           {wipeOpen && (
             <div className="mt-3 rounded-md border border-bad/40 bg-bad/5 p-3 text-sm">

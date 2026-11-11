@@ -28,3 +28,9 @@ export const ROOT_PUBLIC_KEY =
 
 export const SWARM_RENAME =
   "Renaming keeps the swarm's ID, keys and records. Its MQTT topics change: update the hub's and every member's swarm name, and the broker ACL, or they stop connecting.";
+export const SWARM_REMOVE =
+  "Removing hides the swarm and frees its name for reuse. Its history stays: records, audit and the swarm's ID are kept unless you purge records.";
+export const SWARM_REMOVE_MEMBERS =
+  "Free agents keep working outside any swarm. Removed members are revoked: they can't send records until they enroll again.";
+export const SWARM_REMOVE_RECORDS =
+  "Purge deletes only records that came through this swarm, leaving tombstones. Members' other records stay.";
