@@ -30,7 +30,7 @@ from server.services import location as location_service
 from server.services import network as network_service
 from server.services import profile as profile_service
 from server.services import datasets as datasets_service
-from server.services import dataset_uploads
+from server.services import dataset_uploads, integrations
 from server.services import swarm_remove
 from server.services.errors import ServiceError
 
@@ -1344,6 +1344,38 @@ async def upload_dataset_items(dataset_id: str, version: int, request: Request,
         ds = await datasets_service.get_dataset(session, dataset_id)
         items = await datasets_service.upload_items(session, request.app.state.config, ds, version, files,
                                                     prefix=prefix)
+        return {"items": items, "dataset": await datasets_service.dataset_dict(session, ds)}
+
+
+# Catalog integrations (#248): metadata only; LTMS never fetches from them.
+@router.post("/admin/integrations", status_code=201)
+async def create_integration(request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    """``{name, kind, base_url, credential_env?, description?}``. ``credential_env`` is a variable NAME."""
+    async with transaction(request) as session:
+        return integrations.integration_dict(
+            await integrations.create(session, body, admin=f"admin:{admin.username}"))
+
+
+@router.get("/admin/integrations")
+async def list_integrations(request: Request, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        return {"integrations": await integrations.list_all(session)}
+
+
+@router.delete("/admin/integrations/{ref}")
+async def delete_integration(ref: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        await integrations.delete(session, ref, admin=f"admin:{admin.username}")
+        return {"deleted": ref}
+
+
+@router.post("/admin/datasets/{dataset_id}/versions/{version}/external")
+async def add_external_items(dataset_id: str, version: int, request: Request, body: dict,
+                             admin: AdminAuth = ADMIN) -> dict:
+    """``{items: [{key, locator, media_type?, size_bytes?, model?}]}`` into an integration dataset."""
+    async with transaction(request) as session:
+        ds = await datasets_service.get_dataset(session, dataset_id)
+        items = await integrations.add_external_items(session, ds, version, body.get("items"))
         return {"items": items, "dataset": await datasets_service.dataset_dict(session, ds)}
 
 

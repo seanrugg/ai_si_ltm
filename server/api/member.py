@@ -75,6 +75,16 @@ async def put_network(request: Request, body: dict, auth: MemberAuth = Depends(c
         return {"addresses": await network.record_reported(session, member, body, source="reported")}
 
 
+@router.post("/members/me/reads")
+async def report_read(request: Request, body: dict, auth: MemberAuth = Depends(current_member)) -> dict:
+    """``{dataset, version, item, cycle?}``: an item this member read itself, usually an
+    external one fetched from its source (#248). Logged with ``source: reported``."""
+    from server.services import integrations
+
+    async with transaction(request) as session:
+        return await integrations.report_read(session, member_id=auth.member_id, body=body)
+
+
 @router.put("/relay/network/{agent}")
 async def put_relay_network(agent: str, request: Request, body: dict,
                             auth: MemberAuth = Depends(current_member)) -> dict:

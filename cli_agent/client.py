@@ -251,6 +251,13 @@ class LTMSClient:
         params = {k: v for k, v in {"version": version, "cycle": cycle}.items() if v is not None}
         return self._call("GET", f"/api/datasets/{dataset_id}/items/{quote(key, safe='/')}", params=params)
 
+    def report_read(self, dataset_id: str, version: int, item: str, *, cycle: str | None = None) -> dict:
+        """Report an item this member read itself, e.g. an external one fetched from its source (#248)."""
+        body = {"dataset": dataset_id, "version": version, "item": item}
+        if cycle is not None:
+            body["cycle"] = cycle
+        return self._call("POST", "/api/members/me/reads", json=body)
+
     def dream_cycle(self, *, jitter_s: float = 900, sleep: Callable[[float], None] = time.sleep) -> "DreamCycle":
         """``with client.dream_cycle() as cycle:`` - a reading-and-reflection cycle."""
         return DreamCycle(self, jitter_s=jitter_s, sleep=sleep)
@@ -288,6 +295,12 @@ class DreamCycle:
         item = self.client.read_item(dataset_id, key, version=version, cycle=self.id)
         self.items_read += 1
         return item
+
+    def report(self, dataset_id: str, version: int, item: str) -> dict:
+        """Report an external item read during this cycle (fetched from its source, #248)."""
+        res = self.client.report_read(dataset_id, version, item, cycle=self.id)
+        self.items_read += 1
+        return res
 
     def lesson(self, summary: str, *, sources: list[dict] | None = None, refs: dict | None = None,
                payload: dict | None = None, **header) -> dict:

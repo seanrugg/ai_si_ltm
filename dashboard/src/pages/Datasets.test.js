@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
-import Datasets, { AddDataset, DatasetDetail } from "./Datasets.jsx";
+import Datasets, { AddDataset, DatasetDetail, ExternalItems, Integrations } from "./Datasets.jsx";
 import { api } from "../api/client.js";
 import { filterDatasets, formatBytes, sortDatasets, uploadFiles } from "../lib/datasets.js";
 
@@ -18,7 +18,8 @@ const DATASETS = [
 
 vi.mock("../api/useApi.js", () => ({
   useApi: vi.fn((path) => ({
-    data: path === "/admin/datasets" ? { datasets: DATASETS } : { items: [] },
+    data: path === "/admin/datasets" ? { datasets: DATASETS }
+      : path === "/admin/integrations" ? { integrations: [] } : { items: [] },
     error: null, loading: false, reload: () => {},
   })),
 }));
@@ -146,5 +147,43 @@ describe("archive uploads (#246)", () => {
     const [r] = await uploadFiles(api, "d1", 1, [new File(["PK"], "bundle.zip")]);
     expect(r.archive.stored).toHaveLength(1);
     expect(r.archive.skipped[0].reason).toMatch(/nested/);
+  });
+});
+
+describe("catalog integrations (#248)", () => {
+  it("creates an integration with a variable name, never a secret", async () => {
+    api.mockResolvedValueOnce({});
+    const onChanged = vi.fn();
+    render(React.createElement(Integrations, { data: { integrations: [] }, onChanged }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "hf" } });
+    fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "https://huggingface.co" } });
+    fireEvent.change(screen.getByLabelText("Credential variable"), { target: { value: "HF_TOKEN" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add integration" }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(api).toHaveBeenCalledWith("/admin/integrations", { method: "POST", body: {
+      name: "hf", kind: "huggingface", base_url: "https://huggingface.co", credential_env: "HF_TOKEN" } });
+    expect(screen.getByLabelText("Credential variable").getAttribute("type")).not.toBe("password");
+  });
+
+  it("adds an external item, asking for a model on model integrations", async () => {
+    api.mockResolvedValueOnce({});
+    render(React.createElement(ExternalItems, { datasetId: "d1", version: 1, integrationKind: "ollama" }));
+    fireEvent.change(screen.getByLabelText("Key"), { target: { value: "qwen" } });
+    fireEvent.change(screen.getByLabelText("Locator"), { target: { value: "http://ollama.local:11434" } });
+    const add = screen.getByRole("button", { name: "Add item" });
+    expect(add.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "qwen3:8b" } });
+    fireEvent.click(add);
+    await screen.findByText("Added qwen");
+    expect(api).toHaveBeenCalledWith("/admin/datasets/d1/versions/1/external", { method: "POST", body: {
+      items: [{ key: "qwen", locator: "http://ollama.local:11434", model: "qwen3:8b" }] } });
+  });
+
+  it("offers external items instead of a file picker on integration datasets", () => {
+    const ds = { id: "x", name: "Demos", kind: "integration", integration_id: "i1", status: "pending",
+      versions: [{ version: 1, status: "pending", item_count: 0, size_bytes: 0 }] };
+    render(React.createElement(DatasetDetail, { dataset: ds, integrations: [{ id: "i1", kind: "huggingface" }] }));
+    expect(screen.getByRole("form", { name: "Add an external item to version 1" })).toBeDefined();
+    expect(screen.queryByLabelText("Files for version 1")).toBeNull();
   });
 });

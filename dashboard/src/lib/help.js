@@ -40,3 +40,5 @@ export const SWARM_REMOVE_RECORDS =
 export const DATASET_APPROVE = "Approved data is readable by every member of the fleet. Check its contents and licence first.";
 export const DATASET_SCOPE = "Every dataset is shared with the whole fleet.";
 export const DATASET_LARGE = "Large files served to many members at once slow LTMS down. For large or frequently read data, add a catalog integration instead.";
+export const INTEGRATION_ABOUT = "Data or models that stay where they are. LTMS keeps the catalog entry and never fetches from the source; members fetch it themselves and report what they read.";
+export const INTEGRATION_CREDENTIAL = "The NAME of an environment variable on each member, like HF_TOKEN. Never paste the secret itself: LTMS doesn't store credentials.";

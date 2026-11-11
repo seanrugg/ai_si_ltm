@@ -46,6 +46,8 @@ AUDIT_ACTIONS = (
     "dataset_approve",
     "dataset_retire",
     "dataset_upload_expire",
+    "integration_create",
+    "integration_delete",
 )
 
 
