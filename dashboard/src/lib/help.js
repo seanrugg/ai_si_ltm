@@ -35,3 +35,8 @@ export const SWARM_REMOVE_MEMBERS =
   "Free agents keep working outside any swarm. Removed members are revoked: they can't send records until they enroll again.";
 export const SWARM_REMOVE_RECORDS =
   "Purge deletes only records that came through this swarm, leaving tombstones. Members' other records stay.";
+
+// Datasets (#242)
+export const DATASET_APPROVE = "Approved data is readable by every member of the fleet. Check its contents and licence first.";
+export const DATASET_SCOPE = "Every dataset is shared with the whole fleet.";
+export const DATASET_LARGE = "Large files served to many members at once slow LTMS down. For large or frequently read data, add a catalog integration instead.";

@@ -13,6 +13,7 @@ const NAV = [
   { to: "/integrity", label: "Integrity" },
   { to: "/volume", label: "Volume" },
   { to: "/swarms", label: "Swarms" },
+  { to: "/datasets", label: "Datasets" },
   { to: "/conversation", label: "Conversation" },
   { to: "/outcomes", label: "Outcomes" },
   { to: "/lessons", label: "Lessons" },
