@@ -309,6 +309,16 @@ async def profile_senses(request: Request, admin: AdminAuth = ADMIN, member: str
         return await profile_service.senses(session, subject, hours)
 
 
+@router.get("/admin/profile/reading")
+async def profile_reading(request: Request, admin: AdminAuth = ADMIN, member: str | None = None,
+                          swarm: str | None = None, hours: int | None = None) -> dict:
+    """Datasets read and dream cycles, with the lessons each cycle wrote (#243)."""
+    hours = profile_service.parse_hours(hours)
+    async with transaction(request) as session:
+        subject = await profile_service.resolve_subject(session, member, swarm)
+        return await profile_service.reading(session, subject, hours)
+
+
 @router.get("/admin/profile/history")
 async def profile_history(request: Request, admin: AdminAuth = ADMIN, member: str | None = None,
                           swarm: str | None = None) -> dict:
