@@ -15,7 +15,16 @@ function UploadResults({ results }) {
     <ul className="mt-2 text-sm" aria-label="Upload results">
       {results.map((r) => (
         <li key={r.name} className={r.ok ? "text-ok" : "text-bad"}>
-          {r.ok ? `Stored ${r.key}` : `${r.name}: ${r.error}`}
+          {!r.ok ? `${r.name}: ${r.error}` : r.archive
+            ? `Unpacked ${r.name}: ${r.archive.stored.length} stored, ${r.archive.skipped.length} skipped, `
+              + `${r.archive.errors.length} errors`
+            : `Stored ${r.key}`}
+          {r.archive && (r.archive.skipped.length > 0 || r.archive.errors.length > 0) && (
+            <ul className="ml-4 list-disc text-paper-muted">
+              {r.archive.skipped.map((x) => <li key={`s-${x.key}`}>{x.key}: {x.reason}</li>)}
+              {r.archive.errors.map((x) => <li key={`e-${x.key}`}>{x.key}: {x.error}</li>)}
+            </ul>
+          )}
         </li>
       ))}
     </ul>

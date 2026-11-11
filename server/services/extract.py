@@ -93,6 +93,8 @@ def sniff(head: bytes, filename: str) -> str:
             if mtype == "audio/wav" and head[8:12] != b"WAVE":
                 return "application/octet-stream"
             return mtype
+    if head[257:262] == b"ustar":
+        return "application/x-tar"
     if head[4:8] == b"ftyp":
         return "video/mp4"
     if _looks_binary(head):
