@@ -3,6 +3,53 @@
 @tailwind utilities;
 
 @layer base {
+  /* Classic (default): today's look. Values are "r g b" for Tailwind's alpha. */
+  :root {
+    --c-ink: 15 24 40;            /* #0F1828 */
+    --c-ink-raised: 22 34 54;     /* #162236 */
+    --c-ink-line: 38 52 79;       /* #26344F */
+    --c-ink-hover: 28 42 66;      /* #1C2A42 */
+    --c-paper: 231 234 240;       /* #E7EAF0 */
+    --c-paper-muted: 147 160 184; /* #93A0B8 */
+    --c-paper-faint: 94 107 133;  /* #5E6B85 */
+    --c-led: 242 181 68;          /* #F2B544 */
+    --c-led-dim: 138 106 43;      /* #8A6A2B */
+    --c-ok: 91 194 138;           /* #5BC28A */
+    --c-warn: 232 162 58;         /* #E8A23A */
+    --c-bad: 240 96 93;           /* #F0605D */
+    --font-sans: "Atkinson Hyperlegible";
+    --font-mono: "JetBrains Mono";
+    --font-display: "Atkinson Hyperlegible";
+  }
+  /* Holo (#198): deep navy, a faint grid, cyan accents, condensed headings. */
+  [data-theme="holo"] {
+    --c-ink: 6 10 15;             /* #060a0f */
+    --c-ink-raised: 12 20 32;     /* #0c1420 */
+    --c-ink-line: 26 45 70;       /* #1a2d46 */
+    --c-ink-hover: 17 27 44;      /* #111b2c */
+    --c-paper: 226 234 245;       /* #e2eaf5 */
+    --c-paper-muted: 138 164 194; /* #8aa4c2 */
+    --c-paper-faint: 108 134 166; /* #6c86a6 */
+    --c-led: 0 229 255;           /* #00e5ff */
+    --c-led-dim: 10 127 145;      /* #0a7f91 */
+    --c-ok: 0 255 157;            /* #00ff9d */
+    --c-warn: 255 181 71;         /* #ffb547 */
+    --c-bad: 255 107 107;         /* #ff6b6b */
+    --font-sans: "DM Sans";
+    --font-mono: "DM Mono";
+    --font-display: "Bebas Neue";
+  }
+  [data-theme="holo"] body {
+    background-image:
+      linear-gradient(rgba(26, 45, 70, 0.35) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(26, 45, 70, 0.35) 1px, transparent 1px);
+    background-size: 48px 48px;
+  }
+  [data-theme="holo"] h1, [data-theme="holo"] h2 {
+    font-family: var(--font-display), system-ui, sans-serif;
+    font-weight: 400;
+    letter-spacing: 2.5px;
+  }
   html { color-scheme: dark; }
   body { @apply font-sans antialiased; }
   :focus-visible { @apply outline outline-2 outline-offset-2 outline-led; }
