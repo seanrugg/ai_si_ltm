@@ -2,17 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import HelpTip from "../components/HelpTip.jsx";
 import LocationForm from "../components/LocationForm.jsx";
 import RemoveSwarmDialog from "../components/RemoveSwarmDialog.jsx";
-import { ADD_SWARM, MEMORY_WIPE, ROOT_PRIVATE_KEY, ROOT_PUBLIC_KEY, SWARM_ROLE, WIPE_VS_DELETE } from "../lib/help.js";
+import { AddMemberForm, RemoveMemberButton, RoleControl } from "../components/SwarmMemberControls.jsx";
+import { ADD_SWARM, MEMORY_WIPE, ROOT_PRIVATE_KEY, ROOT_PUBLIC_KEY, WIPE_VS_DELETE } from "../lib/help.js";
 import RenameSwarm from "../components/RenameSwarm.jsx";
 import { Link } from "react-router-dom";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import { plural } from "../lib/format.js";
-import { membershipChange } from "../lib/membership.js";
 import { generateRootKey, signAppointment, SwarmKeyError } from "../lib/swarmKey.js";
 import { EmptyState, ErrorNote, Loading, PageHeader, StatusBadge } from "../components/ui.jsx";
-
-const ROLES = ["member", "observer"];
 
 // The one-time panel for a new root key. It traps focus and can't be dismissed
 // until the admin confirms the key is saved; then the key string is dropped.
@@ -293,44 +291,12 @@ function AppointHub({ swarm, allMembers, busy, act }) {
   );
 }
 
-// A member or observer's role, changed in one step with Apply (issue #160).
-function RoleControl({ swarm, member, busy, act }) {
-  const [role, setRole] = useState(member.role);
-  const { kind } = membershipChange({ swarm: swarm.name, role: member.role }, { swarm: swarm.name, role });
-  return (
-    <form className="flex items-center gap-2" aria-label={`Change role for ${member.name}`}
-          onSubmit={(e) => {
-            e.preventDefault();
-            act(() => api(`/admin/swarms/${encodeURIComponent(swarm.name)}/members`,
-              { method: "POST", body: { member: member.name, role } }));
-          }}>
-      <select className="field text-xs" value={role} onChange={(e) => setRole(e.target.value)}
-              aria-label={`Role for ${member.name}`}>
-        <option value="member">member</option>
-        <option value="observer">observer</option>
-      </select>
-      <button className="btn text-xs" disabled={busy || kind === "none"}>Apply</button>
-    </form>
-  );
-}
-
 function SwarmCard({ swarm, swarms, allMembers, location, onReload }) {
   const members = swarm.members || [];
   const revoked = swarm.status === "revoked";
   // allMembers is already filtered to active, so this counts who the wipe would reach.
   const activeNames = new Set(allMembers.map((m) => m.name));
   const wipeCount = members.filter((m) => activeNames.has(m.name)).length;
-  // Where each member is now, so "Add a member" can say it's a move and leave
-  // other swarms' hubs out (a hub moves from its member row, with a warning).
-  const placement = new Map();
-  for (const s of swarms || []) {
-    if (s.name === swarm.name) continue;
-    for (const m of s.members || []) placement.set(m.name, { swarm: s.name, role: m.role });
-  }
-  const eligible = allMembers.filter((m) => m.status === "active" && !members.some((s) => s.name === m.name)
-    && placement.get(m.name)?.role !== "hub");
-  const [addName, setAddName] = useState("");
-  const [addRole, setAddRole] = useState("member");
   const [confirmRevoke, setConfirmRevoke] = useState("");
   const [wipeOpen, setWipeOpen] = useState(false);
   const [confirmWipe, setConfirmWipe] = useState("");
@@ -350,16 +316,6 @@ function SwarmCard({ swarm, swarms, allMembers, location, onReload }) {
     } finally {
       setBusy(false);
     }
-  }
-
-  async function addMember() {
-    return api(`/admin/swarms/${encodeURIComponent(swarm.name)}/members`, {
-      method: "POST", body: { member: addName, role: addRole },
-    });
-  }
-
-  async function removeMember(memberName) {
-    return api(`/admin/swarms/members/${encodeURIComponent(memberName)}`, { method: "DELETE" });
   }
 
   async function revokeSwarm() {
@@ -415,10 +371,7 @@ function SwarmCard({ swarm, swarms, allMembers, location, onReload }) {
                       {m.role !== "hub" && (
                         <RoleControl key={m.role} swarm={swarm} member={m} busy={busy} act={act} />
                       )}
-                      <button className="btn btn-danger text-xs" onClick={() => act(() => removeMember(m.name))}
-                              aria-label={`Remove ${m.name}`}>
-                        Remove
-                      </button>
+                      <RemoveMemberButton name={m.name} busy={busy} act={act} />
                     </span>
                   )}
                 </li>
@@ -430,27 +383,7 @@ function SwarmCard({ swarm, swarms, allMembers, location, onReload }) {
 
       {!revoked && (
         <>
-          <form onSubmit={(e) => { e.preventDefault(); act(addMember); }}
-                className="mb-4 flex flex-wrap items-end gap-2" aria-label="Add member">
-            <select className="field" value={addName} onChange={(e) => setAddName(e.target.value)}
-                    aria-label="Member">
-              <option value="">Add a member</option>
-              {eligible.map((m) => {
-                const from = placement.get(m.name);
-                return (
-                  <option key={m.name} value={m.name}>
-                    {from ? `${m.name} (moves from ${from.swarm})` : m.name}
-                  </option>
-                );
-              })}
-            </select>
-            <select className="field w-24" value={addRole} onChange={(e) => setAddRole(e.target.value)}
-                    aria-label="Role">
-              {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
-            <HelpTip id={`add-role-help-${swarm.name}`} label="About roles">{SWARM_ROLE}</HelpTip>
-            <button className="btn btn-primary" disabled={busy || !addName}>Add</button>
-          </form>
+          <AddMemberForm swarm={swarm} swarms={swarms} allMembers={allMembers} busy={busy} act={act} />
 
           <AppointHub swarm={swarm} allMembers={allMembers} busy={busy} act={act} />
 
