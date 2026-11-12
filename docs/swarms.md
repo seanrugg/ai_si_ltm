@@ -84,7 +84,8 @@ python -m scripts.swarm_key appoint-hub --key /Volumes/KEY/echo-base.swarm.json 
 ```
 
 Copy `appoint.json` to the server and apply it (it isn't secret; it's a signed
-statement, valid for 30 days):
+statement). It must be **applied within 30 days of signing**; once applied it
+stays in force until another hub is appointed or the swarm is revoked:
 
 ```bash
 cat appoint.json | manage.sh swarm-appoint-hub --swarm echo-base -

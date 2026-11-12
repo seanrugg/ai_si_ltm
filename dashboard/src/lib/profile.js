@@ -11,6 +11,7 @@ export const DEFAULT_RANGE = "7d";
 
 export const TABS = [
   { key: "overview", label: "Overview" },
+  { key: "members", label: "Members", swarmOnly: true },
   { key: "places", label: "Places & movement" },
   { key: "interactions", label: "Interactions" },
   { key: "network", label: "Network" },
@@ -24,17 +25,32 @@ export function rangeOf(param) {
   return RANGES.find((r) => r.key === param) ?? RANGES.find((r) => r.key === DEFAULT_RANGE);
 }
 
-export function tabOf(param) {
-  return TABS.find((t) => t.key === param)?.key ?? DEFAULT_TAB;
+/** The tabs a subject has: the Members tab is for swarm profiles only (#282). */
+export function tabsFor(subject) {
+  return TABS.filter((t) => !t.swarmOnly || subject === "swarm");
+}
+
+export function tabOf(param, subject) {
+  return tabsFor(subject).find((t) => t.key === param)?.key ?? DEFAULT_TAB;
 }
 
 /** The tab after `current` in `direction` (+1 right, -1 left), wrapping; Home/End jump. */
-export function nextTab(current, key) {
-  const i = TABS.findIndex((t) => t.key === current);
-  if (key === "Home") return TABS[0].key;
-  if (key === "End") return TABS[TABS.length - 1].key;
+export function nextTab(current, key, subject) {
+  const tabs = tabsFor(subject);
+  const i = tabs.findIndex((t) => t.key === current);
+  if (key === "Home") return tabs[0].key;
+  if (key === "End") return tabs[tabs.length - 1].key;
   const step = key === "ArrowRight" ? 1 : key === "ArrowLeft" ? -1 : 0;
-  return TABS[(i + step + TABS.length) % TABS.length].key;
+  return tabs[(i + step + tabs.length) % tabs.length].key;
+}
+
+/** "1 hub · 2 members · 1 observer" (zero parts left out), or "no members yet" (#282). */
+export function swarmCount(members) {
+  const n = (role) => (members || []).filter((m) => m.role === role).length;
+  const parts = [["hub", "hubs"], ["member", "members"], ["observer", "observers"]]
+    .map(([one, many]) => [n(one), one, many]).filter(([c]) => c > 0)
+    .map(([c, one, many]) => `${c} ${c === 1 ? one : many}`);
+  return parts.length ? parts.join(" · ") : "no members yet";
 }
 
 /**

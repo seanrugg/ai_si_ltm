@@ -109,6 +109,9 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--name", required=True)
     g.add_argument("--out", required=True)
 
+    k = sub.add_parser("pubkey", help="print a key file's name and public key (never the secret)")
+    k.add_argument("--key", required=True)
+
     def common(sp):
         sp.add_argument("--key", required=True)
         sp.add_argument("--server", required=True)
@@ -151,6 +154,17 @@ def main(argv: list[str] | None = None, http=None) -> int:
         key = generate_key()
         save_key(args.out, args.name, key)
         print(json.dumps({"name": args.name, "public_key": public_key_hex(key), "key_file": args.out}, indent=2))
+        return 0
+
+    if args.cmd == "pubkey":
+        # Safe to show on screen: name and public key only (#283). The approval card
+        # shows the first 16 characters of this public key.
+        try:
+            name, key = load_key(args.key)
+        except (OSError, ValueError, KeyError) as exc:
+            print(f"error: can't read key file {args.key}: {exc.__class__.__name__}", file=sys.stderr)
+            return 1
+        print(json.dumps({"name": name, "public_key": public_key_hex(key)}, indent=2))
         return 0
 
     client = LTMSClient(args.server, key_path=args.key, http=http)

@@ -1,13 +1,14 @@
 import { useState } from "react";
 import HelpTip from "../components/HelpTip.jsx";
 import LocationForm from "../components/LocationForm.jsx";
-import { SWARM_MOVE, SWARM_ROLE, MEMORY_WIPE, WIPE_VS_DELETE } from "../lib/help.js";
+import { FINGERPRINT_CHECK, SWARM_MOVE, SWARM_ROLE, MEMORY_WIPE, WIPE_VS_DELETE } from "../lib/help.js";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, HashStrip, Loading, PageHeader, StatusBadge } from "../components/ui.jsx";
 import { localTime, plural, relativeTime } from "../lib/format.js";
 import { describeChange, HUB_WARNING, membershipChange } from "../lib/membership.js";
+import { KINDS, kindOf } from "../lib/visual.js";
 
 const PERMISSIONS = [
   { id: "contribute", help: "Write records under its own name" },
@@ -126,13 +127,11 @@ function PendingCard({ m, selected, onToggle, onDone }) {
       <dl className="mt-2 grid grid-cols-[8rem_1fr] gap-y-1 text-sm">
         <dt className="text-paper-muted">Asks for</dt>
         <dd>{m.requested_permissions.join(", ") || "nothing"}</dd>
-        <dt className="text-paper-muted">Key fingerprint</dt>
+        <dt className="text-paper-muted">Public key (first 16 characters)</dt>
         <dd><HashStrip hash={m.public_key} label={m.public_key.slice(0, 16)} /></dd>
         {m.note && (<><dt className="text-paper-muted">Note</dt><dd>{m.note}</dd></>)}
       </dl>
-      <p className="mt-2 text-xs text-paper-faint">
-        Check the fingerprint against the key file on the device before approving.
-      </p>
+      <p className="mt-2 text-xs text-paper-faint">{FINGERPRINT_CHECK}</p>
       <ErrorNote error={error} />
       {mode === null && (
         <div className="mt-3 flex gap-2">
@@ -346,7 +345,8 @@ function MemberRow({ m, swarm, swarms, location, onDone }) {
         </span>
         <span><StatusBadge status={m.status} /></span>
         <span className="text-sm text-paper-muted">
-          {m.kind}, {m.permissions.join(", ") || "no permissions"}
+          <span className="text-paper-faint">Kind:</span> {KINDS[kindOf({ ...m, role: swarm?.role })]?.label ?? m.kind}
+          {" · "}<span className="text-paper-faint">Permissions:</span> {m.permissions.join(", ") || "none"}
           {m.scope && <span className="ml-1 text-paper-faint">(scoped)</span>}
           {swarm ? ` · in ${swarm.swarm} as ${swarm.role}` : " · free agent"}
         </span>
@@ -604,7 +604,7 @@ export default function Members() {
                       ? "Approve these members? Each gets exactly the permissions it asked for."
                       : "Reject these members?"}
                   </p>
-                  <p className="mb-2 text-xs text-paper-muted">Check each fingerprint against the device&apos;s key file.</p>
+                  <p className="mb-2 text-xs text-paper-muted">{FINGERPRINT_CHECK}</p>
                   <ul className="mb-3 text-sm space-y-1">
                     {selectedIds.map((id) => {
                       const m = pendingById.get(id);
