@@ -291,7 +291,7 @@ export function CognitionControl({ m, onDone }) {
   );
 }
 
-function MemberRow({ m, swarm, swarms, location, onDone }) {
+function MemberRow({ m, swarm, swarms, location, inherited, onDone }) {
   const [mode, setMode] = useState(null); // null | "edit" | "revoke" | "wipe"
   const [reason, setReason] = useState("");
   const [confirmWipe, setConfirmWipe] = useState("");
@@ -374,7 +374,8 @@ function MemberRow({ m, swarm, swarms, location, onDone }) {
         <CognitionControl key={`${m.cognition?.source ?? ""}:${m.cognition?.value ?? ""}`} m={m} onDone={onDone} />
       )}
       {m.status === "active" && mode === null && (
-        <LocationForm key={JSON.stringify(location)} subjectType="member" name={m.name} current={location} onDone={onDone} />
+        <LocationForm key={JSON.stringify(location)} subjectType="member" name={m.name} current={location}
+                      inherited={inherited} onDone={onDone} />
       )}
       {mode === "edit" && (
         <PermissionEditor initial={m.permissions} initialScope={m.scope} saveLabel="Save permissions" busy={busy}
@@ -451,6 +452,8 @@ export default function Members() {
   const locations = useApi("/admin/locations");
   const declaredOf = (name) => (locations.data?.members || []).find((l) => l.name === name)?.all
     ?.find((e) => e.source === "declared" && !e.inherited_from) ?? null;
+  const inheritedOf = (name) => (locations.data?.members || []).find((l) => l.name === name)?.all
+    ?.find((e) => e.source === "declared" && e.inherited_from) ?? null;
   const [showPast, setShowPast] = useState(false);
   const [params, setParams] = useSearchParams();
   const [selected, setSelected] = useState(new Set());
@@ -660,7 +663,7 @@ export default function Members() {
             </select>
             {list.length ? (
               <ul className="panel mt-3">{list.map((m) => <MemberRow key={m.id} m={m} swarm={swarmOf.get(m.name)} swarms={swarmsData}
-                                                      location={declaredOf(m.name)} onDone={() => { reload(); locations.reload(); }} />)}</ul>
+                                                      location={declaredOf(m.name)} inherited={inheritedOf(m.name)} onDone={() => { reload(); locations.reload(); }} />)}</ul>
             ) : (
               <EmptyState title={emptyTitle}>{emptyBody}</EmptyState>
             )}
