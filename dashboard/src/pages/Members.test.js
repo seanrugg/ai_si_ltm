@@ -219,6 +219,9 @@ describe("kind and permissions are labelled separately (#280)", () => {
     expect(text).toContain("Kind: Hub · Permissions: contribute, relay");
     expect(text).toContain("Kind: Hybrid · Permissions: none");
     expect(text).not.toContain("relay, contribute, relay");
+  });
+});
+
 describe("member row links (#279)", () => {
   it("the name opens the profile and a separate link opens the filtered timeline", () => {
     renderMembers();
