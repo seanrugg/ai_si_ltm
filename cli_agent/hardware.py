@@ -80,10 +80,11 @@ def detect(data_dir: str = ".", root: str = "/") -> dict:
         # Hexagon/other NPUs: FastRPC compute DSP devices, or the kernel's accel class.
         "npu": _any(root, "dev/fastrpc-cdsp*", "dev/accel*"),
         "gpu_cuda": _any(root, "dev/nvhost-*", "proc/driver/nvidia"),
-        # Arduino App Lab boards (Linux + MCU): the router that bridges Linux and the MCU.
-        "mcu_bridge": _any(root, "etc/systemd/system/arduino-router.service",
-                           "lib/systemd/system/arduino-router.service",
-                           "usr/lib/systemd/system/arduino-router.service", "var/run/arduino-router.sock"),
+        # Arduino App Lab boards (Linux + MCU): the router service that bridges Linux and the
+        # MCU (arduino-router.service, confirmed on a VENTUNO Q), or the App Lab daemon.
+        "mcu_bridge": _any(root, *(f"{d}/{unit}" for d in ("etc/systemd/system", "lib/systemd/system",
+                                                            "usr/lib/systemd/system")
+                                   for unit in ("arduino-router.service", "arduino-app-cli.service"))),
     }
     return {"version": 1, "facts": facts, "profile": profile(facts)}
 

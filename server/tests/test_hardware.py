@@ -48,6 +48,11 @@ def test_big_board_with_an_npu_can_host_a_hub(tmp_path, monkeypatch):
     assert "16384 MiB RAM" in line and "npu" in line and "mcu_bridge" in line and len(line) < 1000
 
 
+def test_app_lab_daemon_alone_counts_as_an_mcu_bridge(tmp_path):
+    root = _fake_root(tmp_path, ram_kb=2 * 1024 * 1024, files=("lib/systemd/system/arduino-app-cli.service",))
+    assert hardware.detect(str(tmp_path), str(root))["facts"]["mcu_bridge"] is True
+
+
 def test_tiny_or_unknown_memory_is_lite(tmp_path):
     assert hardware.profile({"ram_bytes": 128 * hardware.MIB})["tier"] == "lite"
     assert hardware.profile({})["tier"] == "lite"
