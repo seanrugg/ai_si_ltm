@@ -36,6 +36,7 @@ AUDIT_ACTIONS = (
     "record_delete",
     "memory_wipe",
     "cognition_change",
+    "member_proxied",
     "network_change",
     "location_change",
     "swarm_rename",

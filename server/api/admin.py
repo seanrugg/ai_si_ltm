@@ -170,6 +170,17 @@ async def observe_cognition(member_id: str, request: Request, admin: AdminAuth =
         return enrollment.member_to_dict(m)
 
 
+@router.patch("/admin/members/{member_id}/proxied")
+async def set_proxied(member_id: str, request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    """Set or clear who holds a proxied member's key (#311): ``{"proxied_by": "<text>" | null}``."""
+    if "proxied_by" not in body:
+        raise ServiceError(422, "bad_proxied_by", "body needs proxied_by: text or null")
+    async with transaction(request) as session:
+        m = await enrollment.set_proxied_by(session, _uuid(member_id), admin=admin.username,
+                                            proxied_by=body["proxied_by"])
+        return enrollment.member_to_dict(m)
+
+
 @router.patch("/admin/members/{member_id}/permissions")
 async def set_permissions(member_id: str, body: PermissionsRequest, request: Request, admin: AdminAuth = ADMIN) -> dict:
     async with transaction(request) as session:

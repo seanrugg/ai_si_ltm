@@ -249,3 +249,19 @@ describe("member row links (#279)", () => {
     expect(timeline.getAttribute("href")).toBe("/?agent=alice");
   });
 });
+
+describe("proxied members (#311)", () => {
+  it("badges a proxied member and names who holds its key on the pending card", () => {
+    allMembers = [
+      { id: 11, name: "vector", status: "active", kind: "robot", permissions: ["contribute"], last_ack_seq: 0,
+        last_seen_at: null, proxied_by: "sidecar on hub-host" },
+      { id: "12", name: "cozmo", status: "pending", kind: "robot", permissions: [], requested_permissions: ["contribute"],
+        public_key: "eeee5555eeee5555eeee5555eeee5555eeee5555eeee5555eeee5555eeee5555", created_at: "2026-01-01T00:00:00Z",
+        proxied_by: "sidecar on hub-host" },
+    ];
+    const { container } = renderMembers();
+    expect(screen.getAllByText("Proxied").length).toBeGreaterThanOrEqual(2);
+    expect(container.textContent).toContain("Signed for it by sidecar on hub-host, not by the device itself.");
+    expect(container.textContent).toContain("Its key is held by sidecar on hub-host");
+  });
+});
