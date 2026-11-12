@@ -165,3 +165,31 @@ def test_make_publish_always_uses_qos_one():
         1,
         False,
     )
+
+
+# --- hub heartbeat (#281) ---
+def test_load_config_heartbeat_defaults_and_state_path():
+    cfg = load_config(base_env())
+    assert cfg.heartbeat_seconds == 300.0
+    assert cfg.state_path == "hub-head.json"
+    cfg = load_config({**base_env(), "HUB_OUTBOX_PATH": "/var/lib/hub/hub-outbox.db"})
+    assert cfg.state_path == "/var/lib/hub/hub-head.json"  # beside the outbox by default
+    cfg = load_config({**base_env(), "HUB_HEARTBEAT_SECONDS": "30", "HUB_STATE_PATH": "/x/h.json"})
+    assert cfg.heartbeat_seconds == 30.0
+    assert cfg.state_path == "/x/h.json"
+
+
+def test_load_config_bad_heartbeat():
+    for bad in ("0", "-5", "soon"):
+        with pytest.raises(ValueError, match="HUB_HEARTBEAT_SECONDS"):
+            load_config({**base_env(), "HUB_HEARTBEAT_SECONDS": bad})
+
+
+def test_heartbeat_timer_due_on_start_then_every_interval():
+    from cli_agent.hub import HeartbeatTimer
+    t = HeartbeatTimer(300.0, now=1000.0)
+    assert t.due(1000.0) is True       # on start
+    assert t.due(1001.0) is False
+    assert t.due(1299.9) is False      # not before the interval
+    assert t.due(1300.0) is True
+    assert t.due(1300.5) is False
