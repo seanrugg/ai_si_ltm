@@ -61,7 +61,8 @@ def test_load_config_overrides():
 
 
 def test_load_config_missing_required():
-    for missing in ("LTMS_SERVER", "LTMS_KEY_PATH", "SWARM"):
+    # SWARM is no longer required (#293): the hub looks its topic ID up from LTMS.
+    for missing in ("LTMS_SERVER", "LTMS_KEY_PATH"):
         env = base_env()
         del env[missing]
         with pytest.raises(ValueError) as exc:
@@ -165,3 +166,73 @@ def test_make_publish_always_uses_qos_one():
         1,
         False,
     )
+
+
+# --- hub heartbeat (#281) ---
+def test_load_config_heartbeat_defaults_and_state_path():
+    cfg = load_config(base_env())
+    assert cfg.heartbeat_seconds == 300.0
+    assert cfg.state_path == "hub-head.json"
+    cfg = load_config({**base_env(), "HUB_OUTBOX_PATH": "/var/lib/hub/hub-outbox.db"})
+    assert cfg.state_path == "/var/lib/hub/hub-head.json"  # beside the outbox by default
+    cfg = load_config({**base_env(), "HUB_HEARTBEAT_SECONDS": "30", "HUB_STATE_PATH": "/x/h.json"})
+    assert cfg.heartbeat_seconds == 30.0
+    assert cfg.state_path == "/x/h.json"
+
+
+def test_load_config_bad_heartbeat():
+    for bad in ("0", "-5", "soon"):
+        with pytest.raises(ValueError, match="HUB_HEARTBEAT_SECONDS"):
+            load_config({**base_env(), "HUB_HEARTBEAT_SECONDS": bad})
+
+
+def test_heartbeat_timer_due_on_start_then_every_interval():
+    from cli_agent.hub import HeartbeatTimer
+    t = HeartbeatTimer(300.0, now=1000.0)
+    assert t.due(1000.0) is True       # on start
+    assert t.due(1001.0) is False
+    assert t.due(1299.9) is False      # not before the interval
+    assert t.due(1300.0) is True
+    assert t.due(1300.5) is False
+
+
+# --- topics by swarm topic ID (#293) ---
+def test_swarm_is_optional_and_topic_settings_load():
+    env = base_env()
+    del env["SWARM"]
+    cfg = load_config(env)
+    assert (cfg.swarm, cfg.swarm_topic_id, cfg.legacy_name) == (None, None, None)
+    cfg = load_config({**base_env(), "SWARM_TOPIC_ID": "sw-1a2b3c4d", "SWARM_LEGACY_NAME": "echo-base"})
+    assert (cfg.swarm_topic_id, cfg.legacy_name) == ("sw-1a2b3c4d", "echo-base")
+    with pytest.raises(ValueError, match="SWARM_TOPIC_ID"):
+        load_config({**base_env(), "SWARM_TOPIC_ID": "bad/topic"})
+
+
+def test_topic_precedence_and_legacy_prefix():
+    from cli_agent.hub_main import legacy_prefix
+    from cli_agent.swarm_topic import resolve
+    looked_up = {"topic_id": "sw-1a2b3c4d", "name": "echo-base"}
+    # SWARM_TOPIC_ID wins over the lookup and the name
+    assert resolve("sw-99999999", "echo-base", lambda: looked_up) == ("sw-99999999", "config")
+    # then LTMS
+    assert resolve(None, "echo-base", lambda: looked_up) == ("sw-1a2b3c4d", "ltms")
+    # then the deprecated name, with a warning
+    assert resolve(None, "echo-base", lambda: None) == ("echo-base", "name")
+    # a hub that moved off SWARM=<name> keeps serving the name while members migrate
+    cfg = load_config(base_env())
+    assert legacy_prefix(cfg, "ltms") == "echo-base"
+    assert legacy_prefix(cfg, "name") is None
+    cfg = load_config({**base_env(), "SWARM_LEGACY_NAME": "old-name"})
+    assert legacy_prefix(cfg, "config") == "old-name"
+
+
+def test_on_connect_subscribes_every_prefix():
+    calls = []
+
+    class Client:
+        def subscribe(self, topic, qos):
+            calls.append((topic, qos))
+
+    make_on_connect(["sw-1a2b3c4d", "echo-base"])(Client(), None, None, 0, None)
+    assert calls == [("sw-1a2b3c4d/+/records", 1), ("sw-1a2b3c4d/+/hello", 1),
+                     ("echo-base/+/records", 1), ("echo-base/+/hello", 1)]

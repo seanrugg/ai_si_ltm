@@ -38,8 +38,12 @@ ACL explicitly.
 
    ```
    sudo cp deploy/mosquitto-echo-base.conf /etc/mosquitto/conf.d/
-   sudo cp deploy/echo-base.acl /etc/mosquitto/echo-base.acl
+   sed -e 's/<topic_id>/<your swarm topic id>/g' -e 's/<hub-name>/<your hub name>/g' \
+       deploy/echo-base.acl | sudo tee /etc/mosquitto/echo-base.acl >/dev/null
    ```
+
+   The ACL addresses the swarm by its **topic ID** (`sw-` + 8 hex, from `GET /api/swarm`
+   or the hub's log), not its name, so renaming the swarm needs no change here (#293).
 
 3. Create the password file. The first user (`jetson-hub`) needs `-c`; then add each
    member without `-c`:
@@ -126,13 +130,23 @@ source build.
 Subscribe to all acks on the Jetson:
 
 ```
-mosquitto_sub -h <jetson> -u jetson-hub -P ... -t 'echo-base/+/acks' -v
+mosquitto_sub -h <jetson> -u <hub-name> -P ... -t '<topic_id>/+/acks' -v
 ```
 
 Acks should appear as members run. The member's heartbeats show up as signed records
 in the LTMS dashboard (at whatever `LTMS_SERVER` points to).
 
-## 7. Failure drill
+## 7. Moving an existing swarm from name topics to the topic ID (#293)
+
+1. Update the hub (pull, restart). With `SWARM=<name>` still set it now logs
+   `topic prefix sw-...` and serves **both** prefixes.
+2. Install the new ACL with the migration block uncommented (both prefixes allowed).
+3. Move each member: set `SWARM_TOPIC_ID=sw-...`, restart it. The hub logs once per
+   member still on the old prefix.
+4. When none are left, remove `SWARM` from the hub's env, delete the ACL's migration
+   block and reload Mosquitto (`sudo systemctl kill -s HUP mosquitto`).
+
+## 8. Failure drill
 
 Stop the hub for 2 minutes while the member keeps running, then start it again and
 confirm no gap: the Integrity page is clean and the member's outbox is pruned on the

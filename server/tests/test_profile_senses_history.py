@@ -120,3 +120,26 @@ def test_subject_validation(path, mesh, admin, http):
         assert r.status_code == status and r.json()["error"]["code"] == code, (path, params)
     r = http.get(f"/api/admin/profile/{path}", params={"member": "z3-r0"}, headers={"x-ltms-admin": "1"})
     assert r.status_code == 401
+
+
+def test_history_shows_hub_appointments_on_hub_and_swarm(mesh, admin, home):
+    """#278: appointing a hub, and replacing it, appear in History."""
+    hub1 = mesh.member("hub-one", kind="relay")
+    home.appoint(hub1)
+    events = _get(admin, "history", member="hub-one")["events"]
+    appointed = next(e for e in events if e["action"] == "swarm_appoint_hub")
+    assert appointed["title"] == "Appointed hub of echo-base" and appointed["detail"] is None
+    assert appointed["kind"] == "membership"
+    assert any(e["title"] == "Appointed hub of echo-base" for e in _get(admin, "history", swarm="echo-base")["events"])
+
+    hub2 = mesh.member("hub-two", kind="relay")
+    home.appoint(hub2)
+    new = _get(admin, "history", member="hub-two")["events"]
+    row = next(e for e in new if e["action"] == "swarm_appoint_hub")
+    assert row["title"] == "Appointed hub of echo-base" and row["detail"] == "replacing hub-one"
+
+    old = _get(admin, "history", member="hub-one")["events"]
+    gone = next(e for e in old if e["action"] == "swarm_appoint_hub_replaced")
+    assert gone["title"] == "Replaced as hub of echo-base" and gone["detail"] == "by hub-two"
+    stamps = [e["ts"] for e in old]
+    assert stamps == sorted(stamps, reverse=True)

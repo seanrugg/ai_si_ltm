@@ -159,6 +159,7 @@ export const HISTORY_ICONS = {
 const ICON_FOR_ACTION = {
   enroll_request: "enrolled", enroll_auto: "enrolled", enroll_approve: "enrolled",
   swarm_join: "joined", swarm_leave: "joined",
+  swarm_appoint_hub: "joined", swarm_appoint_hub_replaced: "joined",
   first_lesson: "lesson",
   network_change: "network",
   memory_wipe: "wipe",
@@ -171,7 +172,8 @@ export function historyMarker(event, { ROLES, NEUTRAL, learnColor }) {
   let color = NEUTRAL;
   if (event.kind === "learning") color = learnColor;
   else if (event.kind === "membership") {
-    const role = event.action === "swarm_join" ? String(event.detail || "").match(/as (\w+)/)?.[1] : null;
+    const role = event.action === "swarm_appoint_hub" ? "hub"
+      : event.action === "swarm_join" ? String(event.detail || "").match(/as (\w+)/)?.[1] : null;
     color = (ROLES[role] || ROLES.free).color;
   }
   return { color, icon, iconPath: HISTORY_ICONS[icon] };

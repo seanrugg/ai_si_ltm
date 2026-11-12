@@ -244,6 +244,18 @@ class LTMSClient:
         """
         return self._call("POST", "/api/records", json={"records": records})
 
+    def swarm(self) -> dict | None:
+        """This member's swarm (#292): ``{"id", "topic_id", "name", "role"}``, or None.
+
+        None for a free agent, and also on any error (logged): never raises, so a
+        member can fall back to its configured topic.
+        """
+        try:
+            return self._call("GET", "/api/swarm")["swarm"]
+        except Exception as exc:  # noqa: BLE001 - best effort, like report_cognition
+            log.warning("swarm lookup failed: %s", exc)
+            return None
+
     def head_of(self, agent: str) -> dict:
         """Another member's chain head (hub of that member's swarm only)."""
         return self._call("GET", "/api/records/head", params={"agent": agent})

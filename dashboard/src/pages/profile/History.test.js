@@ -20,6 +20,8 @@ describe("historyMarker", () => {
       [{ kind: "admin", action: "memory_wipe" }, NEUTRAL, "wipe"],
       [{ kind: "admin", action: "record_delete" }, NEUTRAL, "deletion"],
       [{ kind: "membership", action: "permissions_change" }, ROLES.free.color, "other"],
+      [{ kind: "membership", action: "swarm_appoint_hub" }, ROLES.hub.color, "joined"],
+      [{ kind: "membership", action: "swarm_appoint_hub_replaced" }, ROLES.free.color, "joined"],
     ];
     for (const [event, color, icon] of cases) {
       const m = historyMarker(event, opts);
