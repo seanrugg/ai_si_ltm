@@ -18,6 +18,7 @@ import random
 import sys
 from pathlib import Path
 
+from cli_agent import hardware
 from cli_agent.client import LTMSClient, LTMSError
 from ltms_contract import (
     GENESIS_HASH,
@@ -109,6 +110,9 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--name", required=True)
     g.add_argument("--out", required=True)
 
+    hw = sub.add_parser("hardware", help="print this machine's facts and the recommended harness profile")
+    hw.add_argument("--data-dir", default=".", help="where the harness keeps its files (for free disk space)")
+
     def common(sp):
         sp.add_argument("--key", required=True)
         sp.add_argument("--server", required=True)
@@ -118,6 +122,8 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--kind", default="agent", choices=["robot", "agent", "assistant", "relay"])
     e.add_argument("--permissions", default="contribute,recall")
     e.add_argument("--operator")
+    e.add_argument("--no-hardware", action="store_true",
+                   help="don't put the hardware summary in the enrollment note")
 
     t = sub.add_parser("token", help="log in and print the token")
     common(t)
@@ -153,10 +159,16 @@ def main(argv: list[str] | None = None, http=None) -> int:
         print(json.dumps({"name": args.name, "public_key": public_key_hex(key), "key_file": args.out}, indent=2))
         return 0
 
+    if args.cmd == "hardware":
+        print(json.dumps(hardware.detect(args.data_dir), indent=2))
+        return 0
+
     client = LTMSClient(args.server, key_path=args.key, http=http)
     try:
         if args.cmd == "enroll":
-            res = client.enroll(args.kind, [p for p in args.permissions.split(",") if p], operator=args.operator)
+            note = None if args.no_hardware else hardware.summary(hardware.detect(str(Path(args.key).parent)))
+            res = client.enroll(args.kind, [p for p in args.permissions.split(",") if p], operator=args.operator,
+                                note=note)
             print(json.dumps(res, indent=2))
             print("Pending: approve this member in the dashboard (Members → Pending).", file=sys.stderr)
         elif args.cmd == "token":
