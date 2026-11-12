@@ -128,11 +128,14 @@ class LTMSClient:
         return resp.json()
 
     # ------------------------------------------------------------------ enroll / login
-    def enroll(self, kind: str, permissions: list[str], operator: str | None = None, note: str | None = None) -> dict:
-        return self._call("POST", "/api/auth/enroll", auth=False, json={
-            "name": self.name, "kind": kind, "public_key": public_key_hex(self.key),
-            "permissions": permissions, "operator": operator, "note": note,
-        })
+    def enroll(self, kind: str, permissions: list[str], operator: str | None = None, note: str | None = None,
+               intended: dict | None = None) -> dict:
+        """``intended`` = ``{"swarm", "role"}``: what this member is for (#295). A request, never a grant."""
+        body = {"name": self.name, "kind": kind, "public_key": public_key_hex(self.key),
+                "permissions": permissions, "operator": operator, "note": note}
+        if intended:
+            body["intended"] = intended
+        return self._call("POST", "/api/auth/enroll", auth=False, json=body)
 
     def login(self) -> dict:
         ch = self._call("POST", "/api/auth/challenge", auth=False, json={"name": self.name})
@@ -243,6 +246,18 @@ class LTMSClient:
         own flush, it stops at the first rejection (see ``results``).
         """
         return self._call("POST", "/api/records", json={"records": records})
+
+    def swarm(self) -> dict | None:
+        """This member's swarm (#292): ``{"id", "topic_id", "name", "role"}``, or None.
+
+        None for a free agent, and also on any error (logged): never raises, so a
+        member can fall back to its configured topic.
+        """
+        try:
+            return self._call("GET", "/api/swarm")["swarm"]
+        except Exception as exc:  # noqa: BLE001 - best effort, like report_cognition
+            log.warning("swarm lookup failed: %s", exc)
+            return None
 
     def head_of(self, agent: str) -> dict:
         """Another member's chain head (hub of that member's swarm only)."""

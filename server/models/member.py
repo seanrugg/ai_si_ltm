@@ -58,4 +58,7 @@ class Member(Base):
     cognition_admin: Mapped[str | None] = mapped_column(String(16))
     cognition_declared: Mapped[dict | None] = mapped_column(JSONType)
     cognition_observed: Mapped[dict | None] = mapped_column(JSONType)
+    # What the device says it's for (#295): {"swarm", "role"}. A request shown to the
+    # admin, never a grant.
+    intended: Mapped[dict | None] = mapped_column(JSONType)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utcnow)

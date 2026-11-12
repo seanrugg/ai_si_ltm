@@ -205,3 +205,57 @@ describe("wipe memory", () => {
     expect(screen.getByRole("link", { name: "Export" }).getAttribute("href")).toBe("/export");
   });
 });
+
+describe("intended swarm and role on the pending card (#295)", () => {
+  it("shows what the device is for, and the hub note for a would-be hub", () => {
+    allMembers = [
+      { id: "7", name: "hubby", status: "pending", kind: "relay", permissions: [], requested_permissions: ["contribute"],
+        public_key: "cccc3333cccc3333cccc3333cccc3333cccc3333cccc3333cccc3333cccc3333", created_at: "2026-01-01T00:00:00Z",
+        intended: { swarm: "echo-base", role: "hub" } },
+      { id: "8", name: "plain", status: "pending", kind: "robot", permissions: [], requested_permissions: ["contribute"],
+        public_key: "dddd4444dddd4444dddd4444dddd4444dddd4444dddd4444dddd4444dddd4444", created_at: "2026-01-01T00:00:00Z" },
+    ];
+    const { container } = renderMembers();
+    expect(container.textContent).toContain("Wants to be the hub of echo-base");
+    expect(container.textContent).toContain("Relay rights come from the swarm's root key");
+    expect(container.textContent.match(/Wants to be the/g)).toHaveLength(1);
+  });
+});
+
+describe("approval card fingerprint check (#283)", () => {
+  it("labels the 16 characters as the start of the public key and gives the safe command", () => {
+    const { container } = renderMembers();
+    expect(screen.getAllByText("Public key (first 16 characters)").length).toBe(2);
+    expect(container.textContent).toContain("python -m cli_agent pubkey --key");
+    expect(container.textContent).toContain("Don't open the key file itself: it contains the private key.");
+    expect(container.textContent).not.toContain("against the key file on the device");
+  });
+});
+
+describe("kind and permissions are labelled separately (#280)", () => {
+  it("shows Kind and Permissions as two labelled parts, with the profile's kind wording", () => {
+    allMembers = [
+      { id: 9, name: "hub-one", status: "active", kind: "relay", permissions: ["contribute", "relay"],
+        last_ack_seq: 0, last_seen_at: null },
+      { id: 10, name: "robo", status: "active", kind: "robot", permissions: [], last_ack_seq: 0, last_seen_at: null,
+        cognition: { value: "offboard" } },
+    ];
+    const { container } = renderMembers();
+    const text = container.textContent;
+    expect(text).toContain("Kind: Hub · Permissions: contribute, relay");
+    expect(text).toContain("Kind: Hybrid · Permissions: none");
+    expect(text).not.toContain("relay, contribute, relay");
+  });
+});
+
+describe("member row links (#279)", () => {
+  it("the name opens the profile and a separate link opens the filtered timeline", () => {
+    renderMembers();
+    const name = screen.getByRole("link", { name: "Profile of alice" });
+    expect(name.textContent).toBe("alice");
+    expect(name.getAttribute("href")).toBe("/members/alice/profile");
+    const timeline = screen.getByRole("link", { name: "Timeline of alice" });
+    expect(timeline.textContent).toBe("Timeline");
+    expect(timeline.getAttribute("href")).toBe("/?agent=alice");
+  });
+});
