@@ -10,7 +10,7 @@ from sqlalchemy import select
 from server.api.deps import MemberAuth, client_ip, current_member, request_id, require, transaction
 from server.api.schemas import RecordBatch
 from server.models import AuditLog, Member
-from server.services import charter, cognition, network, recall, swarms
+from server.services import charter, cognition, network, recall, swarm_identity, swarms
 from server.services.errors import ServiceError
 from server.services.ingest import ingest_batch
 
@@ -62,6 +62,14 @@ async def chain_head(request: Request, agent: str | None = None,
         if status is not None:
             head["charter"] = status  # #255: tells a client when to read the charter
         return head
+
+
+@router.get("/swarm")
+async def my_swarm(request: Request, auth: MemberAuth = Depends(current_member)) -> dict:
+    """The caller's swarm (#292): permanent ID, MQTT topic ID, current name and role; null for a free agent."""
+    async with transaction(request) as session:
+        member = await session.get(Member, auth.member_id)
+        return {"swarm": await swarm_identity.swarm_of(session, member)}
 
 
 @router.put("/members/me/cognition")

@@ -23,6 +23,7 @@ from cli_agent.member_link import MemberLink
 from cli_agent.client import local_addresses
 from cli_agent.mqtt_messages import acks_topic, encode_hello, hello_topic
 from cli_agent.outbox import Outbox
+from cli_agent.swarm_topic import NoSwarmTopic, check_prefix, resolve
 from ltms_contract import load_key
 
 
@@ -35,8 +36,10 @@ class MemberConfig:
     mqtt_port: int             # MQTT_PORT            (default 1883)
     mqtt_username: str | None  # MQTT_USERNAME
     mqtt_password: str | None  # MQTT_PASSWORD
-    swarm: str                 # SWARM                (required)
+    swarm: str | None          # SWARM                (deprecated: the swarm's name as topic prefix)
     heartbeat_seconds: float   # HEARTBEAT_SECONDS    (default 60.0; must be > 0)
+    swarm_topic_id: str | None = None  # SWARM_TOPIC_ID (preferred, #293)
+    ltms_server: str | None = None     # LTMS_SERVER    (optional: look the topic ID up at start)
 
 
 def load_config(env: Mapping[str, str]) -> MemberConfig:
@@ -59,10 +62,14 @@ def load_config(env: Mapping[str, str]) -> MemberConfig:
     mqtt_username = env.get("MQTT_USERNAME")
     mqtt_password = env.get("MQTT_PASSWORD")  # never logged or put in an error
 
-    try:
-        swarm = env["SWARM"]
-    except KeyError:
-        raise ValueError("missing SWARM") from None
+    swarm = env.get("SWARM") or None
+    swarm_topic_id = env.get("SWARM_TOPIC_ID") or None
+    ltms_server = env.get("LTMS_SERVER") or None
+    if not (swarm or swarm_topic_id or ltms_server):
+        raise ValueError("missing SWARM_TOPIC_ID (or LTMS_SERVER to look it up, or the deprecated SWARM)")
+    for value, setting in ((swarm, "SWARM"), (swarm_topic_id, "SWARM_TOPIC_ID")):
+        if value is not None:
+            check_prefix(value, setting)
 
     try:
         heartbeat_seconds = float(env.get("HEARTBEAT_SECONDS", "60.0"))
@@ -81,7 +88,29 @@ def load_config(env: Mapping[str, str]) -> MemberConfig:
         mqtt_password=mqtt_password,
         swarm=swarm,
         heartbeat_seconds=heartbeat_seconds,
+        swarm_topic_id=swarm_topic_id,
+        ltms_server=ltms_server,
     )
+
+
+def member_prefix(cfg: MemberConfig, lookup=None) -> tuple[str, str]:
+    """The member's topic prefix and where it came from (#293).
+
+    ``SWARM_TOPIC_ID`` first. A member that still has an explicit ``SWARM=<name>``
+    keeps using the name (with a warning naming its topic ID, when LTMS can say)
+    rather than switching on its own: the broker's ACL may not allow the new
+    topics yet, and the hub serves both during migration. Otherwise the topic ID
+    is looked up from LTMS.
+    """
+    if cfg.swarm_topic_id:
+        return resolve(cfg.swarm_topic_id, None)
+    if cfg.swarm:
+        info = lookup() if lookup is not None else None
+        if info and info.get("topic_id") and info["topic_id"] != cfg.swarm:
+            logging.warning("Member: this swarm's topic ID is %s; set SWARM_TOPIC_ID=%s once the broker "
+                            "allows it", info["topic_id"], info["topic_id"])
+        return resolve(None, cfg.swarm)
+    return resolve(None, None, lookup)
 
 
 def make_on_message(acks: "queue.Queue[bytes]"):
@@ -145,6 +174,15 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     name, key = load_key(cfg.key_path)
+    lookup = None
+    if cfg.ltms_server and not cfg.swarm_topic_id:
+        from cli_agent.client import LTMSClient
+        lookup = LTMSClient(cfg.ltms_server, key_path=cfg.key_path).swarm
+    try:
+        prefix, source = member_prefix(cfg, lookup)
+    except NoSwarmTopic as exc:
+        raise SystemExit(f"Member: {exc}") from None
+    logging.info("Member: %s publishing under topic prefix %s (from %s)", name, prefix, source)
     outbox = Outbox(cfg.outbox_path)
 
     mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=name)
@@ -154,15 +192,15 @@ def main() -> None:
     def publish(topic: str, payload: bytes, retain: bool = False) -> None:
         mqtt_client.publish(topic, payload, qos=1, retain=retain)
 
-    link = MemberLink(name, key, outbox, cfg.state_path, publish, cfg.swarm)
+    link = MemberLink(name, key, outbox, cfg.state_path, publish, prefix)
     def hello():
         try:
             network = local_addresses()
         except OSError:  # no resolvable hostname: announce without addresses
             network = []
-        return hello_topic(name, cfg.swarm), encode_hello(name, network)
+        return hello_topic(name, prefix), encode_hello(name, network)
 
-    mqtt_client.on_connect = make_on_connect(acks_topic(name, cfg.swarm), resend_wanted, hello)
+    mqtt_client.on_connect = make_on_connect(acks_topic(name, prefix), resend_wanted, hello)
     mqtt_client.on_message = make_on_message(acks)
     if cfg.mqtt_username is not None:
         mqtt_client.username_pw_set(cfg.mqtt_username, cfg.mqtt_password)
