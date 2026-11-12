@@ -15,7 +15,8 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from cli_agent.client import LTMSClient
-from cli_agent.hub import Hub
+from cli_agent.hub import HeartbeatTimer, Hub
+from cli_agent.member_link import MemberLink
 from cli_agent.mqtt_messages import topic_kind
 from cli_agent.outbox import Outbox
 from ltms_contract import load_key
@@ -32,6 +33,8 @@ class HubConfig:
     mqtt_password: str | None  # MQTT_PASSWORD        (default None)
     swarm: str                 # SWARM                (required)
     tick_seconds: float        # TICK_SECONDS         (default 10.0; must be > 0)
+    heartbeat_seconds: float = 300.0  # HUB_HEARTBEAT_SECONDS (default 300; must be > 0)
+    state_path: str = "hub-head.json"  # HUB_STATE_PATH (default: hub-head.json beside the outbox)
 
 
 def load_config(env: Mapping[str, str]) -> HubConfig:
@@ -69,6 +72,15 @@ def load_config(env: Mapping[str, str]) -> HubConfig:
     if tick_seconds <= 0:
         raise ValueError("TICK_SECONDS must be > 0")
 
+    try:
+        heartbeat_seconds = float(env.get("HUB_HEARTBEAT_SECONDS", "300"))
+    except (TypeError, ValueError):
+        raise ValueError("HUB_HEARTBEAT_SECONDS must be a number") from None
+    if heartbeat_seconds <= 0:
+        raise ValueError("HUB_HEARTBEAT_SECONDS must be > 0")
+
+    state_path = env.get("HUB_STATE_PATH") or os.path.join(os.path.dirname(outbox_path), "hub-head.json")
+
     return HubConfig(
         ltms_server=ltms_server,
         key_path=key_path,
@@ -79,6 +91,8 @@ def load_config(env: Mapping[str, str]) -> HubConfig:
         mqtt_password=mqtt_password,
         swarm=swarm,
         tick_seconds=tick_seconds,
+        heartbeat_seconds=heartbeat_seconds,
+        state_path=state_path,
     )
 
 
@@ -134,14 +148,18 @@ def main() -> None:
     cfg = load_config(os.environ)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-    name, _ = load_key(cfg.key_path)
+    name, key = load_key(cfg.key_path)
     ltms_client = LTMSClient(cfg.ltms_server, key_path=cfg.key_path)
     outbox = Outbox(cfg.outbox_path)
 
     # clean_session=False: the broker queues QoS 1 records for the hub while it is down.
     mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=name, clean_session=False)
     publish = make_publish(mqtt_client)
-    hub = Hub(ltms_client, outbox, publish, cfg.swarm)
+    hub = Hub(ltms_client, outbox, publish, cfg.swarm, name=name)
+    # The hub's own chain (#281): signed into the shared outbox, never published on MQTT.
+    own = MemberLink(name, key, outbox, cfg.state_path, lambda *a, **k: None, cfg.swarm)
+    started_at = time.monotonic()
+    beat = HeartbeatTimer(cfg.heartbeat_seconds, started_at)
     mqtt_client.on_connect = make_on_connect(cfg.swarm)
     mqtt_client.on_message = make_on_message(hub)
     if cfg.mqtt_username is not None:
@@ -160,6 +178,9 @@ def main() -> None:
 
     try:
         while running:
+            now = time.monotonic()
+            if beat.due(now):
+                hub.heartbeat(own, started_at, now)
             hub.tick()
             if hub.stuck:
                 for agent, info in hub.stuck.items():
