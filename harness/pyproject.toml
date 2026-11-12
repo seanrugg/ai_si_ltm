@@ -1,0 +1,35 @@
+# ltms-harness (#294): the client side of LTMS only (signing, outbox, MQTT hub and
+# member, CLI), without the server's dependencies. It packages the repo's own
+# ltms_contract and cli_agent directories (one copy of the code, not a fork).
+# Build from the repository: pip install ./harness   or   pip wheel ./harness
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ltms-harness"
+version = "0.1.0"
+description = "LTMS client harness: signed records, outbox, MQTT hub/member and CLI, without the server"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pynacl>=1.5",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+mqtt = ["paho-mqtt>=2,<3"]
+
+[project.scripts]
+ltms-hub = "cli_agent.hub_main:main"
+ltms-member = "cli_agent.member_main:main"
+
+[tool.setuptools]
+packages = ["ltms_contract", "cli_agent"]
+
+[tool.setuptools.package-dir]
+ltms_contract = "../ltms_contract"
+cli_agent = "../cli_agent"
+
+[tool.setuptools.package-data]
+ltms_contract = ["vectors.json"]
