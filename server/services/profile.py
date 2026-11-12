@@ -451,13 +451,16 @@ HISTORY_KINDS = {
     "swarm_join": "membership", "swarm_leave": "membership", "permissions_change": "membership",
     "cognition_change": "membership", "member_revoke": "membership",
     "memory_wipe": "admin", "record_delete": "admin", "network_change": "admin",
+    "swarm_appoint_hub": "membership",
 }
 WHERE_AI = {"onboard": "on board", "offboard": "off board"}
 
 
-def _event_text(action: str, d: dict, swarm_names: dict) -> tuple[str, str | None]:
+def _event_text(action: str, d: dict, swarm_names: dict,
+                member_names: dict | None = None) -> tuple[str, str | None]:
     """(title, detail) for one audit row: short English built from its detail."""
     d = d if isinstance(d, dict) else {}
+    member_names = member_names or {}
     if action in ("enroll_request", "enroll_auto"):
         swarm = f" to {d['swarm']}" if d.get("swarm") else ""
         return (f"Enrolled{swarm}" if action == "enroll_auto" else f"Asked to enroll{swarm}",
@@ -468,6 +471,11 @@ def _event_text(action: str, d: dict, swarm_names: dict) -> tuple[str, str | Non
     if action == "swarm_join":
         verb = "Moved to" if d.get("moved_from") else "Joined"
         return f"{verb} {d.get('swarm')}", f"as {d['role']}" if d.get("role") else None
+    if action == "swarm_appoint_hub":
+        old = member_names.get(d.get("replaced"))
+        return f"Appointed hub of {d.get('swarm')}", f"replacing {old}" if old else None
+    if action == "swarm_appoint_hub_replaced":
+        return f"Replaced as hub of {d.get('swarm')}", f"by {d['hub']}" if d.get("hub") else None
     if action == "swarm_leave":
         name = swarm_names.get(d.get("swarm"), d.get("swarm"))
         return f"Left {name}", None
@@ -499,18 +507,38 @@ async def history(session: AsyncSession, subject: Subject) -> dict:
     detail_text = cast(AuditLog.detail, String)
     deletes = and_(AuditLog.action == "record_delete",
                    or_(*[detail_text.like(f'%"agent": "{n}"%') for n in names]))
+    # A hub appointment names the hub it replaced in `detail.replaced` (a member id, #278).
+    replaced = and_(AuditLog.action == "swarm_appoint_hub",
+                    or_(*[detail_text.like(f'%"replaced": "{i}"%') for i in ids]))
     rows = list(await session.scalars(
         select(AuditLog).where(AuditLog.action.in_(list(HISTORY_KINDS)),
-                               or_(AuditLog.member_id.in_(ids), deletes))
+                               or_(AuditLog.member_id.in_(ids), deletes, replaced))
         .order_by(AuditLog.ts.desc(), AuditLog.id.desc()).limit(MAX_EVENTS)))
     swarm_names = dict((await session.execute(select(Swarm.id, Swarm.name))).all())
+    replaced_ids = {(a.detail or {}).get("replaced") for a in rows if a.action == "swarm_appoint_hub"} - {None}
+    member_names = {}
+    if replaced_ids:
+        wanted = []
+        for i in replaced_ids:
+            try:
+                wanted.append(uuid.UUID(str(i)))
+            except ValueError:
+                pass
+        if wanted:
+            member_names = {str(mid): n for mid, n in (await session.execute(
+                select(Member.id, Member.name).where(Member.id.in_(wanted)))).all()}
+    id_strs = {str(i) for i in ids}
 
     events = []
     for a in rows:
         if a.action == "record_delete" and (a.detail or {}).get("agent") not in names and a.member_id not in ids:
             continue
-        title, detail = _event_text(a.action, a.detail, swarm_names)
-        events.append({"ts": a.ts.isoformat(), "kind": HISTORY_KINDS[a.action], "action": a.action,
+        action = a.action
+        if (action == "swarm_appoint_hub" and a.member_id not in ids
+                and str((a.detail or {}).get("replaced")) in id_strs):
+            action = "swarm_appoint_hub_replaced"  # seen from the hub that was replaced
+        title, detail = _event_text(action, a.detail, swarm_names, member_names)
+        events.append({"ts": a.ts.isoformat(), "kind": HISTORY_KINDS[a.action], "action": action,
                        "title": title, "detail": detail, "_order": (a.ts, 1)})
     # learning: each member's first lesson
     firsts = (await session.execute(
