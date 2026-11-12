@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import HelpTip from "../components/HelpTip.jsx";
 import LocationForm from "../components/LocationForm.jsx";
 import RemoveSwarmDialog from "../components/RemoveSwarmDialog.jsx";
-import { ADD_SWARM, MEMORY_WIPE, ROOT_PRIVATE_KEY, ROOT_PUBLIC_KEY, SWARM_ROLE, WIPE_VS_DELETE } from "../lib/help.js";
+import { ADD_SWARM, MEMORY_WIPE, ROOT_KEY_FORMAT, ROOT_KEY_PASTE, ROOT_PRIVATE_KEY, ROOT_PUBLIC_KEY, SWARM_ROLE,
+  WIPE_VS_DELETE } from "../lib/help.js";
 import RenameSwarm from "../components/RenameSwarm.jsx";
 import { Link } from "react-router-dom";
 import { api } from "../api/client.js";
@@ -94,6 +95,10 @@ export function KeyOnceDialog({ swarmName, swarmId, keyString, onDone }) {
            aria-label="Root key">
           {keyString}
         </p>
+        <p className="mb-3 flex items-center gap-2 text-sm text-paper">
+          <span>Save the whole line, including <span className="font-mono">ltms-swarm-key-v1:</span></span>
+          <HelpTip id="root-key-format" label="What the parts of the key mean">{ROOT_KEY_FORMAT}</HelpTip>
+        </p>
         <div className="mb-3 flex flex-wrap items-center gap-2 text-sm text-paper-muted">
           <span>Swarm ID <span className="break-all font-mono text-paper">{swarmId}</span></span>
           <HelpTip id="root-public-key" label="About the public root key">{ROOT_PUBLIC_KEY}</HelpTip>
@@ -106,6 +111,9 @@ export function KeyOnceDialog({ swarmName, swarmId, keyString, onDone }) {
         <p className="mb-2 text-sm text-warn">
           Copy this key now and store it offline. It is not shown again. Without it you can&apos;t appoint or replace
           this swarm&apos;s hub.
+        </p>
+        <p className="mb-2 text-sm text-paper-muted">
+          Losing this key means revoking and re-creating the swarm. Keep it in a password manager, with a backup.
         </p>
         <label className="mb-3 flex items-center gap-2 text-sm cursor-pointer">
           <input type="checkbox" className="accent-led" checked={saved} onChange={(e) => setSaved(e.target.checked)} />
@@ -265,6 +273,7 @@ function AppointHub({ swarm, allMembers, busy, act }) {
                    value={keyText} onChange={(e) => setKeyText(e.target.value)}
                    placeholder="ltms-swarm-key-v1:…" required />
           </label>
+          <HelpTip id={`root-key-paste-${swarm.name}`} label="If the key is pasted wrong">{ROOT_KEY_PASTE}</HelpTip>
           <button className="btn btn-primary" disabled={busy || !hub || !keyText}>Sign and appoint</button>
           <button type="button" className="btn" onClick={clear} disabled={!keyText && !localError}>Cancel</button>
         </form>
