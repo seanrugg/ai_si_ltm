@@ -44,6 +44,7 @@ describe("Swarms page", () => {
     const input = html.match(/<input[^>]*name="swarm-root-key"[^>]*>/)[0];
     expect(input).toContain('type="password"');
     expect(input).toContain('autoComplete="new-password"');
+    expect(html).toContain('aria-label="If the key is pasted wrong"'); // #284
   });
 });
 
@@ -64,6 +65,13 @@ describe("one-time key panel", () => {
     expect(html).toContain('aria-label="About the public root key"');
     expect(html).toContain("a".repeat(64));
     expect(html).toContain("Copy this key now and store it offline");
+  });
+
+  it("says to save the whole line, explains its parts, and what losing it means (#284)", () => {
+    expect(html).toContain("Save the whole line, including");
+    expect(html).toContain("ltms-swarm-key-v1:");
+    expect(html).toContain('aria-label="What the parts of the key mean"');
+    expect(html).toContain("Losing this key means revoking and re-creating the swarm");
   });
 
   it("can't be closed until the key is confirmed saved", () => {

@@ -84,7 +84,8 @@ python -m scripts.swarm_key appoint-hub --key /Volumes/KEY/echo-base.swarm.json 
 ```
 
 Copy `appoint.json` to the server and apply it (it isn't secret; it's a signed
-statement, valid for 30 days):
+statement). It must be **applied within 30 days of signing**; once applied it
+stays in force until another hub is appointed or the swarm is revoked:
 
 ```bash
 cat appoint.json | manage.sh swarm-appoint-hub --swarm echo-base -
@@ -141,7 +142,7 @@ it is created.
 
 ### Topics
 
-Until hubs and members switch to the topic ID (#293), `<swarm>` below is the swarm's name.
+`<swarm>` below is the swarm's **topic ID** (#293). Hubs and members find it from `SWARM_TOPIC_ID`, or from LTMS at start; the old `SWARM=<name>` still works, with a warning. During a migration the hub serves both prefixes (`SWARM_LEGACY_NAME`): see `examples/echo-base/README.md`.
 
 | Topic | Who publishes | What |
 |---|---|---|

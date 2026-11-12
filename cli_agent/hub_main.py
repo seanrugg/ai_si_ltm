@@ -17,6 +17,7 @@ from typing import Mapping
 from cli_agent.client import LTMSClient
 from cli_agent.hub import HeartbeatTimer, Hub
 from cli_agent.member_link import MemberLink
+from cli_agent.swarm_topic import check_prefix, resolve
 from cli_agent.mqtt_messages import topic_kind
 from cli_agent.outbox import Outbox
 from ltms_contract import load_key
@@ -31,10 +32,12 @@ class HubConfig:
     mqtt_port: int             # MQTT_PORT            (default 1883)
     mqtt_username: str | None  # MQTT_USERNAME        (default None)
     mqtt_password: str | None  # MQTT_PASSWORD        (default None)
-    swarm: str                 # SWARM                (required)
+    swarm: str | None          # SWARM                (deprecated: the swarm's name as topic prefix)
     tick_seconds: float        # TICK_SECONDS         (default 10.0; must be > 0)
     heartbeat_seconds: float = 300.0  # HUB_HEARTBEAT_SECONDS (default 300; must be > 0)
     state_path: str = "hub-head.json"  # HUB_STATE_PATH (default: hub-head.json beside the outbox)
+    swarm_topic_id: str | None = None  # SWARM_TOPIC_ID (preferred; else looked up from LTMS, #293)
+    legacy_name: str | None = None     # SWARM_LEGACY_NAME (migration: also serve <name>/+/...)
 
 
 def load_config(env: Mapping[str, str]) -> HubConfig:
@@ -60,10 +63,13 @@ def load_config(env: Mapping[str, str]) -> HubConfig:
     mqtt_username = env.get("MQTT_USERNAME")
     mqtt_password = env.get("MQTT_PASSWORD")  # never logged or put in an error
 
-    try:
-        swarm = env["SWARM"]
-    except KeyError:
-        raise ValueError("missing SWARM") from None
+    # The hub always has LTMS_SERVER, so with neither setting it looks its topic ID up at start (#293).
+    swarm = env.get("SWARM") or None
+    swarm_topic_id = env.get("SWARM_TOPIC_ID") or None
+    legacy_name = env.get("SWARM_LEGACY_NAME") or None
+    for value, setting in ((swarm, "SWARM"), (swarm_topic_id, "SWARM_TOPIC_ID"), (legacy_name, "SWARM_LEGACY_NAME")):
+        if value is not None:
+            check_prefix(value, setting)
 
     try:
         tick_seconds = float(env.get("TICK_SECONDS", "10.0"))
@@ -93,7 +99,20 @@ def load_config(env: Mapping[str, str]) -> HubConfig:
         tick_seconds=tick_seconds,
         heartbeat_seconds=heartbeat_seconds,
         state_path=state_path,
+        swarm_topic_id=swarm_topic_id,
+        legacy_name=legacy_name,
     )
+
+
+def legacy_prefix(cfg: HubConfig, source: str) -> str | None:
+    """The old name-based prefix to keep serving during migration, if any (#293).
+
+    ``SWARM_LEGACY_NAME`` wins. A hub that still has ``SWARM=<name>`` but now
+    uses a topic ID also keeps serving the name, so members can move one at a time.
+    """
+    if cfg.legacy_name:
+        return cfg.legacy_name
+    return cfg.swarm if source != "name" else None
 
 
 def records_subscription(swarm: str) -> str:
@@ -124,17 +143,18 @@ def make_on_message(hub):
     return on_message
 
 
-def make_on_connect(swarm: str):
+def make_on_connect(swarm):
+    """``swarm`` is one topic prefix or a list of them (topic ID first, then a legacy name)."""
+    prefixes = [swarm] if isinstance(swarm, str) else list(swarm)
+
     def on_connect(client, userdata, flags, reason_code, properties) -> None:
         try:
-            client.subscribe(records_subscription(swarm), qos=1)
-            client.subscribe(hello_subscription(swarm), qos=1)
-            logging.info(
-                "Hub: MQTT connected (reason %s), subscribed to %s and %s",
-                reason_code,
-                records_subscription(swarm),
-                hello_subscription(swarm),
-            )
+            topics = []
+            for prefix in prefixes:
+                for topic in (records_subscription(prefix), hello_subscription(prefix)):
+                    client.subscribe(topic, qos=1)
+                    topics.append(topic)
+            logging.info("Hub: MQTT connected (reason %s), subscribed to %s", reason_code, " and ".join(topics))
         except Exception:  # never let a reconnect handler raise
             logging.exception("Hub: on_connect failed")
 
@@ -155,12 +175,17 @@ def main() -> None:
     # clean_session=False: the broker queues QoS 1 records for the hub while it is down.
     mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=name, clean_session=False)
     publish = make_publish(mqtt_client)
-    hub = Hub(ltms_client, outbox, publish, cfg.swarm, name=name)
+    # Which swarm, in human terms and as a topic prefix (#293).
+    info = ltms_client.swarm()
+    prefix, source = resolve(cfg.swarm_topic_id, cfg.swarm, lambda: info)
+    logging.info("Hub: swarm %s, topic prefix %s (from %s)",
+                 (info or {}).get("name", "unknown"), prefix, source)
+    hub = Hub(ltms_client, outbox, publish, prefix, name=name, legacy=legacy_prefix(cfg, source))
     # The hub's own chain (#281): signed into the shared outbox, never published on MQTT.
-    own = MemberLink(name, key, outbox, cfg.state_path, lambda *a, **k: None, cfg.swarm)
+    own = MemberLink(name, key, outbox, cfg.state_path, lambda *a, **k: None, prefix)
     started_at = time.monotonic()
     beat = HeartbeatTimer(cfg.heartbeat_seconds, started_at)
-    mqtt_client.on_connect = make_on_connect(cfg.swarm)
+    mqtt_client.on_connect = make_on_connect(hub.prefixes)
     mqtt_client.on_message = make_on_message(hub)
     if cfg.mqtt_username is not None:
         mqtt_client.username_pw_set(cfg.mqtt_username, cfg.mqtt_password)
@@ -181,6 +206,8 @@ def main() -> None:
             now = time.monotonic()
             if beat.due(now):
                 hub.heartbeat(own, started_at, now)
+                current = ltms_client.swarm()  # never raises; keeps the log in human terms
+                logging.info("Hub: heartbeat; swarm %s (topic %s)", (current or {}).get("name", "unknown"), prefix)
             hub.tick()
             if hub.stuck:
                 for agent, info in hub.stuck.items():

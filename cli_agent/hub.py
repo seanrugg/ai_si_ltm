@@ -35,12 +35,17 @@ class HeartbeatTimer:
 
 
 class Hub:
-    def __init__(self, client, outbox: Outbox, publish, swarm: str, name: str | None = None) -> None:
+    def __init__(self, client, outbox: Outbox, publish, swarm: str, name: str | None = None,
+                 legacy: str | None = None) -> None:
         self.client = client
         self.name = name  # the hub's own member name, if it signs its own records
         self.outbox = outbox
         self.publish = publish
-        self.swarm = swarm
+        self.swarm = swarm  # the topic prefix: the swarm's topic ID (#293)
+        # Migration (#293): also serve the old name-based prefix while members move over.
+        self.prefixes = [swarm] + ([legacy] if legacy and legacy != swarm else [])
+        self.legacy = legacy if legacy and legacy != swarm else None
+        self._legacy_logged: set[str] = set()
         self.lock = threading.Lock()
         self.dropped = 0
         self.stuck: dict = {}
@@ -49,9 +54,25 @@ class Hub:
         # Members heard on MQTT (records or hello) since the last heartbeat (#281).
         self.seen: set[str] = set()
 
+    def _agent(self, topic: str, parse) -> str:
+        """The agent in ``topic`` under any served prefix; logs once per member still on the legacy one."""
+        last = None
+        for prefix in self.prefixes:
+            try:
+                agent = parse(topic, prefix)
+            except ValueError as exc:
+                last = exc
+                continue
+            if prefix == self.legacy and agent not in self._legacy_logged:
+                self._legacy_logged.add(agent)
+                logging.info("Hub: %s still uses the legacy topic prefix %r; move it to %r",
+                             agent, self.legacy, self.swarm)
+            return agent
+        raise last
+
     def on_record(self, topic: str, payload: bytes) -> bool:
         try:
-            agent = agent_from_topic(topic, self.swarm)
+            agent = self._agent(topic, agent_from_topic)
             rec = decode_record(payload, agent)
             with self.lock:
                 self.seen.add(agent)
@@ -64,7 +85,7 @@ class Hub:
     def on_hello(self, topic: str, payload: bytes) -> bool:
         """A member announced itself. Its addresses are reported on the next tick. Never raises."""
         try:
-            agent = agent_from_hello_topic(topic, self.swarm)
+            agent = self._agent(topic, agent_from_hello_topic)
             msg = decode_hello(payload, agent)
         except ValueError as exc:
             self.dropped += 1
@@ -117,6 +138,7 @@ class Hub:
         for name, head in result["heads"].items():
             if name == self.name:
                 continue  # the hub's own records: nobody on MQTT waits for these acks
-            self.publish(acks_topic(name, self.swarm), encode_ack(head), retain=True)
+            for prefix in self.prefixes:
+                self.publish(acks_topic(name, prefix), encode_ack(head), retain=True)
         self.stuck = dict(result["errors"])
         return result
