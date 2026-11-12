@@ -6,12 +6,13 @@ import { useApi } from "../api/useApi.js";
 import { ErrorNote, Loading, StatusBadge } from "../components/ui.jsx";
 import { Legend, MemberMark } from "../components/visual.jsx";
 import ProxiedBadge from "../components/ProxiedBadge.jsx";
-import { localTime, plural, relativeTime } from "../lib/format.js";
-import { DEFAULT_TAB, RANGES, TABS, nextTab, rangeOf, tabOf } from "../lib/profile.js";
+import { localTime, relativeTime } from "../lib/format.js";
+import { DEFAULT_TAB, RANGES, nextTab, rangeOf, swarmCount, tabOf, tabsFor } from "../lib/profile.js";
 import { KINDS, NEUTRAL, ROLES, kindOf, roleOf } from "../lib/visual.js";
 import Overview from "./profile/Overview.jsx";
 import Activity from "./profile/Activity.jsx";
 import History from "./profile/History.jsx";
+import Members from "./profile/Members.jsx";
 import Interactions from "./profile/Interactions.jsx";
 import Network from "./profile/Network.jsx";
 import Places from "./profile/Places.jsx";
@@ -20,7 +21,7 @@ import Senses from "./profile/Senses.jsx";
 export const SWARM_PATH = "M10 6a2 2 0 1 0 4 0a2 2 0 1 0-4 0 M3 18a2 2 0 1 0 4 0a2 2 0 1 0-4 0 M17 18a2 2 0 1 0 4 0a2 2 0 1 0-4 0 M11 7.8 6 16.2 M13 7.8l5 8.4 M7 18h10";
 
 // Tabs built so far; the rest say "Coming soon" until their issue merges.
-const TAB_VIEWS = { overview: Overview, places: Places, interactions: Interactions, network: Network, activity: Activity,
+const TAB_VIEWS = { overview: Overview, members: Members, places: Places, interactions: Interactions, network: Network, activity: Activity,
   senses: Senses, history: History };
 
 export function SwarmMark({ size = 40 }) {
@@ -46,19 +47,19 @@ export function memberWithRole(member, swarms) {
   return { ...member, role: null, swarm: null };
 }
 
-function Tabs({ tab, onSelect }) {
+function Tabs({ tab, subject, onSelect }) {
   const refs = useRef({});
   function onKeyDown(e) {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
     e.preventDefault();
-    const next = nextTab(tab, e.key);
+    const next = nextTab(tab, e.key, subject);
     onSelect(next);
     refs.current[next]?.focus();
   }
   return (
     <div role="tablist" aria-label="Profile sections" className="mb-3 flex flex-wrap gap-1 border-b border-ink-line"
          onKeyDown={onKeyDown}>
-      {TABS.map((t) => (
+      {tabsFor(subject).map((t) => (
         <button key={t.key} type="button" role="tab" id={`tab-${t.key}`} aria-controls={`panel-${t.key}`}
                 aria-selected={tab === t.key} tabIndex={tab === t.key ? 0 : -1}
                 ref={(el) => { refs.current[t.key] = el; }}
@@ -86,7 +87,7 @@ export default function Profile({ subject }) {
   const { name } = useParams();
   const [params, setParams] = useSearchParams();
   const range = rangeOf(params.get("range"));
-  const tab = tabOf(params.get("tab"));
+  const tab = tabOf(params.get("tab"), subject);
   const subjectParams = { [subject]: name };
 
   function setParam(key, value) {
@@ -165,7 +166,7 @@ export default function Profile({ subject }) {
           <span className="text-sm text-paper-muted">
             {subject === "member"
               ? `${ROLES[role]?.label ?? "Free agent"} · ${KINDS[kind]?.label ?? ""}`
-              : `Swarm · ${plural((swarm?.members || []).length, "member")}`}
+              : `Swarm · ${swarmCount(swarm?.members)}`}
           </span>
         </div>
         {member && (
@@ -189,7 +190,7 @@ export default function Profile({ subject }) {
         )}
       </section>
 
-      <Tabs tab={tab} onSelect={(t) => setParam("tab", t)} />
+      <Tabs tab={tab} subject={subject} onSelect={(t) => setParam("tab", t)} />
       <div className="mb-4"><Legend /></div>
 
       <section role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
@@ -199,6 +200,7 @@ export default function Profile({ subject }) {
             ? <Loading what="Loading the profile" />
             : summary.data && <View subject={subject} name={name} summary={summary.data} history={history.data}
                                     range={range} members={memberRows} swarms={swarms.data}
+                                    onReload={() => { swarms.reload?.(); members.reload?.(); }}
                                     onSelectPeer={(peer) => setParams((prev) => {
                                       const next = new URLSearchParams(prev);
                                       next.set("tab", "interactions");

@@ -222,6 +222,16 @@ describe("intended swarm and role on the pending card (#295)", () => {
   });
 });
 
+describe("approval card fingerprint check (#283)", () => {
+  it("labels the 16 characters as the start of the public key and gives the safe command", () => {
+    const { container } = renderMembers();
+    expect(screen.getAllByText("Public key (first 16 characters)").length).toBe(2);
+    expect(container.textContent).toContain("python -m cli_agent pubkey --key");
+    expect(container.textContent).toContain("Don't open the key file itself: it contains the private key.");
+    expect(container.textContent).not.toContain("against the key file on the device");
+  });
+});
+
 describe("kind and permissions are labelled separately (#280)", () => {
   it("shows Kind and Permissions as two labelled parts, with the profile's kind wording", () => {
     allMembers = [
