@@ -86,15 +86,38 @@ def _invite_hash(code: str) -> str:
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
 
+INVITE_ROLES = ("member", "observer")
+INTENDED_ROLES = ("hub", "member", "observer")
+
+
+def _validate_intended(intended: dict | None) -> dict | None:
+    """``{"swarm", "role"}`` a device says it's for (#295): shown to the admin, never granted."""
+    if intended is None:
+        return None
+    if not isinstance(intended, dict) or set(intended) - {"swarm", "role"}:
+        raise ServiceError(422, "bad_intended", "intended must be {\"swarm\": <name>, \"role\": <role>}")
+    swarm, role = intended.get("swarm"), intended.get("role")
+    if swarm is not None and (not isinstance(swarm, str) or not NAME_RE.match(swarm)):
+        raise ServiceError(422, "bad_intended", "intended.swarm must be a swarm name")
+    if role is not None and role not in INTENDED_ROLES:
+        raise ServiceError(422, "bad_intended", f"intended.role must be one of {', '.join(INTENDED_ROLES)}")
+    if swarm is None and role is None:
+        return None
+    return {"swarm": swarm, "role": role}
+
+
 async def create_invite(
     session: AsyncSession, swarm: Swarm, *, uses: int, expires_at: datetime | None,
-    actor: str = "cli",
+    actor: str = "cli", role: str = "member",
 ) -> tuple[Invite, str]:
     """Create a one-time enrollment code for ``swarm``.
 
     Returns the row and the plaintext code. Only the code's SHA-256 is stored,
     so the caller must show the plaintext now; it can't be recovered later.
     """
+    if role not in INVITE_ROLES:
+        raise ServiceError(422, "bad_role", "an invite's role is member or observer; "
+                                            "a hub is appointed with the swarm's root key")
     if swarm.status != "active":
         raise ServiceError(409, "swarm_revoked", f"swarm {swarm.name!r} is revoked")
     if expires_at is not None:
@@ -104,16 +127,16 @@ async def create_invite(
             raise ServiceError(422, "bad_expiry", "expires_at must be in the future")
     code = INVITE_PREFIX + secrets.token_urlsafe(24)
     row = Invite(swarm_id=swarm.id, code_hash=_invite_hash(code), uses_left=uses,
-                 expires_at=expires_at)
+                 expires_at=expires_at, role=role)
     session.add(row)
     await session.flush()
     session.add(AuditLog(actor=actor, action="swarm_invite_create",
-                         detail={"swarm": swarm.name, "uses": uses,
+                         detail={"swarm": swarm.name, "uses": uses, "role": role,
                                  "expires_at": expires_at.isoformat() if expires_at else None}))
     return row, code
 
 
-async def _use_invite(session: AsyncSession, swarm: Swarm, code: str, now: datetime) -> None:
+async def _use_invite(session: AsyncSession, swarm: Swarm, code: str, now: datetime) -> Invite:
     """Spend one use of an invite code, atomically.
 
     The decrement is a single conditional UPDATE, so two enrollments racing
@@ -132,6 +155,7 @@ async def _use_invite(session: AsyncSession, swarm: Swarm, code: str, now: datet
         .execution_options(synchronize_session=False))
     if result.rowcount != 1:
         raise ServiceError(403, "bad_invite", "invite code has no uses left")
+    return row
 
 
 async def request_enrollment(
@@ -148,6 +172,7 @@ async def request_enrollment(
     swarm: str | None = None,
     invite: str | None = None,
     enrollment_policy: str = "manual",
+    intended: dict | None = None,
 ) -> Member:
     if not NAME_RE.match(name or ""):
         raise ServiceError(422, "bad_name", "name must match ^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -161,6 +186,8 @@ async def request_enrollment(
     except (ValueError, TypeError):
         raise ServiceError(422, "bad_public_key", "public_key must be 64 hex chars (Ed25519)") from None
     requested = _validate_permissions(permissions)
+    intended = _validate_intended(intended)
+    join_role = "member"
 
     now = datetime.now(timezone.utc)
     swarm_row = None
@@ -198,7 +225,7 @@ async def request_enrollment(
                 member = Member(
                     name=name, kind=kind, public_key=pk, operator=operator, note=note,
                     requested_permissions=requested, permissions=["recall"],
-                    status="active", request_ip=remote_ip, enrolled_at=now,
+                    status="active", request_ip=remote_ip, enrolled_at=now, intended=intended,
                 )
                 session.add(member)
                 await session.flush()
@@ -229,7 +256,7 @@ async def request_enrollment(
         if mode == "invite":
             if invite is None:
                 raise ServiceError(403, "bad_invite", "this swarm requires an invite code")
-            await _use_invite(session, swarm_row, invite, now)
+            join_role = (await _use_invite(session, swarm_row, invite, now)).role or "member"
             # An invitee only ever gets contribute and/or recall, whatever it
             # asked for.
             granted = sorted(set(requested) & {"contribute", "recall"})
@@ -267,18 +294,20 @@ async def request_enrollment(
         status="active" if auto else "pending",
         request_ip=remote_ip,
         enrolled_at=now if auto else None,
+        intended=intended,
     )
     session.add(member)
     await session.flush()
     if swarm_row is not None and auto:
-        await swarms.set_member(session, member, swarm_row, "member", actor=f"enroll:{name}")
+        await swarms.set_member(session, member, swarm_row, join_role, actor=f"enroll:{name}")
     elif swarm_row is not None:
         session.add(EnrollmentSwarmRequest(member_id=member.id, swarm_id=swarm_row.id))
     session.add(AuditLog(member_id=member.id, actor=name,
                          action="enroll_auto" if auto else "enroll_request",
                          detail={"kind": kind, "mode": mode, "granted": granted,
                                  "swarm": swarm_row.name if swarm_row is not None else None,
-                                 "ip": remote_ip}))
+                                 "role": join_role if auto and swarm_row is not None else None,
+                                 "intended": intended, "ip": remote_ip}))
     return member
 
 
@@ -387,6 +416,7 @@ def member_to_dict(m: Member) -> dict:
         "memory_generation": m.memory_generation,
         "recall_floor_id": m.recall_floor_id,
         "cognition": cognition.resolve(m),
+        "intended": m.intended,
         "enrolled_at": m.enrolled_at.isoformat() if m.enrolled_at else None,
         "revoked_at": m.revoked_at.isoformat() if m.revoked_at else None,
         "last_seen_at": m.last_seen_at.isoformat() if m.last_seen_at else None,

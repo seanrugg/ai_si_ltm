@@ -128,11 +128,14 @@ class LTMSClient:
         return resp.json()
 
     # ------------------------------------------------------------------ enroll / login
-    def enroll(self, kind: str, permissions: list[str], operator: str | None = None, note: str | None = None) -> dict:
-        return self._call("POST", "/api/auth/enroll", auth=False, json={
-            "name": self.name, "kind": kind, "public_key": public_key_hex(self.key),
-            "permissions": permissions, "operator": operator, "note": note,
-        })
+    def enroll(self, kind: str, permissions: list[str], operator: str | None = None, note: str | None = None,
+               intended: dict | None = None) -> dict:
+        """``intended`` = ``{"swarm", "role"}``: what this member is for (#295). A request, never a grant."""
+        body = {"name": self.name, "kind": kind, "public_key": public_key_hex(self.key),
+                "permissions": permissions, "operator": operator, "note": note}
+        if intended:
+            body["intended"] = intended
+        return self._call("POST", "/api/auth/enroll", auth=False, json=body)
 
     def login(self) -> dict:
         ch = self._call("POST", "/api/auth/challenge", auth=False, json={"name": self.name})
