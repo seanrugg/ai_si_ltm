@@ -16,6 +16,7 @@ class EnrollRequest(BaseModel):
     note: str | None = Field(None, max_length=1000)
     swarm: str | None = Field(None, max_length=64)
     invite: str | None = Field(None, max_length=128)
+    intended: dict | None = None  # {"swarm", "role"}: what it's for; shown to the admin, never granted (#295)
 
 
 class ChallengeRequest(BaseModel):
@@ -63,6 +64,7 @@ class McpTokenCreate(BaseModel):
 class InviteCreate(BaseModel):
     uses: int = Field(..., ge=1, le=10000)
     expires_at: datetime | None = None
+    role: str = "member"  # member or observer (#295)
 
 
 class SwarmMode(BaseModel):
