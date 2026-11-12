@@ -48,3 +48,9 @@ export const URL_SNAPSHOT = "LTMS fetches the page or file once and keeps it as 
 export const CHARTER = "The charter is the fleet's governance: every member reads it when it joins and whenever it changes. Reads are logged and sent to the LRS.";
 // "{days}" is replaced with the server's grace period.
 export const CHARTER_GRACE = "Members must read this version. After {days} days, members who haven't read it can't write records until they do.";
+
+// #283: checking a pending member's key without exposing its secret.
+export const FINGERPRINT_CHECK =
+  "On the device, run python -m cli_agent pubkey --key <key file> and check that its public key starts with " +
+  "these 16 characters. Don't open the key file itself: it contains the private key.";
+
