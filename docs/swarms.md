@@ -141,7 +141,7 @@ it is created.
 
 ### Topics
 
-Until hubs and members switch to the topic ID (#293), `<swarm>` below is the swarm's name.
+`<swarm>` below is the swarm's **topic ID** (#293). Hubs and members find it from `SWARM_TOPIC_ID`, or from LTMS at start; the old `SWARM=<name>` still works, with a warning. During a migration the hub serves both prefixes (`SWARM_LEGACY_NAME`): see `examples/echo-base/README.md`.
 
 | Topic | Who publishes | What |
 |---|---|---|
