@@ -147,7 +147,7 @@ def test_make_on_connect_subscribes_with_qos_one():
     client = FakeMqttClient()
     on_connect = make_on_connect("echo-base")
     on_connect(client, None, {}, 0, None)
-    assert client.subscribes == [("echo-base/+/records", 1), ("echo-base/+/hello", 1)]
+    assert client.subscribes == [("echo-base/+/records", 1), ("echo-base/+/hello", 1), ("echo-base/+/say", 1)]
 
 
 def test_make_publish_always_uses_qos_one():
@@ -234,5 +234,37 @@ def test_on_connect_subscribes_every_prefix():
             calls.append((topic, qos))
 
     make_on_connect(["sw-1a2b3c4d", "echo-base"])(Client(), None, None, 0, None)
-    assert calls == [("sw-1a2b3c4d/+/records", 1), ("sw-1a2b3c4d/+/hello", 1),
-                     ("echo-base/+/records", 1), ("echo-base/+/hello", 1)]
+    assert calls == [("sw-1a2b3c4d/+/records", 1), ("sw-1a2b3c4d/+/hello", 1), ("sw-1a2b3c4d/+/say", 1),
+                     ("echo-base/+/records", 1), ("echo-base/+/hello", 1), ("echo-base/+/say", 1)]
+
+
+# --- swarm messages (#300) ---
+def test_max_msgs_per_second_setting():
+    assert load_config(base_env()).max_msgs_per_second == 10
+    assert load_config({**base_env(), "HUB_MAX_MSGS_PER_SECOND": "3"}).max_msgs_per_second == 3
+    for bad in ("0", "-1", "2.5", "lots"):
+        with pytest.raises(ValueError, match="HUB_MAX_MSGS_PER_SECOND"):
+            load_config({**base_env(), "HUB_MAX_MSGS_PER_SECOND": bad})
+
+
+def test_on_message_routes_say_to_on_say():
+    seen = []
+
+    class FakeHub:
+        def on_say(self, topic, payload):
+            seen.append(("say", topic))
+
+        def on_hello(self, topic, payload):
+            seen.append(("hello", topic))
+
+        def on_record(self, topic, payload):
+            seen.append(("record", topic))
+
+    on_message = make_on_message(FakeHub())
+
+    class Msg:
+        def __init__(self, topic):
+            self.topic, self.payload = topic, b"{}"
+    for t in ("sw-1/a/say", "sw-1/a/hello", "sw-1/a/records"):
+        on_message(None, None, Msg(t))
+    assert seen == [("say", "sw-1/a/say"), ("hello", "sw-1/a/hello"), ("record", "sw-1/a/records")]

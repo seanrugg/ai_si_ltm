@@ -239,3 +239,59 @@ def test_hub_without_legacy_serves_one_prefix(mesh, home, outbox):
     hub_client, _ = _setup(mesh, home)
     hub = Hub(hub_client, outbox, lambda *a, **k: None, "sw-1a2b3c4d", legacy="sw-1a2b3c4d")
     assert hub.prefixes == ["sw-1a2b3c4d"]
+
+
+# --- swarm messages (#300) ---
+def _say_link(name, key, outbox_path, tmp_path, published):
+    from cli_agent.member_link import MemberLink
+    from cli_agent.outbox import Outbox
+    return MemberLink(name, key, Outbox(outbox_path), tmp_path / f"{name}-head.json",
+                      lambda t, p, retain=False: published.append((t, p)), "echo-base")
+
+
+def test_message_is_forwarded_with_peers_and_reply_ref(mesh, home, outbox, tmp_path):
+    hub_client, z3 = _setup(mesh, home)
+    hub = Hub(hub_client, outbox, lambda *a, **k: None, "echo-base")
+    published = []
+    link = _say_link("z3-r0", z3.key, tmp_path / "z3.db", tmp_path, published)
+    first = link.send_message("anyone near the charger?")
+    reply = link.send_message("on my way", to=["vector"], reply_to="vector:7")
+    assert [t for t, _ in published] == ["echo-base/z3-r0/say", "echo-base/z3-r0/say"]
+    for topic, payload in published:
+        assert hub.on_say(topic, payload, now=1000.0)
+    result = hub.tick()
+    assert result["errors"] == {} and result["heads"]["z3-r0"]["last_ack_seq"] == 2
+    recs = z3._call("GET", "/api/records", params={"agent": "z3-r0"})["records"]
+    by_seq = {r["seq"]: r for r in recs}
+    assert by_seq[1]["type"] == "communication" and "swarm-message" in by_seq[1]["tags"]
+    assert by_seq[2]["peers"] == ["vector"] and by_seq[2]["refs"] == {"reply_to": "vector:7"}
+    assert first["summary"] == "anyone near the charger?" and reply["seq"] == 2
+
+
+def test_hub_caps_messages_per_member_per_second(mesh, home, outbox, tmp_path):
+    hub_client, z3 = _setup(mesh, home)
+    hub = Hub(hub_client, outbox, lambda *a, **k: None, "echo-base", max_msgs_per_second=10)
+    published = []
+    link = _say_link("z3-r0", z3.key, tmp_path / "z3.db", tmp_path, published)
+    for i in range(20):
+        link.send_message(f"ping {i}")
+    accepted = [hub.on_say(t, p, now=2000.5) for t, p in published]
+    assert accepted.count(True) == 10 and accepted.count(False) == 10
+    assert hub.dropped_messages == {"z3-r0": 10}
+    # the next second has a fresh allowance
+    assert hub.on_say(published[10][0], published[10][1], now=2001.0)
+    # the heartbeat reports the drops and resets them
+    from cli_agent.member_link import MemberLink
+    own = MemberLink("jetson-hub", hub_client.key, outbox, tmp_path / "hub.json", lambda *a, **k: None, "echo-base")
+    beat = hub.heartbeat(own, started_at=0.0, now=10.0)
+    assert beat["payload"]["dropped_messages"] == {"z3-r0": 10}
+    assert hub.dropped_messages == {}
+
+
+def test_say_topic_carries_only_swarm_messages(mesh, home, outbox, tmp_path):
+    hub_client, z3 = _setup(mesh, home)
+    hub = Hub(hub_client, outbox, lambda *a, **k: None, "echo-base")
+    rec = sign(z3, 1)[0]  # an ordinary record, not a swarm message
+    assert not hub.on_say("echo-base/z3-r0/say", encode_record(rec), now=1.0)
+    assert not hub.on_say("echo-base/other/say", encode_record(rec), now=1.0)   # topic/author mismatch
+    assert hub.dropped == 2

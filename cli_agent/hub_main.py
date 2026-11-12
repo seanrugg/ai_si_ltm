@@ -18,7 +18,7 @@ from cli_agent.client import LTMSClient
 from cli_agent.hub import HeartbeatTimer, Hub
 from cli_agent.member_link import MemberLink
 from cli_agent.swarm_topic import check_prefix, resolve
-from cli_agent.mqtt_messages import topic_kind
+from cli_agent.mqtt_messages import say_subscription, topic_kind
 from cli_agent.outbox import Outbox
 from ltms_contract import load_key
 
@@ -34,6 +34,7 @@ class HubConfig:
     mqtt_password: str | None  # MQTT_PASSWORD        (default None)
     swarm: str | None          # SWARM                (deprecated: the swarm's name as topic prefix)
     tick_seconds: float        # TICK_SECONDS         (default 10.0; must be > 0)
+    max_msgs_per_second: int = 10      # HUB_MAX_MSGS_PER_SECOND (swarm messages per member, #300)
     heartbeat_seconds: float = 300.0  # HUB_HEARTBEAT_SECONDS (default 300; must be > 0)
     state_path: str = "hub-head.json"  # HUB_STATE_PATH (default: hub-head.json beside the outbox)
     swarm_topic_id: str | None = None  # SWARM_TOPIC_ID (preferred; else looked up from LTMS, #293)
@@ -79,6 +80,13 @@ def load_config(env: Mapping[str, str]) -> HubConfig:
         raise ValueError("TICK_SECONDS must be > 0")
 
     try:
+        max_msgs = int(env.get("HUB_MAX_MSGS_PER_SECOND", "10"))
+    except (TypeError, ValueError):
+        raise ValueError("HUB_MAX_MSGS_PER_SECOND must be a whole number") from None
+    if max_msgs <= 0:
+        raise ValueError("HUB_MAX_MSGS_PER_SECOND must be > 0")
+
+    try:
         heartbeat_seconds = float(env.get("HUB_HEARTBEAT_SECONDS", "300"))
     except (TypeError, ValueError):
         raise ValueError("HUB_HEARTBEAT_SECONDS must be a number") from None
@@ -99,6 +107,7 @@ def load_config(env: Mapping[str, str]) -> HubConfig:
         tick_seconds=tick_seconds,
         heartbeat_seconds=heartbeat_seconds,
         state_path=state_path,
+        max_msgs_per_second=max_msgs,
         swarm_topic_id=swarm_topic_id,
         legacy_name=legacy_name,
     )
@@ -133,8 +142,11 @@ def make_publish(mqtt_client):
 def make_on_message(hub):
     def on_message(client, userdata, msg) -> None:
         try:
-            if topic_kind(msg.topic) == "hello":
+            kind = topic_kind(msg.topic)
+            if kind == "hello":
                 hub.on_hello(msg.topic, msg.payload)
+            elif kind == "say":
+                hub.on_say(msg.topic, msg.payload)
             else:
                 hub.on_record(msg.topic, msg.payload)
         except Exception:  # a bad message must never kill the MQTT thread
@@ -151,7 +163,7 @@ def make_on_connect(swarm):
         try:
             topics = []
             for prefix in prefixes:
-                for topic in (records_subscription(prefix), hello_subscription(prefix)):
+                for topic in (records_subscription(prefix), hello_subscription(prefix), say_subscription(prefix)):
                     client.subscribe(topic, qos=1)
                     topics.append(topic)
             logging.info("Hub: MQTT connected (reason %s), subscribed to %s", reason_code, " and ".join(topics))
@@ -180,7 +192,8 @@ def main() -> None:
     prefix, source = resolve(cfg.swarm_topic_id, cfg.swarm, lambda: info)
     logging.info("Hub: swarm %s, topic prefix %s (from %s)",
                  (info or {}).get("name", "unknown"), prefix, source)
-    hub = Hub(ltms_client, outbox, publish, prefix, name=name, legacy=legacy_prefix(cfg, source))
+    hub = Hub(ltms_client, outbox, publish, prefix, name=name, legacy=legacy_prefix(cfg, source),
+              max_msgs_per_second=cfg.max_msgs_per_second)
     # The hub's own chain (#281): signed into the shared outbox, never published on MQTT.
     own = MemberLink(name, key, outbox, cfg.state_path, lambda *a, **k: None, prefix)
     started_at = time.monotonic()

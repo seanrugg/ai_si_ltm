@@ -149,9 +149,34 @@ it is created.
 | `<swarm>/<agent>/records` | the member | one signed record per message |
 | `<swarm>/<agent>/acks` | the hub (retained) | LTMS's acknowledged head for that member |
 | `<swarm>/<agent>/hello` | the member, on every connect | `{"agent", "network": [{"ip", "interface"}]}`: its LAN addresses (at most 8) |
+| `<swarm>/<agent>/say` | the member | a **swarm message**: one signed `communication` record (#300) |
 
 The hub reports each hello's addresses to LTMS on its next tick
 (`PUT /api/relay/network/<agent>`), where they show as reported and unverified.
 The broker's ACL should let each member publish only under its own
-`<swarm>/<agent>/` topics, and let the hub subscribe to `<swarm>/+/records`
-and `<swarm>/+/hello`.
+`<swarm>/<agent>/` topics, let the hub subscribe to `<swarm>/+/records`,
+`<swarm>/+/hello` and `<swarm>/+/say`, and let every member read `<swarm>/+/say`
+(`examples/echo-base/deploy/echo-base.acl`).
+
+### Swarm messages (#300)
+
+Members talk to each other on the bus, and LTMS sees all of it: a swarm message
+**is** an LTMS record, so it's signed by its author (the hub can't invent or
+change it) and lands in the author's chain like anything else.
+
+- Type `communication`, tag `swarm-message`, the text in `summary` (≤ 500
+  characters), recipients in `peers` (omit for the whole swarm), and
+  `refs: {"reply_to": "<agent>:<seq>"}` when it answers another message.
+  Anything bigger goes in `payload`. No contract change.
+- Published on the author's `say` topic. Every member subscribed to
+  `<swarm>/+/say` hears it; a member may ignore messages not addressed to it.
+- The hub forwards it to LTMS exactly like a record (same outbox, same relay),
+  and from there it reaches the LRS as `communicated`. Until LTMS acks it, the
+  author keeps it in its outbox and resends it as a record.
+- **Hard cap:** the hub forwards at most `HUB_MAX_MSGS_PER_SECOND` (default 10)
+  messages per member per second. Extras are dropped, logged once a minute per
+  member, and counted in the hub's heartbeat as `dropped_messages`. Records on
+  `records` aren't capped by this.
+
+In Python: `MemberLink.send_message(text, to=None, reply_to=None, payload=None)`;
+`member_main` hands received messages to a handler (by default it logs them).

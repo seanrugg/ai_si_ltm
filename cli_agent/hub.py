@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 
 import httpx
 
 from cli_agent.client import LTMSError
 from cli_agent.mqtt_messages import (
-    acks_topic, agent_from_hello_topic, agent_from_topic, decode_hello, decode_record, encode_ack,
+    acks_topic, agent_from_hello_topic, agent_from_say_topic, agent_from_topic, decode_hello, decode_record,
+    encode_ack, is_swarm_message,
 )
 from cli_agent.outbox import Outbox
 from cli_agent.replicator import replicate_once
@@ -36,7 +38,7 @@ class HeartbeatTimer:
 
 class Hub:
     def __init__(self, client, outbox: Outbox, publish, swarm: str, name: str | None = None,
-                 legacy: str | None = None) -> None:
+                 legacy: str | None = None, max_msgs_per_second: int = 10) -> None:
         self.client = client
         self.name = name  # the hub's own member name, if it signs its own records
         self.outbox = outbox
@@ -53,6 +55,11 @@ class Hub:
         self.pending_network: dict[str, list] = {}
         # Members heard on MQTT (records or hello) since the last heartbeat (#281).
         self.seen: set[str] = set()
+        # Swarm messages (#300): a hard per-member cap, so a looping agent can't flood the bus.
+        self.max_msgs_per_second = max_msgs_per_second
+        self._msg_window: dict[str, tuple[int, int]] = {}   # agent -> (second, count)
+        self.dropped_messages: dict[str, int] = {}          # since the last heartbeat
+        self._cap_logged: dict[str, float] = {}             # agent -> last log time
 
     def _agent(self, topic: str, parse) -> str:
         """The agent in ``topic`` under any served prefix; logs once per member still on the legacy one."""
@@ -80,6 +87,41 @@ class Hub:
         except ValueError as exc:  # bad topic, bad JSON, agent mismatch, seq conflict
             self.dropped += 1
             logging.warning("Hub: dropped record on %s: %s", topic, exc)
+            return False
+
+    def on_say(self, topic: str, payload: bytes, now: float | None = None) -> bool:
+        """A swarm message (#300): forwarded to LTMS like a record, within the per-member cap."""
+        now = time.time() if now is None else now
+        try:
+            agent = self._agent(topic, agent_from_say_topic)
+        except ValueError as exc:
+            self.dropped += 1
+            logging.warning("Hub: dropped message on %s: %s", topic, exc)
+            return False
+        second = int(now)
+        with self.lock:
+            window, count = self._msg_window.get(agent, (second, 0))
+            if window != second:
+                window, count = second, 0
+            count += 1
+            self._msg_window[agent] = (window, count)
+            if count > self.max_msgs_per_second:
+                self.dropped_messages[agent] = self.dropped_messages.get(agent, 0) + 1
+                if now - self._cap_logged.get(agent, -1e9) >= 60:
+                    self._cap_logged[agent] = now
+                    logging.warning("Hub: %s is over %d messages/second; dropping the extras",
+                                    agent, self.max_msgs_per_second)
+                return False
+        try:
+            rec = decode_record(payload, agent)
+            if not is_swarm_message(rec):
+                raise ValueError("not a swarm message (a communication record tagged swarm-message)")
+            with self.lock:
+                self.seen.add(agent)
+                return self.outbox.add(rec)
+        except ValueError as exc:
+            self.dropped += 1
+            logging.warning("Hub: dropped message on %s: %s", topic, exc)
             return False
 
     def on_hello(self, topic: str, payload: bytes) -> bool:
@@ -119,13 +161,12 @@ class Hub:
         """
         with self.lock:
             members_seen, self.seen = len(self.seen), set()
-            return link.append(
-                "perception",
-                summary="heartbeat",
-                tags=["telemetry", "internal"],
-                payload={"uptime_s": round(now - started_at, 1), "role": "hub",
-                         "members_seen": members_seen},
-            )
+            dropped, self.dropped_messages = self.dropped_messages, {}
+            payload = {"uptime_s": round(now - started_at, 1), "role": "hub", "members_seen": members_seen}
+            if dropped:
+                payload["dropped_messages"] = dropped
+            return link.append("perception", summary="heartbeat", tags=["telemetry", "internal"],
+                               payload=payload)
 
     def tick(self, batch_size: int = 100) -> dict | None:
         self.report_network()
