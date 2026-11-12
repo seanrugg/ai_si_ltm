@@ -205,3 +205,15 @@ describe("wipe memory", () => {
     expect(screen.getByRole("link", { name: "Export" }).getAttribute("href")).toBe("/export");
   });
 });
+
+describe("member row links (#279)", () => {
+  it("the name opens the profile and a separate link opens the filtered timeline", () => {
+    renderMembers();
+    const name = screen.getByRole("link", { name: "Profile of alice" });
+    expect(name.textContent).toBe("alice");
+    expect(name.getAttribute("href")).toBe("/members/alice/profile");
+    const timeline = screen.getByRole("link", { name: "Timeline of alice" });
+    expect(timeline.textContent).toBe("Timeline");
+    expect(timeline.getAttribute("href")).toBe("/?agent=alice");
+  });
+});
