@@ -215,3 +215,27 @@ def test_hub_heartbeat_is_relayed_and_not_acked_on_mqtt(mesh, home, outbox, tmp_
     assert beat2["seq"] == 2 and beat2["prev_hash"] == beat["hash"]
     assert beat2["payload"]["members_seen"] == 0
     assert hub.tick()["heads"]["jetson-hub"]["last_ack_seq"] == 2
+
+
+
+# --- migration: topic ID plus the legacy name (#293) ---
+def test_hub_serves_topic_id_and_legacy_prefix(mesh, home, outbox):
+    hub_client, z3 = _setup(mesh, home)
+    sent = []
+    publish = lambda t, p, retain=False: sent.append((t, p, retain))
+    hub = Hub(hub_client, outbox, publish, "sw-1a2b3c4d", legacy="echo-base")
+    assert hub.prefixes == ["sw-1a2b3c4d", "echo-base"]
+    recs = sign(z3, 2)
+    assert hub.on_record("sw-1a2b3c4d/z3-r0/records", encode_record(recs[0]))   # new topic
+    assert hub.on_record("echo-base/z3-r0/records", encode_record(recs[1]))     # legacy topic
+    assert not hub.on_record("other/z3-r0/records", encode_record(recs[1]))
+    assert hub.on_hello("echo-base/z3-r0/hello", b'{"agent": "z3-r0"}')
+    result = hub.tick()
+    assert result["heads"]["z3-r0"]["last_ack_seq"] == 2
+    assert sorted(t for t, _, _ in sent) == ["echo-base/z3-r0/acks", "sw-1a2b3c4d/z3-r0/acks"]
+
+
+def test_hub_without_legacy_serves_one_prefix(mesh, home, outbox):
+    hub_client, _ = _setup(mesh, home)
+    hub = Hub(hub_client, outbox, lambda *a, **k: None, "sw-1a2b3c4d", legacy="sw-1a2b3c4d")
+    assert hub.prefixes == ["sw-1a2b3c4d"]

@@ -84,7 +84,8 @@ python -m scripts.swarm_key appoint-hub --key /Volumes/KEY/echo-base.swarm.json 
 ```
 
 Copy `appoint.json` to the server and apply it (it isn't secret; it's a signed
-statement, valid for 30 days):
+statement). It must be **applied within 30 days of signing**; once applied it
+stays in force until another hub is appointed or the swarm is revoked:
 
 ```bash
 cat appoint.json | manage.sh swarm-appoint-hub --swarm echo-base -
@@ -119,6 +120,29 @@ directly, including the hub's own records). Moving a member later doesn't
 change the provenance of what it already sent.
 
 ## MQTT topics
+
+### Swarm topic ID (#292)
+
+A device addresses its swarm on MQTT by the swarm's **topic ID**, never by its
+name, so renaming a swarm changes nothing on any device. A member or hub gets
+it from LTMS:
+
+```
+GET /api/swarm   →  {"swarm": {"id": "<64 hex>", "topic_id": "sw-1a2b3c4d", "name": "<current name>", "role": "member"}}
+```
+
+`{"swarm": null}` for a free agent. In Python: `LTMSClient.swarm()`.
+
+The topic ID is `sw-` plus the first 8 hex characters of the permanent swarm ID.
+If an **older** swarm (in any status) already starts with the same 8, the newer
+swarm uses 12, then 16, ... characters until no older swarm shares the prefix.
+The oldest swarm keeps the short form, so a swarm's topic ID never changes after
+it is created.
+
+
+### Topics
+
+`<swarm>` below is the swarm's **topic ID** (#293). Hubs and members find it from `SWARM_TOPIC_ID`, or from LTMS at start; the old `SWARM=<name>` still works, with a warning. During a migration the hub serves both prefixes (`SWARM_LEGACY_NAME`): see `examples/echo-base/README.md`.
 
 | Topic | Who publishes | What |
 |---|---|---|

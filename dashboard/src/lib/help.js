@@ -52,3 +52,17 @@ export const CHARTER_GRACE = "Members must read this version. After {days} days,
 // #295: a pending member that wants to be a hub.
 export const HUB_INTENT =
   "Relay rights come from the swarm's root key: after approving, add it to the swarm and appoint it as hub.";
+
+// #283: checking a pending member's key without exposing its secret.
+export const FINGERPRINT_CHECK =
+  "On the device, run python -m cli_agent pubkey --key <key file> and check that its public key starts with " +
+  "these 16 characters. Don't open the key file itself: it contains the private key.";
+
+// #284: the root key string, and what a bad paste does.
+export const ROOT_KEY_FORMAT =
+  "The whole line is the key. ltms-swarm-key-v1 is a label saying what kind of key it is and isn't secret; " +
+  "the middle part is the secret; the last 8 characters are a checksum that catches copy mistakes. " +
+  "Save and paste the entire line, label included.";
+export const ROOT_KEY_PASTE =
+  "A mistyped or incomplete key is rejected here, before anything is signed or sent. Nothing changes; paste it again.";
+

@@ -1,9 +1,28 @@
-# The hub reads every member's records and writes every member's acks.
-user jetson-hub
-topic read echo-base/+/records
-topic write echo-base/+/acks
+# Mosquitto ACL for one swarm. Topics use the swarm's **topic ID** (#293), never
+# its name, so renaming the swarm changes nothing here. The topic ID (e.g. sw-1a2b3c4d)
+# is in the hub's log at start ("topic prefix ...") and in GET /api/swarm (docs/swarms.md).
+# Replace the two placeholders before installing:
+#   sed -e 's/<topic_id>/sw-1a2b3c4d/g' -e 's/<hub-name>/my-hub/g' echo-base.acl | sudo tee /etc/mosquitto/echo-base.acl
+# MQTT usernames are LTMS member names (%u below).
 
-# Every member (MQTT username == LTMS member name) may only write its own
-# records and read its own acks.
-pattern write echo-base/%u/records
-pattern read echo-base/%u/acks
+# The hub reads every member's records and hellos, and writes every member's acks.
+user <hub-name>
+topic read <topic_id>/+/records
+topic read <topic_id>/+/hello
+topic write <topic_id>/+/acks
+
+# Every member may only write its own records and hello, and read its own acks.
+pattern write <topic_id>/%u/records
+pattern write <topic_id>/%u/hello
+pattern read <topic_id>/%u/acks
+
+# Migration from name-based topics (#293): while members move over, also allow the
+# old prefix. Uncomment, replace <old-name>, and set SWARM_LEGACY_NAME on the hub.
+# Remove these lines once every member uses SWARM_TOPIC_ID.
+#user <hub-name>
+#topic read <old-name>/+/records
+#topic read <old-name>/+/hello
+#topic write <old-name>/+/acks
+#pattern write <old-name>/%u/records
+#pattern write <old-name>/%u/hello
+#pattern read <old-name>/%u/acks
