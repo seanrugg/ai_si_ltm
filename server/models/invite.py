@@ -26,4 +26,6 @@ class Invite(Base):
     code_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     uses_left: Mapped[int] = mapped_column(Integer, nullable=False)
     expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # The role an invitee joins with (#295): member or observer, never hub.
+    role: Mapped[str] = mapped_column(String(16), nullable=False, default="member", server_default="member")
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utcnow)

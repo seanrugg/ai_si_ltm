@@ -666,8 +666,8 @@ async def create_swarm_invite(name: str, request: Request, body: InviteCreate, a
         swarm = await swarms.get_swarm(session, name)
         row, code = await enrollment.create_invite(
             session, swarm, uses=body.uses, expires_at=body.expires_at,
-            actor=f"admin:{admin.username}")
-    return {"id": str(row.id), "code": code, "uses_left": row.uses_left,
+            actor=f"admin:{admin.username}", role=body.role)
+    return {"id": str(row.id), "code": code, "uses_left": row.uses_left, "role": row.role,
             "expires_at": row.expires_at.isoformat() if row.expires_at else None}
 
 

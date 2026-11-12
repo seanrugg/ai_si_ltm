@@ -205,3 +205,19 @@ describe("wipe memory", () => {
     expect(screen.getByRole("link", { name: "Export" }).getAttribute("href")).toBe("/export");
   });
 });
+
+describe("intended swarm and role on the pending card (#295)", () => {
+  it("shows what the device is for, and the hub note for a would-be hub", () => {
+    allMembers = [
+      { id: "7", name: "hubby", status: "pending", kind: "relay", permissions: [], requested_permissions: ["contribute"],
+        public_key: "cccc3333cccc3333cccc3333cccc3333cccc3333cccc3333cccc3333cccc3333", created_at: "2026-01-01T00:00:00Z",
+        intended: { swarm: "echo-base", role: "hub" } },
+      { id: "8", name: "plain", status: "pending", kind: "robot", permissions: [], requested_permissions: ["contribute"],
+        public_key: "dddd4444dddd4444dddd4444dddd4444dddd4444dddd4444dddd4444dddd4444", created_at: "2026-01-01T00:00:00Z" },
+    ];
+    const { container } = renderMembers();
+    expect(container.textContent).toContain("Wants to be the hub of echo-base");
+    expect(container.textContent).toContain("Relay rights come from the swarm's root key");
+    expect(container.textContent.match(/Wants to be the/g)).toHaveLength(1);
+  });
+});

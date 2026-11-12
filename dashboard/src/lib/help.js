@@ -48,3 +48,7 @@ export const URL_SNAPSHOT = "LTMS fetches the page or file once and keeps it as 
 export const CHARTER = "The charter is the fleet's governance: every member reads it when it joins and whenever it changes. Reads are logged and sent to the LRS.";
 // "{days}" is replaced with the server's grace period.
 export const CHARTER_GRACE = "Members must read this version. After {days} days, members who haven't read it can't write records until they do.";
+
+// #295: a pending member that wants to be a hub.
+export const HUB_INTENT =
+  "Relay rights come from the swarm's root key: after approving, add it to the swarm and appoint it as hub.";

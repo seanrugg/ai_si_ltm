@@ -118,6 +118,8 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--kind", default="agent", choices=["robot", "agent", "assistant", "relay"])
     e.add_argument("--permissions", default="contribute,recall")
     e.add_argument("--operator")
+    e.add_argument("--swarm", help="the swarm this member is meant for (shown to the admin; not a grant)")
+    e.add_argument("--role", choices=["hub", "member", "observer"], help="its intended role in that swarm")
 
     t = sub.add_parser("token", help="log in and print the token")
     common(t)
@@ -156,7 +158,9 @@ def main(argv: list[str] | None = None, http=None) -> int:
     client = LTMSClient(args.server, key_path=args.key, http=http)
     try:
         if args.cmd == "enroll":
-            res = client.enroll(args.kind, [p for p in args.permissions.split(",") if p], operator=args.operator)
+            intended = {k: v for k, v in (("swarm", args.swarm), ("role", args.role)) if v} or None
+            res = client.enroll(args.kind, [p for p in args.permissions.split(",") if p], operator=args.operator,
+                                intended=intended)
             print(json.dumps(res, indent=2))
             print("Pending: approve this member in the dashboard (Members → Pending).", file=sys.stderr)
         elif args.cmd == "token":
