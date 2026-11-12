@@ -20,9 +20,24 @@ from cli_agent.outbox import Outbox
 from cli_agent.replicator import replicate_once
 
 
+class HeartbeatTimer:
+    """Due at once on start, then every ``interval`` seconds (monotonic clock)."""
+
+    def __init__(self, interval: float, now: float) -> None:
+        self.interval = interval
+        self.next = now
+
+    def due(self, now: float) -> bool:
+        if now < self.next:
+            return False
+        self.next = now + self.interval
+        return True
+
+
 class Hub:
-    def __init__(self, client, outbox: Outbox, publish, swarm: str) -> None:
+    def __init__(self, client, outbox: Outbox, publish, swarm: str, name: str | None = None) -> None:
         self.client = client
+        self.name = name  # the hub's own member name, if it signs its own records
         self.outbox = outbox
         self.publish = publish
         self.swarm = swarm
@@ -31,12 +46,15 @@ class Hub:
         self.stuck: dict = {}
         # LAN addresses from members' hello messages (#216), sent to LTMS on the next tick.
         self.pending_network: dict[str, list] = {}
+        # Members heard on MQTT (records or hello) since the last heartbeat (#281).
+        self.seen: set[str] = set()
 
     def on_record(self, topic: str, payload: bytes) -> bool:
         try:
             agent = agent_from_topic(topic, self.swarm)
             rec = decode_record(payload, agent)
             with self.lock:
+                self.seen.add(agent)
                 return self.outbox.add(rec)
         except ValueError as exc:  # bad topic, bad JSON, agent mismatch, seq conflict
             self.dropped += 1
@@ -52,8 +70,9 @@ class Hub:
             self.dropped += 1
             logging.warning("Hub: dropped hello on %s: %s", topic, exc)
             return False
-        if msg.get("network"):
-            with self.lock:
+        with self.lock:
+            self.seen.add(agent)
+            if msg.get("network"):
                 self.pending_network[agent] = msg["network"]
         return True
 
@@ -71,6 +90,22 @@ class Hub:
                 logging.warning("Hub: network report for %s failed: %s", agent, exc)
         return sent
 
+    def heartbeat(self, link, started_at: float, now: float) -> dict:
+        """Sign the hub's own heartbeat into the outbox (#281); the next tick relays it.
+
+        ``link`` is a MemberLink for the hub's own key with a no-op publish: the
+        record goes straight into the shared outbox, never onto MQTT.
+        """
+        with self.lock:
+            members_seen, self.seen = len(self.seen), set()
+            return link.append(
+                "perception",
+                summary="heartbeat",
+                tags=["telemetry", "internal"],
+                payload={"uptime_s": round(now - started_at, 1), "role": "hub",
+                         "members_seen": members_seen},
+            )
+
     def tick(self, batch_size: int = 100) -> dict | None:
         self.report_network()
         try:
@@ -80,6 +115,8 @@ class Hub:
             logging.warning("Hub: tick failed: %s", exc)
             return None  # publish nothing; the outbox is untouched
         for name, head in result["heads"].items():
+            if name == self.name:
+                continue  # the hub's own records: nobody on MQTT waits for these acks
             self.publish(acks_topic(name, self.swarm), encode_ack(head), retain=True)
         self.stuck = dict(result["errors"])
         return result
