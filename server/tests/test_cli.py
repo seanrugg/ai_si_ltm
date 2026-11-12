@@ -31,3 +31,33 @@ def test_cli_end_to_end(tmp_path, http, admin, capsys):
     assert rep["status"] == "ok" and rep["records"] == 25
     actions = admin.get("/api/admin/timeline", params={"type": "action", "outcome": "reflex_stop"}).json()
     assert all(r["outcome"] == "reflex_stop" for r in actions["records"])
+
+
+def test_pubkey_prints_public_key_never_the_secret(tmp_path, capsys):
+    """#283: the safe way to check a key against the approval card."""
+    key = tmp_path / "k.json"
+    assert main(["genkey", "--name", "fp-check", "--out", str(key)]) == 0
+    capsys.readouterr()
+    secret = json.loads(key.read_text())["secret_key"]
+    public = json.loads(key.read_text())["public_key"]
+
+    assert main(["pubkey", "--key", str(key)]) == 0
+    out = capsys.readouterr()
+    assert json.loads(out.out) == {"name": "fp-check", "public_key": public}
+    assert secret not in out.out + out.err
+
+    assert main(["pubkey", "--key", str(tmp_path / "missing.json")]) == 1
+    err = capsys.readouterr().err
+    assert "can't read key file" in err
+
+
+def test_pubkey_rejects_a_mismatched_key_file(tmp_path, capsys):
+    key = tmp_path / "k.json"
+    assert main(["genkey", "--name", "fp-check", "--out", str(key)]) == 0
+    data = json.loads(key.read_text())
+    data["public_key"] = "0" * 64
+    key.write_text(json.dumps(data))
+    capsys.readouterr()
+    assert main(["pubkey", "--key", str(key)]) == 1
+    out = capsys.readouterr()
+    assert data["secret_key"] not in out.out + out.err
