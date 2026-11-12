@@ -120,6 +120,29 @@ change the provenance of what it already sent.
 
 ## MQTT topics
 
+### Swarm topic ID (#292)
+
+A device addresses its swarm on MQTT by the swarm's **topic ID**, never by its
+name, so renaming a swarm changes nothing on any device. A member or hub gets
+it from LTMS:
+
+```
+GET /api/swarm   →  {"swarm": {"id": "<64 hex>", "topic_id": "sw-1a2b3c4d", "name": "<current name>", "role": "member"}}
+```
+
+`{"swarm": null}` for a free agent. In Python: `LTMSClient.swarm()`.
+
+The topic ID is `sw-` plus the first 8 hex characters of the permanent swarm ID.
+If an **older** swarm (in any status) already starts with the same 8, the newer
+swarm uses 12, then 16, ... characters until no older swarm shares the prefix.
+The oldest swarm keeps the short form, so a swarm's topic ID never changes after
+it is created.
+
+
+### Topics
+
+Until hubs and members switch to the topic ID (#293), `<swarm>` below is the swarm's name.
+
 | Topic | Who publishes | What |
 |---|---|---|
 | `<swarm>/<agent>/records` | the member | one signed record per message |
