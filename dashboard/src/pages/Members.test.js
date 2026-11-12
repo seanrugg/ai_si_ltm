@@ -205,3 +205,19 @@ describe("wipe memory", () => {
     expect(screen.getByRole("link", { name: "Export" }).getAttribute("href")).toBe("/export");
   });
 });
+
+describe("kind and permissions are labelled separately (#280)", () => {
+  it("shows Kind and Permissions as two labelled parts, with the profile's kind wording", () => {
+    allMembers = [
+      { id: 9, name: "hub-one", status: "active", kind: "relay", permissions: ["contribute", "relay"],
+        last_ack_seq: 0, last_seen_at: null },
+      { id: 10, name: "robo", status: "active", kind: "robot", permissions: [], last_ack_seq: 0, last_seen_at: null,
+        cognition: { value: "offboard" } },
+    ];
+    const { container } = renderMembers();
+    const text = container.textContent;
+    expect(text).toContain("Kind: Hub · Permissions: contribute, relay");
+    expect(text).toContain("Kind: Hybrid · Permissions: none");
+    expect(text).not.toContain("relay, contribute, relay");
+  });
+});

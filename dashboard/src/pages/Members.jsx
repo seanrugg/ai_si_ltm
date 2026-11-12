@@ -8,6 +8,7 @@ import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, HashStrip, Loading, PageHeader, StatusBadge } from "../components/ui.jsx";
 import { localTime, plural, relativeTime } from "../lib/format.js";
 import { describeChange, HUB_WARNING, membershipChange } from "../lib/membership.js";
+import { KINDS, kindOf } from "../lib/visual.js";
 
 const PERMISSIONS = [
   { id: "contribute", help: "Write records under its own name" },
@@ -345,7 +346,8 @@ function MemberRow({ m, swarm, swarms, location, onDone }) {
         </span>
         <span><StatusBadge status={m.status} /></span>
         <span className="text-sm text-paper-muted">
-          {m.kind}, {m.permissions.join(", ") || "no permissions"}
+          <span className="text-paper-faint">Kind:</span> {KINDS[kindOf({ ...m, role: swarm?.role })]?.label ?? m.kind}
+          {" · "}<span className="text-paper-faint">Permissions:</span> {m.permissions.join(", ") || "none"}
           {m.scope && <span className="ml-1 text-paper-faint">(scoped)</span>}
           {swarm ? ` · in ${swarm.swarm} as ${swarm.role}` : " · free agent"}
         </span>
