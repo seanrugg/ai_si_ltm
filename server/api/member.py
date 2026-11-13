@@ -80,6 +80,10 @@ async def my_swarm(request: Request, auth: MemberAuth = Depends(current_member))
         swarm = await swarm_identity.swarm_of(session, member)
         if swarm is not None:
             swarm["roster"] = await _roster(session, swarm["id"])
+            from server.models import Swarm as SwarmRow
+
+            # The leader (#308): name and public key, so members can verify its directives.
+            swarm["leader"] = await swarms.leader_of(session, await session.get(SwarmRow, swarm["id"]))
         return {"swarm": swarm}
 
 

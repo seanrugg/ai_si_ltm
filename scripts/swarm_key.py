@@ -38,6 +38,13 @@ def appointment(key, swarm: str, hub: str, hub_key: str, ts: str | None = None) 
     return {"statement": statement, "sig": key.sign(SWARM_PREFIX + canonicalize(statement)).signature.hex()}
 
 
+def leader_appointment(key, swarm: str, leader: str, leader_key: str, ts: str | None = None) -> dict:
+    """A swarm leader appointment (#308): same framing as the hub's, a different action."""
+    statement = {"v": 1, "action": "appoint_leader", "swarm": swarm, "leader": leader,
+                 "leader_key": leader_key.lower(), "ts": ts or now_ts()}
+    return {"statement": statement, "sig": key.sign(SWARM_PREFIX + canonicalize(statement)).signature.hex()}
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -48,6 +55,10 @@ def main(argv: list[str] | None = None) -> int:
     h.add_argument("--key", required=True)
     h.add_argument("--hub", required=True, help="the hub's member name, e.g. jetson-hub")
     h.add_argument("--hub-key", required=True, help="the hub's member public key, 64 hex")
+    lead = sub.add_parser("appoint-leader", help="sign a swarm leader appointment (prints JSON)")
+    lead.add_argument("--key", required=True)
+    lead.add_argument("--leader", required=True, help="the leader's member name")
+    lead.add_argument("--leader-key", required=True, help="the leader's member public key, 64 hex")
     i = sub.add_parser("show", help="print a key file's swarm name, public key and ID")
     i.add_argument("--key", required=True)
     args = ap.parse_args(argv)
@@ -71,6 +82,14 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(appointment(key, swarm_id(public_key_hex(key)), args.hub, args.hub_key), indent=2))
         print(f"signed for swarm {name!r}; apply on the server with: "
               f"manage.sh swarm-appoint-hub --swarm {name} <this file>", file=sys.stderr)
+    elif args.cmd == "appoint-leader":
+        name, key = load_key(args.key)
+        if len(args.leader_key) != 64:
+            print("--leader-key must be 64 hex characters", file=sys.stderr)
+            return 1
+        print(json.dumps(leader_appointment(key, swarm_id(public_key_hex(key)), args.leader, args.leader_key), indent=2))
+        print(f"signed for swarm {name!r}; apply in the dashboard (Manage, Appoint leader) or "
+              f"POST /api/admin/swarms/{name}/leader", file=sys.stderr)
     elif args.cmd == "show":
         name, key = load_key(args.key)
         pub = public_key_hex(key)

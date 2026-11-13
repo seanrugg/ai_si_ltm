@@ -21,7 +21,7 @@ def test_member_gets_id_topic_id_name_and_role(mesh, home):
     home.add(z3, role="observer")
     s = z3.swarm()
     roster = s.pop("roster")  # #334: the swarm's active members
-    assert s == {"id": home.id, "topic_id": "sw-" + home.id[:8], "name": "echo-base", "role": "observer"}
+    assert s == {"id": home.id, "topic_id": "sw-" + home.id[:8], "name": "echo-base", "role": "observer", "leader": None}
     assert [m["name"] for m in roster] == ["z3-r0"]
 
 
