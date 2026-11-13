@@ -14,6 +14,7 @@ import {
   nowTs,
   publicKeyHex,
   signAppointment,
+  appointLeader,
   SwarmKeyError,
   swarmIdFor,
 } from "./swarmKey.js";
@@ -41,6 +42,16 @@ describe("vectors shared with Python", () => {
     });
     expect(signed.statement).toEqual(v.statement);
     expect(signed.sig).toBe(v.sig);
+  });
+
+  it.each(vectors.leader_appointments)("leader appointment for $statement.leader (#309)", (v) => {
+    expect(canonicalize(v.statement)).toBe(v.canonical);
+    expect(bytesToHex(appointmentMessage(v.statement))).toBe(v.message_hex);
+    const signed = appointLeader(encodeKey(hexToBytes(v.root_seed_hex)), {
+      swarm: { id: v.statement.swarm, name: "echo-base" }, leader: v.statement.leader,
+      leaderKey: v.statement.leader_key, ts: v.statement.ts,
+    });
+    expect(signed).toEqual({ statement: v.statement, sig: v.sig });
   });
 
   it("canonicalizes the contract's JCS cases exactly like ltms_contract", () => {

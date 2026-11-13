@@ -15,7 +15,9 @@ from server.tests.conftest import ADMIN_PASS, ADMIN_USER
 from server.tests.test_lrs_forward import _endpoint, _endpoint_row, _forward
 from server.xapi.translate import EXT
 
-T = datetime(2026, 11, 13, 12, 30, tzinfo=timezone.utc)
+# Two days ahead of the real clock: members stamp ts from the real clock, and ingest
+# rejects ts more than 300s ahead of received_at, so the fake clock must stay ahead.
+T = (datetime.now(timezone.utc) + timedelta(days=2)).replace(hour=12, minute=30, second=0, microsecond=0)
 
 
 @pytest.fixture
@@ -88,7 +90,7 @@ def test_noisy_member_is_summarised_per_window_and_open_windows_wait(admin, mesh
     first = summaries[0]["result"]["extensions"]
     assert first[EXT + "message-summary/first"] == "z3-r0:1" and first[EXT + "message-summary/last"] == "z3-r0:3"
     assert first[EXT + "message-summary/peers"] == ["vector"]
-    assert first[EXT + "message-summary/window-start"] == "2026-11-13T10:10:00+00:00"
+    assert first[EXT + "message-summary/window-start"] == T.replace(hour=10, minute=10).isoformat()
     # The 12:25 window is still open, so the batch stops before it (and before vector's later message).
     assert _endpoint_row(db_exec, "lrs").cursor == ids[9]
 

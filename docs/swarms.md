@@ -217,6 +217,25 @@ The broker's ACL needs `topic write <topic_id>/+/ping` for the hub and
 Members keep resending unacked records every `RESEND_SECONDS` (60), separately
 from the heartbeat.
 
+
+
+## Swarm leader (#308)
+
+A swarm can have one **leader**: any active member (a cloud agent may lead), but
+not its hub. Like the hub, it's appointed with the swarm's root key:
+
+```bash
+python -m scripts.swarm_key appoint-leader --key /Volumes/KEY/<swarm>.swarm.json \
+    --leader <member> --leader-key <64 hex> > appoint-leader.json
+# then POST it to /api/admin/swarms/<swarm>/leader (or use the dashboard)
+```
+
+The appointment must be applied within 30 days of signing. It gives the leader
+scoped recall of the swarm's records (every type except `system`), and removing
+or replacing the leader takes back exactly what the appointment added. A member
+that already has full recall keeps it unchanged. `GET /api/swarm` shows the
+leader's name and public key, so members can verify its directives (#310).
+
 ## Directives and downlink (#303, #304, #305)
 
 An admin issues a **directive** to one swarm or all swarms. LTMS signs it with the
@@ -284,6 +303,7 @@ The new leader lists them (`GET /api/directives?inherited=1`) and must
 `POST /api/directives/{id}/confirm` or `/cancel` each one; both are audited.
 Unconfirmed ones stay open. The fleet outranks the leader: an admin can cancel
 any directive, and a leader can't cancel the fleet's.
+
 
 ## Introductions (#334)
 

@@ -177,8 +177,6 @@ async def list_all(session, limit: int = 100) -> list[dict]:
     rows = list(await session.scalars(select(Directive).order_by(Directive.issued_at.desc()).limit(limit)))
     acks = await acknowledgements(session, rows)
     return [{**await to_dict(session, d), "delivery": acks.get(str(d.id))} for d in rows]
-    rows = await session.scalars(select(Directive).order_by(Directive.issued_at.desc()).limit(limit))
-    return [await to_dict(session, d) for d in rows]
 
 
 async def inherit_from(session, swarm, leader_name: str | None) -> int:

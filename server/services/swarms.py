@@ -504,6 +504,10 @@ async def describe(session: AsyncSession) -> list[dict]:
                 .where(RecordProvenance.swarm_id.in_(ids)).group_by(RecordProvenance.swarm_id))).all():
             counts[sid] = (int(n24 or 0), int(n7 or 0), last)
 
+    leaders = dict((await session.execute(
+        select(Swarm.id, Member.name).join(Member, Member.id == Swarm.leader_member_id)
+        .where(Swarm.id.in_(ids)))).all()) if ids else {}
+
     def iso(dt):
         return dt.isoformat() if dt is not None else None
 
@@ -513,6 +517,7 @@ async def describe(session: AsyncSession) -> list[dict]:
         n24, n7, last = counts.get(swarm.id, (0, 0, None))
         roles = [r for r, _, _ in rows]
         out.append({"id": swarm.id, "name": swarm.name, "status": swarm.status, "home": swarm.is_home,
+                    "leader": leaders.get(swarm.id),
                     "members": [{"name": n, "role": r, "since": j.isoformat()} for r, n, j in rows],
                     "metrics": {"hubs": roles.count("hub"), "members": roles.count("member"),
                                 "observers": roles.count("observer"), "records_24h": n24, "records_7d": n7,
