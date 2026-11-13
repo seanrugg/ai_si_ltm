@@ -1,4 +1,4 @@
-# LTMS — Long-Term Memory Server
+# LTMS — Long-Term Memory System
 
 Append-only, signed, tamper-evident memory for a mesh of robots, AI agents and
 the hubs that relay for them. Members sign every record with Ed25519 and chain
