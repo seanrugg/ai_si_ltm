@@ -43,6 +43,11 @@ def test_vectors_agree_with_the_cli_and_server_code():
                                        ts=st["ts"])
         assert made == {"statement": st, "sig": a["sig"]}
         assert swarms.appointment_message(st).hex() == a["message_hex"]
+    for a in v["leader_appointments"]:  # #309
+        root = SigningKey(bytes.fromhex(a["root_seed_hex"]))
+        st = a["statement"]
+        made = swarm_key.leader_appointment(root, st["swarm"], st["leader"], st["leader_key"], ts=st["ts"])
+        assert made == {"statement": st, "sig": a["sig"]}
 
 
 def test_server_accepts_an_appointment_signed_the_browser_way(http, admin, db_exec):

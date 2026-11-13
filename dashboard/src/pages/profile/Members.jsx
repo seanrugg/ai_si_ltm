@@ -38,6 +38,7 @@ export default function Members({ name, summary, members, swarms, onReload }) {
   return (
     <section aria-labelledby="members-h">
       <h2 id="members-h" className="mb-2 text-lg font-bold">Members</h2>
+      <p className="mb-2 text-sm text-paper-muted">{swarm.leader ? `Leader: ${swarm.leader}` : "No leader"}</p>
       <ErrorNote error={error} />
       {rows.length === 0 ? (
         <p className="mb-4 text-sm text-paper-muted">No members yet.</p>
@@ -72,6 +73,13 @@ export default function Members({ name, summary, members, swarms, onReload }) {
                         <span aria-hidden="true" className="inline-block h-3 w-3 rounded-full"
                               style={{ boxShadow: `inset 0 0 0 2px ${ROLES[row.role]?.color}` }} />
                         {row.role}
+                        {swarm.leader === row.name && (
+                          <span className="ml-2 inline-flex items-center gap-1 text-xs">
+                            <span aria-hidden="true" className="inline-block h-3 w-3 rounded-full"
+                                  style={{ boxShadow: `inset 0 0 0 2px ${ROLES.leader.color}` }} />
+                            leader
+                          </span>
+                        )}
                       </span>
                     </td>
                     <td className="px-3 py-2">{kind}</td>

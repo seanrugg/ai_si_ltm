@@ -33,7 +33,8 @@ describe("Manage tab", () => {
   it("offers only swarm members (not observers) as the hub, with a password-type key field", () => {
     const html = page();
     expect(html).toContain('<option value="jetson-hub">jetson-hub</option>');
-    expect(html).not.toContain('<option value="vector">');
+    const hubForm = html.match(/<form[^>]*aria-label="Appoint hub for echo-base"[\s\S]*?<\/form>/)[0];
+    expect(hubForm).not.toContain('<option value="vector">');  // the leader may be any member (#309); the hub may not
     const input = html.match(/<input[^>]*name="swarm-root-key"[^>]*>/)[0];
     expect(input).toContain('type="password"');
     expect(input).toContain('autoComplete="new-password"');

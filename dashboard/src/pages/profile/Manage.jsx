@@ -10,8 +10,8 @@ import { ErrorNote, StatusBadge } from "../../components/ui.jsx";
 import { api } from "../../api/client.js";
 import { useApi } from "../../api/useApi.js";
 import { plural } from "../../lib/format.js";
-import { MEMORY_WIPE, ROOT_KEY_PASTE, WIPE_VS_DELETE } from "../../lib/help.js";
-import { signAppointment, SwarmKeyError } from "../../lib/swarmKey.js";
+import { LEADER_ABOUT, MEMORY_WIPE, ROOT_KEY_PASTE, WIPE_VS_DELETE } from "../../lib/help.js";
+import { appointLeader, signAppointment, SwarmKeyError } from "../../lib/swarmKey.js";
 
 export function AppointHub({ swarm, allMembers, busy, act }) {
   const candidates = (swarm.members || [])
@@ -103,6 +103,69 @@ export function AppointHub({ swarm, allMembers, busy, act }) {
 }
 
 /** A city estimate from a member's network address (#285), to pre-fill a swarm's home location. */
+/** Appoint or remove the swarm leader (#309): any active member except the hub. */
+export function AppointLeader({ swarm, allMembers, busy, act }) {
+  const hubName = (swarm.members || []).find((m) => m.role === "hub")?.name;
+  const candidates = (allMembers || []).filter((m) => m.status === "active" && m.name !== hubName);
+  const [leader, setLeader] = useState("");
+  const [keyText, setKeyText] = useState("");
+  const [localError, setLocalError] = useState(null);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+
+  async function sign(e) {
+    e.preventDefault();
+    setLocalError(null);
+    const member = candidates.find((m) => m.name === leader);
+    let body;
+    try {
+      body = appointLeader(keyText, { swarm, leader, leaderKey: member?.public_key });
+    } catch (err) {
+      setKeyText("");
+      setLocalError(err instanceof SwarmKeyError ? err : new Error("Couldn't sign the appointment."));
+      return;
+    }
+    setKeyText("");
+    await act(() => api(`/admin/swarms/${encodeURIComponent(swarm.name)}/leader`, { method: "POST", body }));
+    setLeader("");
+  }
+
+  return (
+    <div className="mb-4">
+      <h3 className="mb-2 flex items-center gap-2 text-sm font-bold text-paper-muted">
+        Appoint leader <HelpTip id={`leader-about-${swarm.name}`} label="About the swarm leader">{LEADER_ABOUT}</HelpTip>
+      </h3>
+      <p className="mb-2 text-xs text-paper-muted">{swarm.leader ? `Leader: ${swarm.leader}.` : "No leader."}</p>
+      <form onSubmit={sign} className="mb-2 flex flex-wrap items-end gap-2" autoComplete="off"
+            aria-label={`Appoint leader for ${swarm.name}`}>
+        <label className="flex flex-col gap-1 text-xs text-paper-muted">
+          Leader
+          <select className="field" value={leader} onChange={(e) => setLeader(e.target.value)} required>
+            <option value="">Choose a member</option>
+            {candidates.map((m) => <option key={m.name} value={m.name}>{m.name}</option>)}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-paper-muted">
+          Root key (signed here; never sent)
+          <input className="field w-72 font-mono" type="password" name="swarm-root-key-leader"
+                 autoComplete="new-password" spellCheck={false} data-1p-ignore data-lpignore="true"
+                 value={keyText} onChange={(e) => setKeyText(e.target.value)} placeholder="ltms-swarm-key-v1:…" required />
+        </label>
+        <button className="btn btn-primary" disabled={busy || !leader || !keyText}>Sign and appoint</button>
+      </form>
+      {localError && <p className="mb-2 text-sm text-bad" role="alert">{localError.message}</p>}
+      {swarm.leader && (confirmRemove ? (
+        <span className="flex flex-wrap items-center gap-2 text-sm">
+          Remove {swarm.leader} as leader?
+          <button type="button" className="btn btn-danger" disabled={busy}
+                  onClick={() => act(() => api(`/admin/swarms/${encodeURIComponent(swarm.name)}/leader`, { method: "DELETE" }))
+                    .then(() => setConfirmRemove(false))}>Remove leader</button>
+          <button type="button" className="btn" onClick={() => setConfirmRemove(false)}>Keep</button>
+        </span>
+      ) : <button type="button" className="btn" onClick={() => setConfirmRemove(true)}>Remove leader…</button>)}
+    </div>
+  );
+}
+
 export function networkSuggestion(swarm, locations) {
   const names = new Set((swarm.members || []).map((m) => m.name));
   for (const l of locations?.members || []) {
@@ -180,6 +243,7 @@ export function SwarmManage({ swarm, allMembers, location, suggestion, onReload 
       {!revoked && (
         <>
           <AppointHub swarm={swarm} allMembers={allMembers} busy={busy} act={act} />
+          <AppointLeader swarm={swarm} allMembers={allMembers} busy={busy} act={act} />
 
           <h3 className="mb-2 mt-6 text-base font-bold">Danger zone</h3>
           <div className="rounded-md border border-bad/40 bg-bad/5 p-3">
