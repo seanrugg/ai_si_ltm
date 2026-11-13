@@ -9,7 +9,7 @@ import base64
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 import httpx
@@ -25,8 +25,8 @@ from server.models import (
 )
 from server.services.enrollment import _validate_scope
 from server.services.errors import ServiceError
-from server.services.recall import apply_scope, effective_scope, fetch_payloads
-from server.xapi.translate import because_key, read_to_statement, record_to_statement
+from server.services.recall import _json_list_contains, apply_scope, effective_scope, fetch_payloads
+from server.xapi.translate import because_key, message_summary_statement, read_to_statement, record_to_statement
 
 log = logging.getLogger(__name__)
 
@@ -359,6 +359,7 @@ async def forward_once(session: AsyncSession, cfg: ServerConfig, http: httpx.Asy
             records = list(await session.scalars(stmt))
             if not records:
                 break
+            before = endpoint.cursor
             try:
                 forwarded += await _forward_endpoint(session, cfg, http, endpoint, records)
             except httpx.HTTPError as exc:
@@ -369,8 +370,8 @@ async def forward_once(session: AsyncSession, cfg: ServerConfig, http: httpx.Asy
                 endpoint.last_error = f"{type(exc).__name__}: {exc}"
                 endpoint.last_error_at = datetime.now(timezone.utc)
                 break
-            if len(records) < cfg.lrs_batch_size:
-                break
+            if len(records) < cfg.lrs_batch_size or endpoint.cursor == before:
+                break  # caught up, or waiting for a summary window to close (#301)
 
         if endpoint.send_reads:
             forwarded += await _forward_reads(session, cfg, http, endpoint)
@@ -494,6 +495,67 @@ async def _cause_hashes(session: AsyncSession, records: list[Record]) -> dict[st
     return {f"{a}:{s}": h for a, s, h in rows if (a, s) in wanted}
 
 
+SWARM_MESSAGE_TAG = "swarm-message"
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _is_swarm_message(r: Record) -> bool:
+    return r.type == "communication" and SWARM_MESSAGE_TAG in (r.tags or [])
+
+
+def _aware(dt: datetime) -> datetime:
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+async def _summary_members(session: AsyncSession, cfg: ServerConfig, member_ids: set, now: datetime) -> set:
+    """Members in summary mode now (#301): over the limit in each of the last N full clock hours.
+
+    Entering and leaving are audited once each (``lrs_summary_on`` / ``lrs_summary_off``).
+    """
+    if not member_ids:
+        return set()
+    hour0 = now.replace(minute=0, second=0, microsecond=0)
+    per_hour, hours = cfg.lrs_msg_summary_per_hour, max(1, cfg.lrs_msg_summary_sustain_hours)
+    swarm_msg = _json_list_contains(session, Record.tags, SWARM_MESSAGE_TAG)
+    out = set()
+    names = {m.id: m.name for m in await session.scalars(select(Member).where(Member.id.in_(list(member_ids))))}
+    for mid in member_ids:
+        counts = []
+        for h in range(1, hours + 1):
+            start, end = hour0 - timedelta(hours=h), hour0 - timedelta(hours=h - 1)
+            counts.append(await session.scalar(
+                select(func.count()).select_from(Record).where(
+                    Record.member_id == mid, Record.type == "communication", swarm_msg,
+                    Record.received_at >= start, Record.received_at < end)) or 0)
+        on = all(c > per_hour for c in counts)
+        if on:
+            out.add(mid)
+        last = await _last_summary_state(session, names.get(mid))
+        if on != (last == "lrs_summary_on"):
+            session.add(AuditLog(actor="system:lrs-forward", action="lrs_summary_on" if on else "lrs_summary_off",
+                                 detail={"member": names.get(mid), "per_hour": per_hour,
+                                         "hourly_counts": counts}))
+    return out
+
+
+async def _last_summary_state(session: AsyncSession, name: str | None) -> str | None:
+    rows = await session.scalars(
+        select(AuditLog).where(AuditLog.action.in_(("lrs_summary_on", "lrs_summary_off")))
+        .order_by(AuditLog.id.desc()).limit(200))
+    for row in rows:
+        if (row.detail or {}).get("member") == name:
+            return row.action
+    return None
+
+
+def _window_start(dt: datetime, minutes: int) -> datetime:
+    dt = _aware(dt)
+    return dt.replace(minute=dt.minute - dt.minute % minutes, second=0, microsecond=0)
+
+
 async def _forward_endpoint(
     session: AsyncSession,
     cfg: ServerConfig,
@@ -507,6 +569,32 @@ async def _forward_endpoint(
     continues with the next endpoint. On 409 or any other status the cursor is
     kept and last_error recorded.
     """
+    # Swarm-message summaries (#301): group a noisy member's messages into windows.
+    now = _now()
+    window = timedelta(minutes=max(1, cfg.lrs_msg_summary_window_minutes))
+    summarised = await _summary_members(session, cfg, {r.member_id for r in records if _is_swarm_message(r)}, now)
+    groups: dict[tuple, list[Record]] = {}
+    for r in records:
+        if r.member_id in summarised and _is_swarm_message(r):
+            groups.setdefault((r.member_id, _window_start(r.received_at, window.seconds // 60)), []).append(r)
+    if groups:
+        # Never send part of a window that's still open: stop the batch before it.
+        full = len(records) >= cfg.lrs_batch_size
+        last_at = _aware(records[-1].received_at)
+        cut, waiting = len(records), False
+        for (_, ws), rs in groups.items():
+            if ws + window > now:
+                cut, waiting = min(cut, records.index(rs[0])), True
+            elif full and ws + window > last_at:
+                cut = min(cut, records.index(rs[0]))
+        if cut == 0 and waiting:
+            return 0  # the oldest record is in an open window: wait for it to close
+        records = records[:cut] or records
+        keep = {r.id for r in records}
+        groups = {k: [r for r in rs if r.id in keep] for k, rs in groups.items()}
+        groups = {k: rs for k, rs in groups.items() if rs}
+    grouped = {r.id: k for k, rs in groups.items() for r in rs}
+
     # Author and provenance for the statement envelope.
     member_by_id = {
         m.id: m
@@ -539,8 +627,23 @@ async def _forward_endpoint(
     ref_hashes = await _cause_hashes(session, records)
 
     statements = []
+    done_groups = set()
     for r in records:
         prov = provenance_by_record.get(r.id)
+        if r.id in grouped:
+            key = grouped[r.id]
+            if key in done_groups:
+                continue
+            done_groups.add(key)
+            rs = groups[key]
+            ws = key[1]
+            statements.append(message_summary_statement(
+                r.agent, [{"agent": x.agent, "seq": x.seq, "hash": x.hash, "ts": x.ts.isoformat(),
+                           "peers": x.peers} for x in rs],
+                window_start=ws.isoformat(), window_end=(ws + window).isoformat(), base=cfg.public_base_url,
+                xapi_version=endpoint.xapi_version, agent_kind=member_by_id[r.member_id].kind,
+                swarm=swarm_names.get(prov.swarm_id) if prov is not None and prov.swarm_id is not None else None))
+            continue
         rec = json.loads(r.header_raw)
         rec["hash"] = r.hash
         rec["sig"] = r.sig

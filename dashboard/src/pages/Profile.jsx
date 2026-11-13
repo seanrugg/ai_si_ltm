@@ -14,6 +14,7 @@ import Overview from "./profile/Overview.jsx";
 import Activity from "./profile/Activity.jsx";
 import History from "./profile/History.jsx";
 import Members from "./profile/Members.jsx";
+import Manage from "./profile/Manage.jsx";
 import Interactions from "./profile/Interactions.jsx";
 import Network from "./profile/Network.jsx";
 import Places from "./profile/Places.jsx";
@@ -22,7 +23,7 @@ import Senses from "./profile/Senses.jsx";
 export const SWARM_PATH = "M10 6a2 2 0 1 0 4 0a2 2 0 1 0-4 0 M3 18a2 2 0 1 0 4 0a2 2 0 1 0-4 0 M17 18a2 2 0 1 0 4 0a2 2 0 1 0-4 0 M11 7.8 6 16.2 M13 7.8l5 8.4 M7 18h10";
 
 // Tabs built so far; the rest say "Coming soon" until their issue merges.
-const TAB_VIEWS = { overview: Overview, members: Members, places: Places, interactions: Interactions, network: Network, activity: Activity,
+const TAB_VIEWS = { overview: Overview, members: Members, manage: Manage, places: Places, interactions: Interactions, network: Network, activity: Activity,
   senses: Senses, history: History };
 
 export function SwarmMark({ size = 40 }) {
