@@ -348,13 +348,48 @@ async def revoke_swarm(session: AsyncSession, swarm: Swarm, *, actor: str = "cli
 
 
 async def describe(session: AsyncSession) -> list[dict]:
+    """Every swarm with its members and ``metrics`` (#330), in a fixed number of queries."""
+    from sqlalchemy import case, func
+
+    from server.models import Record, RecordProvenance
+
+    swarms_ = list(await session.scalars(select(Swarm).where(Swarm.status != "removed").order_by(Swarm.created_at)))
+    ids = [s.id for s in swarms_]
+    members: dict[str, list] = {i: [] for i in ids}
+    hub_seen: dict[str, datetime | None] = {}
+    if ids:
+        for sid, role, name, joined, seen in (await session.execute(
+                select(SwarmMember.swarm_id, SwarmMember.role, Member.name, SwarmMember.joined_at, Member.last_seen_at)
+                .join(Member, Member.id == SwarmMember.member_id)
+                .where(SwarmMember.swarm_id.in_(ids), SwarmMember.left_at.is_(None))
+                .order_by(SwarmMember.role, Member.name))).all():
+            members[sid].append((role, name, joined))
+            if role == "hub" and seen is not None and (hub_seen.get(sid) is None or seen > hub_seen[sid]):
+                hub_seen[sid] = seen
+    now = datetime.now(timezone.utc)
+    counts: dict[str, tuple] = {}
+    if ids:
+        day_ago, week_ago = now - timedelta(hours=24), now - timedelta(days=7)
+        for sid, n24, n7, last in (await session.execute(
+                select(RecordProvenance.swarm_id,
+                       func.sum(case((Record.received_at >= day_ago, 1), else_=0)),
+                       func.sum(case((Record.received_at >= week_ago, 1), else_=0)),
+                       func.max(Record.received_at))
+                .join(Record, Record.id == RecordProvenance.record_id)
+                .where(RecordProvenance.swarm_id.in_(ids)).group_by(RecordProvenance.swarm_id))).all():
+            counts[sid] = (int(n24 or 0), int(n7 or 0), last)
+
+    def iso(dt):
+        return dt.isoformat() if dt is not None else None
+
     out = []
-    for swarm in await session.scalars(select(Swarm).where(Swarm.status != "removed").order_by(Swarm.created_at)):
-        rows = await session.execute(
-            select(SwarmMember.role, Member.name, SwarmMember.joined_at)
-            .join(Member, Member.id == SwarmMember.member_id)
-            .where(SwarmMember.swarm_id == swarm.id, SwarmMember.left_at.is_(None))
-            .order_by(SwarmMember.role, Member.name))
+    for swarm in swarms_:
+        rows = members[swarm.id]
+        n24, n7, last = counts.get(swarm.id, (0, 0, None))
+        roles = [r for r, _, _ in rows]
         out.append({"id": swarm.id, "name": swarm.name, "status": swarm.status, "home": swarm.is_home,
-                    "members": [{"name": n, "role": r, "since": j.isoformat()} for r, n, j in rows]})
+                    "members": [{"name": n, "role": r, "since": j.isoformat()} for r, n, j in rows],
+                    "metrics": {"hubs": roles.count("hub"), "members": roles.count("member"),
+                                "observers": roles.count("observer"), "records_24h": n24, "records_7d": n7,
+                                "last_record_at": iso(last), "hub_last_seen_at": iso(hub_seen.get(swarm.id))}})
     return out
