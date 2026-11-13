@@ -44,7 +44,7 @@ describe("swarm Members tab (#282)", () => {
     expect(tabOf("members", "member")).toBe("overview");
     expect(tabOf("members", "swarm")).toBe("members");
     expect(nextTab("overview", "ArrowRight", "swarm")).toBe("members");
-    expect(nextTab("overview", "ArrowRight", "member")).toBe("places");
+    expect(nextTab("overview", "ArrowRight", "member")).toBe("specs");  // Specs follows Overview (#333)
   });
 
   it("the header count says what it counts", () => {

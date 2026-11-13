@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { ErrorNote, StatusBadge } from "../../components/ui.jsx";
 import { AddMemberForm, RemoveMemberButton, RoleControl } from "../../components/SwarmMemberControls.jsx";
 import { localTime, relativeTime } from "../../lib/format.js";
+import { SpecsRollup } from "./Specs.jsx";
 import { KINDS, ROLES, kindOf } from "../../lib/visual.js";
 
 const ORDER = { hub: 0, member: 1, observer: 2 };
@@ -107,6 +108,7 @@ export default function Members({ name, summary, members, swarms, onReload }) {
         </div>
       )}
       {!revoked && <AddMemberForm swarm={swarm} swarms={swarms} allMembers={active} busy={busy} act={act} />}
+      <SpecsRollup swarm={swarm} members={members} />
     </section>
   );
 }
