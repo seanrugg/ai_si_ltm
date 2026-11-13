@@ -181,6 +181,19 @@ change it) and lands in the author's chain like anything else.
 In Python: `MemberLink.send_message(text, to=None, reply_to=None, payload=None)`;
 `member_main` hands received messages to a handler (by default it logs them).
 
+### Busy members: summaries to the LRS (#301)
+
+LTMS keeps every swarm message. Only what goes to an LRS changes: a member that
+sent more than `LTMS_LRS_MSG_SUMMARY_PER_HOUR` (60) swarm messages in each of
+the last `LTMS_LRS_MSG_SUMMARY_SUSTAIN_HOURS` (3) clock hours is in *summary
+mode*. Its swarm messages then go to the LRS as one `communicated` statement
+per `LTMS_LRS_MSG_SUMMARY_WINDOW_MINUTES` (5) window, with `count`, the distinct
+`peers`, the `first` and `last` record refs and the window's start and end
+(`result.extensions`, `…/message-summary/*`). It's counting, not summarising
+text. One full hour under the limit ends it. Entering and leaving are audited
+(`lrs_summary_on`, `lrs_summary_off`). The forwarder waits for a window to close
+before sending it, so it can run up to one window behind.
+
 ## Heartbeats and ping (#356)
 
 Hubs and members sign a heartbeat (a self-report: `perception` tagged
@@ -220,3 +233,23 @@ scoped recall of the swarm's records (every type except `system`), and removing
 or replacing the leader takes back exactly what the appointment added. A member
 that already has full recall keeps it unchanged. `GET /api/swarm` shows the
 leader's name and public key, so members can verify its directives (#310).
+
+## Introductions (#334)
+
+`GET /api/swarm` includes the swarm's `roster`: each active member's name, role,
+kind and a one-line spec summary (from the spec sheet, [specs.md](specs.md)).
+No keys, operators or locations.
+
+When the harness starts in a swarm (or its role changes) it introduces itself
+once: a `communication` tagged `introduction` (and `swarm-message` on the bus),
+addressed to the whole swarm, with `{swarm, role, specs_summary, capabilities,
+harness_version}` in the payload. The last swarm and role it introduced itself
+as are kept in `introduced.json` beside its state, so a restart sends nothing.
+With the direct transport it's appended to its chain instead of published.
+
+A member that hears an introduction may reply once (`refs.reply_to`), after a
+random 0 to 30 s delay so a newcomer isn't answered by everyone at once. It
+never replies to a reply. `INTRO_REPLY=off` turns replies off;
+`INTRO_CHECK_SECONDS` (3600) is how often it checks for a new swarm or role.
+Introductions count against the hub's per-member message limit. The
+Conversation page marks them and can show introductions only.

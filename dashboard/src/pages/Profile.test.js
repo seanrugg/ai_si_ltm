@@ -102,8 +102,8 @@ describe("Profile page", () => {
     renderAt("/members/z3-r0/profile");
     const overview = await screen.findByRole("tab", { name: "Overview" });
     fireEvent.keyDown(overview, { key: "ArrowRight" });
-    await waitFor(() => expect(screen.getByRole("tab", { name: "Places & movement" }).getAttribute("aria-selected")).toBe("true"));
-    expect(document.activeElement.textContent).toBe("Places & movement");
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Specs" }).getAttribute("aria-selected")).toBe("true"));
+    expect(document.activeElement.textContent).toBe("Specs");
     fireEvent.keyDown(document.activeElement, { key: "ArrowLeft" });
     fireEvent.keyDown(document.activeElement, { key: "ArrowLeft" });
     await waitFor(() => expect(new URLSearchParams(location.search).get("tab")).toBe("history"));
