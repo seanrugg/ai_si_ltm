@@ -203,3 +203,22 @@ The broker's ACL needs `topic write <topic_id>/+/ping` for the hub and
 `pattern read <topic_id>/%u/ping` for members (see `examples/echo-base/deploy/echo-base.acl`).
 Members keep resending unacked records every `RESEND_SECONDS` (60), separately
 from the heartbeat.
+
+## Directives and downlink (#303, #304, #305)
+
+An admin issues a **directive** to one swarm or all swarms. LTMS signs it with the
+fleet key (`GET /api/fleet-key` gives the public key) so members can check where
+it came from. Each swarm's hub pulls `GET /api/relay/downlink` every
+`DOWNLINK_SECONDS` (30) and publishes:
+
+| What | Topic | Retained |
+|---|---|---|
+| an open directive | `<topic_id>/fleet/<directive id>` | yes, until cancelled or expired |
+| a cancel | `<topic_id>/fleet` (and an empty retained message on the directive's topic) | no |
+| a message to the swarm from a member outside it (`peers: ["swarm:<topic_id>"]`, needs `speak:swarm`) | `<topic_id>/<sender>/say`, unchanged | no |
+
+The hub saves its cursor (`hub-downlink.json` beside its state) only after
+publishing, so a crash re-delivers instead of losing. It doesn't forward
+downlinked messages back to LTMS. The ACL needs `topic write <topic_id>/fleet/#`
+and `topic write <topic_id>/+/say` for the hub, and `pattern read <topic_id>/fleet/#`
+for members.

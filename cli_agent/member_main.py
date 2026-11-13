@@ -181,7 +181,9 @@ def drain_messages(messages: "queue.Queue", name: str, prefix: str, handler=log_
             if agent == name:
                 continue  # our own message, echoed by the broker
             rec = decode_record(payload, agent)
-            if not is_swarm_message(rec):
+            # A message from outside the swarm, downlinked by the hub (#305), is addressed
+            # to the swarm by its topic ID instead of carrying the swarm-message tag.
+            if not is_swarm_message(rec) and f"swarm:{prefix}" not in (rec.get("peers") or []):
                 raise ValueError("not a swarm message")
             handler(rec)
             handled += 1
