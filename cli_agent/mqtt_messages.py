@@ -38,6 +38,11 @@ def say_topic(agent: str, swarm: str) -> str:
     return f"{swarm}/{agent}/{_SAY_SUFFIX}"
 
 
+def ping_topic(agent: str, swarm: str) -> str:
+    """hub -> member: an admin asked for a heartbeat (#356). Empty payload, not retained."""
+    return f"{swarm}/{agent}/ping"
+
+
 def say_subscription(swarm: str) -> str:
     """Every member's swarm messages."""
     return f"{swarm}/+/{_SAY_SUFFIX}"
@@ -55,7 +60,7 @@ def is_swarm_message(record: dict) -> bool:
 
 
 def topic_kind(topic: str) -> str:
-    """The last topic segment: "records", "acks", "hello" or "say"."""
+    """The last topic segment: "records", "acks", "hello", "say" or "ping"."""
     return topic.rsplit("/", 1)[-1]
 
 

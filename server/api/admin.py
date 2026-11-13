@@ -358,6 +358,23 @@ async def profile_history(request: Request, admin: AdminAuth = ADMIN, member: st
         return await profile_service.history(session, subject)
 
 
+# Admin ping (#356): ask a member for a heartbeat.
+@router.post("/admin/members/{name}/ping")
+async def ping_member(name: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    from server.services import ping
+
+    async with transaction(request) as session:
+        return await ping.request(session, name, admin=f"admin:{admin.username}")
+
+
+@router.get("/admin/members/{name}/ping")
+async def ping_status(name: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    from server.services import ping
+
+    async with transaction(request) as session:
+        return await ping.status(session, name)
+
+
 @router.get("/admin/locations")
 async def locations(request: Request, admin: AdminAuth = ADMIN, swarm: str | None = None,
                     member: str | None = None) -> dict:
