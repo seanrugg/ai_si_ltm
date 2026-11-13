@@ -18,6 +18,22 @@ records. In the xAPI export, sensed records use the `sensed` verb and carry
 their payload in the `telemetry` extension; perceived records use
 `perceived` and carry their payload in `holocron/payload`.
 
+## Self-reports are not sensing
+
+A member reporting on **itself** (heartbeat, uptime, temperature, memory,
+throttling) tags the record `telemetry` **and** `internal`. That's a
+*self-report*: it describes the member, not the world around it (#348).
+
+- Profile counts leave self-reports out of Sensing and the sensing-to-learning
+  chain, and show them as their own number, with a note saying so.
+- The Senses tab lists only sensors reading the world.
+- On the timeline, pick **self-reports (heartbeat, health)** under Sensing to
+  see them; like sensor data, they're hidden by default.
+- They're still records like any other: signed, chained, and sent to the LRS.
+
+The hub's heartbeat is a self-report. So is a health reading such as
+`{"sensor": "jetson-health", ...}`.
+
 ## Payload convention: any sensor
 
 A sensed record's payload is a JSON object. It is exported whole, whatever

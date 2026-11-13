@@ -179,10 +179,25 @@ def _buckets(start: date, end: date, weekly: bool) -> list[date]:
     return out
 
 
+def self_report_clause(session: AsyncSession):
+    """A member reporting on itself: a perception tagged both ``telemetry`` and ``internal`` (#348).
+
+    Heartbeats and health readings. Never NULL, so ``~`` keeps untagged records.
+    """
+    return and_(Record.type == "perception", Record.tags.is_not(None),
+                recall._json_list_contains(session, Record.tags, "telemetry"),
+                recall._json_list_contains(session, Record.tags, "internal"))
+
+
 async def summary(session: AsyncSession, subject: Subject, hours: int) -> dict:
     since = _since(hours)
-    where = and_(subject.records(), _in_range(since))
+    base = and_(subject.records(), _in_range(since))
     telemetry = recall._json_list_contains(session, Record.tags, "telemetry")
+    # A member reporting on itself (heartbeat, health) isn't sensing the world (#348):
+    # it's counted on its own and left out of every other count here.
+    own = self_report_clause(session)
+    self_report = await session.scalar(select(func.count()).select_from(Record).where(base, own)) or 0
+    where = and_(base, ~own)
 
     by_type = dict((await session.execute(
         select(Record.type, func.count()).where(where).group_by(Record.type))).all())
@@ -196,6 +211,7 @@ async def summary(session: AsyncSession, subject: Subject, hours: int) -> dict:
     flow = {"sensed": sensed, "perceived": by_type.get("perception", 0) - sensed,
             **{label: by_type.get(t, 0) for t, label in FLOW.items()}}
     flow = {k: flow[k] for k in ("sensed", "perceived", "reasoned", "decided", "performed", "learned")}
+    flow["self_report"] = self_report
 
     outcomes = {o: 0 for o in OUTCOMES}
     action_outcomes = Counter()
@@ -380,7 +396,7 @@ async def senses(session: AsyncSession, subject: Subject, hours: int) -> dict:
     """
     since = _since(hours)
     where = and_(subject.records(), _in_range(since), Record.type == "perception",
-                 recall._json_list_contains(session, Record.tags, "telemetry"))
+                 recall._json_list_contains(session, Record.tags, "telemetry"), ~self_report_clause(session))
     rows = list(await session.scalars(
         select(Record).where(where).order_by(Record.ts.desc(), Record.id.desc()).limit(MAX_SENSED_SCAN)))
     payloads = await recall.fetch_payloads(session, rows)

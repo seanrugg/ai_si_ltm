@@ -45,7 +45,8 @@ def test_categories_flow_and_outcomes(mesh, admin):
     s = _summary(admin, member="z3-r0")
     assert s["subject"] == {"type": "member", "name": "z3-r0"} and s["hours"] == 168
     assert s["categories"] == {"sense": 2, "act": 5, "comm": 1, "learn": 1}
-    assert s["flow"] == {"sensed": 1, "perceived": 1, "reasoned": 1, "decided": 1, "performed": 3, "learned": 1}
+    assert s["flow"] == {"sensed": 1, "perceived": 1, "reasoned": 1, "decided": 1, "performed": 3, "learned": 1,
+                         "self_report": 0}
     assert s["outcomes"]["success"] == 1 and s["outcomes"]["stuck"] == 1 and s["outcomes"]["failed"] == 0
     assert s["action_success"] == 0.5  # actions without an outcome don't count
     assert [p["place"] for p in s["places"]] == ["kitchen", "hall"]
@@ -123,3 +124,22 @@ def test_subject_validation(mesh, admin, http, home):
         assert r.json()["error"]["code"] == code
     r = http.get("/api/admin/profile/summary", params={"member": "z3-r0"}, headers={"x-ltms-admin": "1"})
     assert r.status_code == 401
+
+
+def test_self_reports_are_not_sensing(mesh, admin):
+    """A hub's heartbeat (perception tagged telemetry+internal) isn't sensing the world (#348)."""
+    hub = mesh.member("jetson-hub")
+    for _ in range(3):
+        hub.append("perception", summary="heartbeat", tags=["telemetry", "internal"], payload={"uptime_s": 1})
+    hub.append("perception", summary="cpu temp", tags=["telemetry"], payload={"sensor": "imu", "v": 1})
+    hub.flush()
+    s = _summary(admin, member="jetson-hub")
+    assert s["categories"]["sense"] == 1
+    assert s["flow"]["sensed"] == 1 and s["flow"]["perceived"] == 0 and s["flow"]["self_report"] == 3
+    assert sum(d["sense"] for d in s["daily"]) == 1
+    senses = admin.get("/api/admin/profile/senses", params={"member": "jetson-hub"}).json()["sensors"]
+    assert [x["sensor"] for x in senses] == ["imu"]
+    tl = admin.get("/api/admin/timeline", params={"agent": "jetson-hub", "type": "self_report"}).json()["records"]
+    assert len(tl) == 3
+    tl = admin.get("/api/admin/timeline", params={"agent": "jetson-hub", "type": "sensed"}).json()["records"]
+    assert [r["summary"] for r in tl] == ["cpu temp"]
