@@ -132,6 +132,37 @@ when a flush is refused with `charter_unread`. Set
 `client.auto_read_charter = False` to handle it yourself (`read_charter()`).
 The `hash` is the SHA-256 of the published markdown.
 
+### Charter versions (#345)
+
+Versions are never edited. Every change, including going back to an older
+version, publishes a new one.
+
+- **Change note:** publishing takes an optional note of up to 200 characters
+  saying what changed. Send `{"markdown", "note"}`, or `?note=` with
+  `text/markdown`. The note appears in the history.
+- **Compare:** pick any two versions on the Charter page to see a line diff.
+  Added and removed lines are marked `+` and `−`, and a summary names the
+  articles that changed.
+- **Make current:** `POST /api/admin/charter/versions/{n}/make-current`
+  republishes version *n*'s exact bytes as a new version, with the note
+  "Reverted to version *n*".
+  - Publishing text identical to an older version does the same.
+  - The same bytes give the same hash. Reads count by hash, so a member that
+    read version *n* doesn't have to read the new version.
+- **Withdraw:** `POST /api/admin/charter/versions/{n}/withdraw` with
+  `{"reason"}`.
+  - A withdrawn version is hidden from the history unless you choose to show
+    it, and is never served to members.
+  - Its reads stay logged.
+- **Delete:** `DELETE /api/admin/charter/versions/{n}?confirm=n` removes a
+  version **nobody has read**.
+  - An audit row (`charter_delete`) keeps its number and hash.
+  - Version numbers aren't reused.
+- **The current version** can't be withdrawn or deleted. Make another version
+  current first.
+- **Audit:** `charter_publish` records `{version, hash, note, reverted_from}`.
+  `charter_withdraw` and `charter_delete` also have audit rows.
+
 ## Example: the I2IDL glossary
 
 The I2IDL Glossary of Digital Learning publishes its whole concept scheme as

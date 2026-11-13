@@ -1534,13 +1534,17 @@ async def import_reference_source_file(key: str, request: Request, file: UploadF
 # Fleet charter (#255): publish markdown; see who has read the current version.
 @router.put("/admin/charter")
 async def publish_charter(request: Request, admin: AdminAuth = ADMIN) -> dict:
-    """The body is the charter as markdown (``text/markdown`` or ``{"markdown": ...}``)."""
+    """The body is the charter as markdown (``text/markdown`` or ``{"markdown": ..., "note": ...}``).
+    With markdown, the change note (#345) goes in ``?note=``."""
     raw = await request.body()
+    note = request.query_params.get("note")
     if request.headers.get("content-type", "").startswith("application/json"):
         import json as _json
 
         try:
-            markdown = _json.loads(raw or b"{}").get("markdown")
+            body = _json.loads(raw or b"{}")
+            markdown = body.get("markdown")
+            note = body.get("note", note)
         except (ValueError, AttributeError):
             raise ServiceError(422, "bad_charter", "send markdown, or JSON {\"markdown\": ...}") from None
     else:
@@ -1549,7 +1553,33 @@ async def publish_charter(request: Request, admin: AdminAuth = ADMIN) -> dict:
         except UnicodeDecodeError:
             raise ServiceError(422, "bad_charter", "the charter must be UTF-8") from None
     async with transaction(request) as session:
-        return await charter.publish(session, request.app.state.config, markdown, admin=f"admin:{admin.username}")
+        return await charter.publish(session, request.app.state.config, markdown,
+                                     admin=f"admin:{admin.username}", note=note)
+
+
+# Charter version control (#345): make an older version current, withdraw, delete.
+@router.post("/admin/charter/versions/{version}/make-current")
+async def make_charter_current(version: int, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        return await charter.make_current(session, request.app.state.config, version,
+                                          admin=f"admin:{admin.username}")
+
+
+@router.post("/admin/charter/versions/{version}/withdraw")
+async def withdraw_charter_version(version: int, request: Request, body: dict,
+                                   admin: AdminAuth = ADMIN) -> dict:
+    """``{"reason": ...}``."""
+    async with transaction(request) as session:
+        return await charter.withdraw(session, version, body.get("reason"), admin=f"admin:{admin.username}")
+
+
+@router.delete("/admin/charter/versions/{version}")
+async def delete_charter_version(version: int, request: Request, confirm: str = "",
+                                 admin: AdminAuth = ADMIN) -> dict:
+    """``?confirm=<version>``: the version number typed again."""
+    async with transaction(request) as session:
+        return await charter.delete_version(session, request.app.state.config, version, confirm,
+                                            admin=f"admin:{admin.username}")
 
 
 @router.get("/admin/charter")

@@ -6,6 +6,12 @@ and sent to the LRS as ``read-resource`` like any other.
 
 - Publishing makes a new version, approved at once (the admin is the author).
   Its SHA-256 is the charter hash. Identical bytes change nothing.
+- Version control (#345): a publish carries an optional change note. **Make
+  current** re-publishes an older version's exact bytes as a new version (same
+  hash), so history is never rewritten. A superseded version can be
+  **withdrawn** (hidden, never served, reads kept) or, if nobody has read it,
+  **deleted** (an audit row keeps its number and hash). Reads count by hash:
+  a member that read the same bytes under another version number has read it.
 - **Write gate**, when a charter exists: a member that joined after the
   current version was published must read it before its records are
   accepted; members that joined earlier have ``charter_grace_days`` to read
@@ -19,7 +25,7 @@ import io
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models import AuditLog, Dataset, DatasetItem, DatasetRead, DatasetVersion, Member
@@ -29,6 +35,7 @@ from server.services.errors import ServiceError
 NAME = "fleet-charter"
 KEY = "charter.md"
 MAX_BYTES = 256 * 1024
+MAX_NOTE = 200
 
 
 @dataclass
@@ -62,16 +69,55 @@ async def current(session: AsyncSession) -> Current | None:
     return Current(ds, v.version, item.sha256, _as_utc(v.approved_at), v.approved_by, item.text or "")
 
 
-async def publish(session: AsyncSession, cfg, markdown, *, admin: str) -> dict:
+def _note(note) -> str | None:
+    if note is None:
+        return None
+    if not isinstance(note, str):
+        raise ServiceError(422, "bad_note", "the change note is text")
+    note = " ".join(note.split())
+    if len(note) > MAX_NOTE:
+        raise ServiceError(422, "bad_note", f"the change note is at most {MAX_NOTE} characters")
+    return note or None
+
+
+async def _versions(session: AsyncSession, ds: Dataset) -> list[tuple[DatasetVersion, DatasetItem | None]]:
+    """Every remaining version, newest first, with its charter item."""
+    rows = list(await session.scalars(select(DatasetVersion).where(DatasetVersion.dataset_id == ds.id)
+                                      .order_by(DatasetVersion.version.desc())))
+    items = {i.version_id: i for i in await session.scalars(
+        select(DatasetItem).where(DatasetItem.version_id.in_([v.id for v in rows] or [-1]), DatasetItem.key == KEY))}
+    return [(v, items.get(v.id)) for v in rows]
+
+
+async def _deleted(session: AsyncSession) -> list[dict]:
+    rows = await session.execute(select(AuditLog.actor, AuditLog.ts, AuditLog.detail)
+                                 .where(AuditLog.action == "charter_delete").order_by(AuditLog.ts))
+    return [{**(d or {}), "deleted_by": actor, "deleted_at": _as_utc(ts).isoformat()} for actor, ts, d in rows]
+
+
+async def publish(session: AsyncSession, cfg, markdown, *, admin: str, note=None) -> dict:
     if not isinstance(markdown, str) or not markdown.strip():
         raise ServiceError(422, "bad_charter", "the charter is markdown text and can't be empty")
     data = markdown.encode("utf-8")
     if len(data) > MAX_BYTES:
         raise ServiceError(413, "too_large", f"the charter is at most {MAX_BYTES // 1024} KB")
+    note = _note(note)
     sha = hashlib.sha256(data).hexdigest()
     cur = await current(session)
     if cur is not None and cur.hash == sha:
         return {**_public(cur), "published": False}
+    if cur is not None:
+        # The same bytes as an older (not withdrawn) version: that's Make current (#345).
+        for v, item in await _versions(session, cur.dataset):
+            if v.status == "approved" and item is not None and item.sha256 == sha:
+                return await make_current(session, cfg, v.version, admin=admin)
+    return await _publish_new(session, cfg, cur, markdown, admin=admin, note=note)
+
+
+async def _publish_new(session: AsyncSession, cfg, cur: Current | None, markdown: str, *, admin: str,
+                       note: str | None, reverted_from: int | None = None) -> dict:
+    data = markdown.encode("utf-8")
+    sha = hashlib.sha256(data).hexdigest()
     ds = cur.dataset if cur is not None else await _dataset(session)
     now = datetime.now(timezone.utc)
     if ds is None:
@@ -80,25 +126,101 @@ async def publish(session: AsyncSession, cfg, markdown, *, admin: str) -> dict:
                      approved_by=admin)
         session.add(ds)
         await session.flush()
-        v = DatasetVersion(dataset_id=ds.id, version=1, status="pending", item_count=0, size_bytes=0)
-        session.add(v)
-        await session.flush()
-    else:
-        last = await session.scalar(select(DatasetVersion).where(DatasetVersion.dataset_id == ds.id)
-                                    .order_by(DatasetVersion.version.desc()).limit(1))
-        v = DatasetVersion(dataset_id=ds.id, version=last.version + 1, status="pending", item_count=0,
-                           size_bytes=0)
-        session.add(v)
-        await session.flush()
+    last = await session.scalar(select(func.max(DatasetVersion.version)).where(DatasetVersion.dataset_id == ds.id))
+    gone = max((d.get("version") or 0 for d in await _deleted(session)), default=0)
+    v = DatasetVersion(dataset_id=ds.id, version=max(last or 0, gone) + 1, status="pending", item_count=0,
+                       size_bytes=0)
+    session.add(v)
+    await session.flush()
     stored_sha, size, head = dataset_store.save_file(cfg.data_dir, io.BytesIO(data), MAX_BYTES + 1)
+    meta = {"published_by": admin, "note": note}
+    if reverted_from is not None:
+        meta["reverted_from"] = reverted_from
     session.add(DatasetItem(version_id=v.id, key=KEY, media_type="text/markdown", size_bytes=size,
-                            sha256=stored_sha, tier="text", text=markdown, meta={"published_by": admin}))
+                            sha256=stored_sha, tier="text", text=markdown, meta=meta))
     await datasets.refresh_manifest(session, v)
     v.status, v.approved_by, v.approved_at = "approved", admin, now
     ds.status, ds.updated_at = "approved", now
-    session.add(AuditLog(actor=admin, action="charter_publish", detail={"version": v.version, "hash": sha}))
+    detail = {"version": v.version, "hash": sha, "note": note}
+    if reverted_from is not None:
+        detail["reverted_from"] = reverted_from
+    session.add(AuditLog(actor=admin, action="charter_publish", detail=detail))
     await session.flush()
-    return {**_public(await current(session)), "published": True}
+    return {**_public(await current(session)), "published": True, "note": note, "reverted_from": reverted_from}
+
+
+async def _version(session: AsyncSession, version: int) -> tuple[Current, DatasetVersion, DatasetItem]:
+    cur = await current(session)
+    if cur is None:
+        raise ServiceError(404, "no_charter", "this fleet has no charter yet")
+    v = await session.scalar(select(DatasetVersion).where(DatasetVersion.dataset_id == cur.dataset.id,
+                                                          DatasetVersion.version == version))
+    item = await session.scalar(select(DatasetItem).where(DatasetItem.version_id == v.id, DatasetItem.key == KEY)) \
+        if v is not None else None
+    if item is None:
+        raise ServiceError(404, "not_found", f"no charter version {version}")
+    return cur, v, item
+
+
+async def make_current(session: AsyncSession, cfg, version: int, *, admin: str) -> dict:
+    """Re-publish ``version``'s exact bytes as a new version (#345). Same bytes, same hash."""
+    cur, v, item = await _version(session, version)
+    if v.version == cur.version:
+        raise ServiceError(409, "already_current", f"version {version} is the current version")
+    if v.status != "approved":
+        raise ServiceError(409, "withdrawn", f"version {version} is withdrawn; publish its text again instead")
+    if item.sha256 == cur.hash:
+        return {**_public(cur), "published": False}
+    return await _publish_new(session, cfg, cur, item.text or "", admin=admin,
+                              note=f"Reverted to version {version}", reverted_from=version)
+
+
+async def _reads(session: AsyncSession, ds: Dataset) -> dict[int, int]:
+    """Members that read each version (by version number)."""
+    rows = await session.execute(
+        select(DatasetRead.version, func.count(func.distinct(DatasetRead.member_id)))
+        .where(DatasetRead.dataset_id == ds.id, DatasetRead.item_key == KEY).group_by(DatasetRead.version))
+    return {int(v): int(n) for v, n in rows}
+
+
+async def withdraw(session: AsyncSession, version: int, reason, *, admin: str) -> dict:
+    """Hide a superseded version (#345): never served to members; its reads stay logged."""
+    cur, v, item = await _version(session, version)
+    if v.version == cur.version:
+        raise ServiceError(409, "current", "the current version can't be withdrawn; make another version current first")
+    if v.status == "withdrawn":
+        raise ServiceError(409, "withdrawn", f"version {version} is already withdrawn")
+    if not isinstance(reason, str) or not reason.strip():
+        raise ServiceError(422, "bad_reason", "say why it's withdrawn")
+    reason = " ".join(reason.split())
+    if len(reason) > MAX_NOTE:
+        raise ServiceError(422, "bad_reason", f"the reason is at most {MAX_NOTE} characters")
+    now = datetime.now(timezone.utc)
+    v.status = "withdrawn"
+    item.meta = {**(item.meta or {}), "withdrawn": {"by": admin, "at": now.isoformat(), "reason": reason}}
+    session.add(AuditLog(actor=admin, action="charter_withdraw",
+                         detail={"version": version, "hash": item.sha256, "reason": reason}))
+    await session.flush()
+    return {"version": version, "status": "withdrawn", "reason": reason}
+
+
+async def delete_version(session: AsyncSession, cfg, version: int, confirm, *, admin: str) -> dict:
+    """Delete a superseded version nobody has read (#345). An audit row keeps its number and hash."""
+    cur, v, item = await _version(session, version)
+    if v.version == cur.version:
+        raise ServiceError(409, "current", "the current version can't be deleted")
+    if str(confirm).strip() != str(version):
+        raise ServiceError(422, "confirm", f"type the version number ({version}) to confirm")
+    if (await _reads(session, cur.dataset)).get(version):
+        raise ServiceError(409, "has_reads", f"members have read version {version}; withdraw it instead")
+    sha = item.sha256
+    await session.execute(delete(DatasetItem).where(DatasetItem.version_id == v.id))
+    await session.delete(v)
+    session.add(AuditLog(actor=admin, action="charter_delete", detail={"version": version, "hash": sha}))
+    await session.flush()
+    in_use = await session.scalar(select(DatasetItem.id).where(DatasetItem.sha256 == sha).limit(1))
+    dataset_store.remove_if_unused(cfg.data_dir, sha, in_use is not None)
+    return {"version": version, "status": "deleted"}
 
 
 def _public(cur: Current) -> dict:
@@ -115,10 +237,19 @@ async def read(session: AsyncSession, *, member_id) -> dict:
     return {**_public(cur), "markdown": cur.markdown}
 
 
+async def _same_bytes(session: AsyncSession, cur: Current) -> list[int]:
+    """Version numbers with the current version's hash (#345): reading any of them counts."""
+    rows = await session.scalars(select(DatasetVersion.version).join(DatasetItem, DatasetItem.version_id == DatasetVersion.id)
+                                 .where(DatasetVersion.dataset_id == cur.dataset.id, DatasetItem.key == KEY,
+                                        DatasetItem.sha256 == cur.hash))
+    return sorted(set(rows) | {cur.version})
+
+
 async def _read_at(session: AsyncSession, cur: Current, member_ids) -> dict:
+    """When each member first read the current charter's bytes, under any version number."""
     rows = await session.execute(
         select(DatasetRead.member_id, DatasetRead.ts).where(
-            DatasetRead.dataset_id == cur.dataset.id, DatasetRead.version == cur.version,
+            DatasetRead.dataset_id == cur.dataset.id, DatasetRead.version.in_(await _same_bytes(session, cur)),
             DatasetRead.item_key == KEY, DatasetRead.member_id.in_(list(member_ids)))
         .order_by(DatasetRead.ts))
     out: dict = {}
@@ -175,13 +306,21 @@ async def admin_view(session: AsyncSession, cfg) -> dict:
     cur = await current(session)
     if cur is None:
         return {"current": None, "versions": [], "members": [], "grace_days": cfg.charter_grace_days}
+    reads = await _reads(session, cur.dataset)
     versions = []
-    for v in await session.scalars(select(DatasetVersion).where(DatasetVersion.dataset_id == cur.dataset.id)
-                                   .order_by(DatasetVersion.version.desc())):
-        item = await session.scalar(select(DatasetItem).where(DatasetItem.version_id == v.id, DatasetItem.key == KEY))
+    for v, item in await _versions(session, cur.dataset):
+        meta = (item.meta if item else None) or {}
+        status = "current" if v.version == cur.version else "withdrawn" if v.status == "withdrawn" else "superseded"
         versions.append({"version": v.version, "hash": item.sha256 if item else None,
                          "published_at": _as_utc(v.approved_at).isoformat() if v.approved_at else None,
-                         "published_by": v.approved_by})
+                         "published_by": v.approved_by, "note": meta.get("note"),
+                         "reverted_from": meta.get("reverted_from"), "status": status,
+                         "withdrawn": meta.get("withdrawn"), "reads": reads.get(v.version, 0)})
+    for d in await _deleted(session):
+        versions.append({"version": d.get("version"), "hash": d.get("hash"), "published_at": None,
+                         "published_by": None, "note": None, "reverted_from": None, "status": "deleted",
+                         "deleted_by": d["deleted_by"], "deleted_at": d["deleted_at"], "reads": 0})
+    versions.sort(key=lambda x: x["version"] or 0, reverse=True)
     members = list(await session.scalars(select(Member).where(Member.status == "active").order_by(Member.name)))
     read_at = await _read_at(session, cur, [m.id for m in members])
     now = datetime.now(timezone.utc)
@@ -196,13 +335,9 @@ async def admin_view(session: AsyncSession, cfg) -> dict:
 
 
 async def version_text(session: AsyncSession, version: int) -> dict:
-    cur = await current(session)
-    if cur is None:
-        raise ServiceError(404, "no_charter", "this fleet has no charter yet")
-    v = await session.scalar(select(DatasetVersion).where(DatasetVersion.dataset_id == cur.dataset.id,
-                                                          DatasetVersion.version == version))
-    item = await session.scalar(select(DatasetItem).where(DatasetItem.version_id == v.id, DatasetItem.key == KEY)) \
-        if v is not None else None
-    if item is None:
-        raise ServiceError(404, "not_found", f"no charter version {version}")
-    return {"version": version, "hash": item.sha256, "markdown": item.text}
+    """Any remaining version's text, for admins (withdrawn ones too)."""
+    cur, v, item = await _version(session, version)
+    meta = item.meta or {}
+    status = "current" if v.version == cur.version else "withdrawn" if v.status == "withdrawn" else "superseded"
+    return {"version": version, "hash": item.sha256, "markdown": item.text, "note": meta.get("note"),
+            "status": status}

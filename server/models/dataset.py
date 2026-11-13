@@ -17,7 +17,7 @@ DATASET_SCOPES = ("fleet",)
 DATASET_KINDS = ("upload", "url", "integration", "charter")
 INTEGRATION_KINDS = ("http", "s3", "huggingface", "ollama", "openai", "mcp")
 DATASET_STATUSES = ("pending", "approved", "retired")
-VERSION_STATUSES = ("pending", "approved")
+VERSION_STATUSES = ("pending", "approved", "withdrawn")  # withdrawn: a charter version (#345)
 ITEM_TIERS = ("text", "large", "external")
 
 
