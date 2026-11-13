@@ -128,3 +128,18 @@ async def to_dict(session, d: Directive) -> dict:
 async def list_all(session, limit: int = 100) -> list[dict]:
     rows = await session.scalars(select(Directive).order_by(Directive.issued_at.desc()).limit(limit))
     return [await to_dict(session, d) for d in rows]
+
+
+async def inherit_from(session, swarm, leader_name: str | None) -> int:
+    """Leader change (#310): the old leader's open directives for this swarm become
+    ``inherited``, waiting for the new leader to confirm or cancel each one."""
+    if not leader_name:
+        return 0
+    n = 0
+    for d in await session.scalars(select(Directive).where(
+            Directive.scope_swarm_id == swarm.id, Directive.signer == "leader",
+            Directive.issued_by == leader_name, Directive.status == "open")):
+        if status_of(d) == "open" and not d.inherited:
+            d.inherited = True
+            n += 1
+    return n

@@ -77,7 +77,13 @@ async def my_swarm(request: Request, auth: MemberAuth = Depends(current_member))
     """The caller's swarm (#292): permanent ID, MQTT topic ID, current name and role; null for a free agent."""
     async with transaction(request) as session:
         member = await session.get(Member, auth.member_id)
-        return {"swarm": await swarm_identity.swarm_of(session, member)}
+        swarm = await swarm_identity.swarm_of(session, member)
+        if swarm is not None:
+            from server.models import Swarm as SwarmRow
+
+            # The leader (#308): name and public key, so members can verify its directives.
+            swarm["leader"] = await swarms.leader_of(session, await session.get(SwarmRow, swarm["id"]))
+        return {"swarm": swarm}
 
 
 @router.put("/members/me/cognition")
