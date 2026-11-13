@@ -79,4 +79,7 @@ export const COUNT_SELF_REPORT = "The member reporting on itself: heartbeat, upt
 export const COUNT_HEARTBEAT = "A hub sends a heartbeat every few minutes (HUB_HEARTBEAT_SECONDS) so LTMS knows it is alive: uptime, members seen, dropped messages. It's a self-report.";
 export const GUIDED_SETUP = "The device said which swarm and role it is meant for. Each step happens only when you click it, and any step can wait. A hub is added as a member first, then appointed with the swarm root key, signed here in the browser.";
 
+export const MSG_SUMMARY = "LTMS keeps every swarm message. Only the LRS copy of a busy member's messages (over 60 an hour, for 3 hours) is grouped into one statement per 5 minutes.";
+export const MSG_OVER_HALF = "Messages are over half of this swarm's LRS traffic. Members over 60 messages/hour are already summarised; consider lowering the threshold in Settings.";
+
 export const PING_ABOUT = "Asks the member for a heartbeat now. Its hub (or the member itself, if it talks to LTMS directly) checks for pings every 30 s; the answer is the next record LTMS receives from it. Heartbeats otherwise come twice a day.";
