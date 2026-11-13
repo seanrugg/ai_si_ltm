@@ -97,8 +97,9 @@ def _key_for(url: str, content_type: str) -> str:
     return "".join(c if c.isalnum() or c in "._-/" else "_" for c in key)[:200]
 
 
-async def _fetch(url: str, cfg, *, transport, resolve) -> tuple[str, str, bytes]:
-    allowed = allow_list(cfg)
+async def _fetch(url: str, cfg, *, transport, resolve, allowed: list[str] | None = None) -> tuple[str, str, bytes]:
+    """``allowed`` defaults to LTMS_DATASET_URL_ALLOW; a built-in reference source passes its own host."""
+    allowed = allow_list(cfg) if allowed is None else allowed
     limit = cfg.dataset_text_max_mb * 1024 * 1024
     async with httpx.AsyncClient(transport=transport, timeout=TIMEOUT_S, follow_redirects=False,
                                  headers={"User-Agent": "LTMS dataset snapshot"}) as client:

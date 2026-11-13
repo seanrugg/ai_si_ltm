@@ -137,12 +137,22 @@ The `hash` is the SHA-256 of the published markdown.
 The I2IDL Glossary of Digital Learning publishes its whole concept scheme as
 JSON-LD (`https://id.i2idl.org/glossary.jsonld`). It's open by design:
 I2IDL-original material is CC BY 4.0, and each definition keeps the rights of
-the sources it draws on. To make it fleet reference material:
+the sources it draws on. It's a built-in **reference source** (#351): on the
+Datasets page, under *Reference sources*, press **Import latest**. LTMS fetches
+the file from `id.i2idl.org` itself (https, public addresses only, size and time
+limits; no `LTMS_DATASET_URL_ALLOW` entry needed). On a closed network, save
+the file elsewhere and use **Import from a saved file**.
+
+After the first import, LTMS checks for a new publication every
+`LTMS_REFERENCE_REFRESH_HOURS` (default 168, weekly; `0` turns it off). A new
+publication arrives as a pending version; members see nothing new until an
+admin approves it. A source that was never imported is never fetched.
+
+The command-line importer does the same from any machine, for scripting:
 
 ```bash
 LTMS_ADMIN_USERNAME=<admin> LTMS_ADMIN_PASSWORD=<password> \
   python -m scripts.import_glossary --server https://<your-ltms>
-# on a closed network, from a saved copy:
 python -m scripts.import_glossary --server https://<your-ltms> --from-file glossary.jsonld
 ```
 
@@ -160,4 +170,5 @@ by term or definition, and lessons cite a concept like any item:
 `{"dataset": "<id>", "version": 1, "item": "concepts/learning-record.json"}`.
 
 For live lookups instead of a copy, register the glossary's MCP server as an
-`mcp` catalog integration.
+`mcp` catalog integration. That only tells members where the server is: they
+connect to it themselves, and LTMS never calls it or copies its terms.

@@ -40,7 +40,10 @@ export const SWARM_REMOVE_RECORDS =
 export const DATASET_APPROVE = "Approved data is readable by every member of the fleet. Check its contents and licence first.";
 export const DATASET_SCOPE = "Every dataset is shared with the whole fleet.";
 export const DATASET_LARGE = "Large files served to many members at once slow LTMS down. For large or frequently read data, add a catalog integration instead.";
-export const INTEGRATION_ABOUT = "Data or models that stay where they are. LTMS keeps the catalog entry and never fetches from the source; members fetch it themselves and report what they read.";
+export const INTEGRATION_ABOUT = "A pointer to data or models that stay where they are (MCP, Hugging Face, S3). LTMS never fetches from it: members connect themselves and report what they read. To copy content into LTMS, use Reference sources.";
+export const REFERENCE_SOURCES = "Material LTMS can import itself, one item per entry, rights kept. Import fetches from the source's own site; on a closed network, use a saved copy. Each import is a pending version you approve.";
+export const REFERENCE_REFRESH = "After the first import, LTMS checks the source on this schedule. A new publication arrives as a pending version; members see nothing new until you approve it. LTMS_REFERENCE_REFRESH_HOURS=0 turns it off.";
+export const INTEGRATION_EMPTY = "This integration dataset has no items, so members can't find anything through it. Add item locators to a version, or connect members to the integration directly.";
 export const INTEGRATION_CREDENTIAL = "The NAME of an environment variable on each member, like HF_TOKEN. Never paste the secret itself: LTMS doesn't store credentials.";
 export const URL_SNAPSHOT = "LTMS fetches the page or file once and keeps it as a new version, never a live link, so lessons that cite it stay checkable. Only https hosts on LTMS_DATASET_URL_ALLOW; off when that's empty.";
 

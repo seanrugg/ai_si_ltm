@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
-import Datasets, { AddDataset, DatasetDetail, ExternalItems, Integrations, SnapshotUrl } from "./Datasets.jsx";
+import Datasets, { AddDataset, DatasetDetail, ExternalItems, Integrations, ReferenceSources, SnapshotUrl } from "./Datasets.jsx";
 import { api } from "../api/client.js";
-import { filterDatasets, formatBytes, sortDatasets, uploadFiles } from "../lib/datasets.js";
+import { filterDatasets, formatBytes, isEmptyIntegration, referenceStatus, refreshLabel, sortDatasets, uploadFiles } from "../lib/datasets.js";
 
 vi.mock("../api/client.js", () => ({ api: vi.fn() }));
 
@@ -208,5 +208,47 @@ describe("URL snapshots (#249)", () => {
     render(React.createElement(DatasetDetail, { dataset: ds }));
     expect(screen.getByRole("form", { name: "Snapshot URL" })).toBeDefined();
     expect(screen.queryByRole("button", { name: "New version" })).toBeNull();
+  });
+});
+
+describe("reference sources (#351)", () => {
+  const SRC = { key: "i2idl-glossary", title: "I2IDL Glossary of Digital Learning",
+    url: "https://id.i2idl.org/glossary.jsonld", description: "Terms.", dataset_id: null, publications: [],
+    refresh_hours: 168 };
+
+  it("imports the latest publication from the dashboard", async () => {
+    const onChanged = vi.fn();
+    api.mockResolvedValueOnce({ status: "imported", version: 1, publicationVersion: "v0.0.91", items: 412 });
+    render(React.createElement(ReferenceSources, { data: { sources: [SRC] }, onChanged }));
+    expect(screen.getByText("Not imported yet.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Import latest" }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(api).toHaveBeenCalledWith("/admin/reference-sources/i2idl-glossary/import", { method: "POST", body: undefined });
+    expect(screen.getByText(/Imported 412 entries from v0\.0\.91 as v1/)).toBeTruthy();
+  });
+
+  it("imports a saved file on a closed network", async () => {
+    api.mockResolvedValueOnce({ status: "unchanged", version: 1, publicationVersion: "v0.0.91", items: 412 });
+    render(React.createElement(ReferenceSources, { data: { sources: [SRC] } }));
+    const file = new File(["{}"], "glossary.jsonld", { type: "application/ld+json" });
+    fireEvent.change(screen.getByLabelText("Import from a saved file"), { target: { files: [file] } });
+    await waitFor(() => expect(api).toHaveBeenCalled());
+    const [path, opts] = api.mock.calls[0];
+    expect(path).toBe("/admin/reference-sources/i2idl-glossary/import-file");
+    expect(opts.body.get("file").name).toBe("glossary.jsonld");
+  });
+
+  it("describes the state and refresh schedule", () => {
+    expect(referenceStatus({ dataset_id: "x", publications: [
+      { publicationVersion: "v0.0.91", version: 1, status: "approved" },
+      { publicationVersion: "v0.0.92", version: 2, status: "pending" }] }))
+      .toBe("Members read v0.0.91 (dataset v1). v0.0.92 is waiting for approval (v2).");
+    expect(referenceStatus({ dataset_id: "x", publications: [{ publicationVersion: "v1", version: 1, status: "pending" }] }))
+      .toMatch(/^No version approved yet/);
+    expect(refreshLabel(168)).toBe("weekly");
+    expect(refreshLabel(0)).toBe("off");
+    expect(refreshLabel(48)).toBe("every 2 days");
+    expect(isEmptyIntegration({ kind: "integration", versions: [{ item_count: 0 }] })).toBe(true);
+    expect(isEmptyIntegration({ kind: "integration", versions: [{ item_count: 3 }] })).toBe(false);
   });
 });
