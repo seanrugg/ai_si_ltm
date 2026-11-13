@@ -66,7 +66,7 @@ class MemberLink:
         return rec
 
     def send_message(self, text: str, *, to=None, reply_to: str | None = None,
-                     payload: dict | None = None) -> dict:
+                     payload: dict | None = None, tags: list[str] | None = None) -> dict:
         """Say something to the swarm (#300): a signed ``communication`` record on the say topic.
 
         ``to``: recipient member names (omit for the whole swarm). ``reply_to``:
@@ -75,7 +75,7 @@ class MemberLink:
         """
         if not isinstance(text, str) or not text or len(text) > MAX_MESSAGE_SUMMARY:
             raise ValueError(f"a swarm message needs text of 1..{MAX_MESSAGE_SUMMARY} characters")
-        header = {"summary": text, "tags": [SWARM_MESSAGE_TAG]}
+        header = {"summary": text, "tags": [SWARM_MESSAGE_TAG, *(tags or [])]}
         if to:
             header["peers"] = [to] if isinstance(to, str) else list(to)
         if reply_to:

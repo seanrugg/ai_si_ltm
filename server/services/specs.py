@@ -203,3 +203,19 @@ async def history(session, member: Member, *, limit: int = 20, offset: int = 0) 
     return {"total": total, "events": [{"ts": r.ts.isoformat() if getattr(r, "ts", None) else None, "actor": r.actor,
                                         **{k: (r.detail or {}).get(k) for k in ("source", "sections", "old", "new")}}
                                        for r in rows]}
+
+
+def summary_line(member: Member) -> str:
+    """One line from the spec sheet for a roster (#334), e.g. "Jetson Orin Nano 8 GB · qwen3:4b on board"."""
+    r = resolve(member)
+    hw = r["hardware"]["value"] or {}
+    models = r["models"]["value"] or []
+    parts = []
+    board = " ".join(p for p in (hw.get("board"), f"{round(hw['ram_mib'] / 1024)} GB" if hw.get("ram_mib") else None) if p)
+    if board:
+        parts.append(board)
+    if models:
+        m = models[0]
+        where = {"onboard": "on board", "offboard": "off board"}.get(m.get("where"), "")
+        parts.append(" ".join(p for p in (m.get("name"), where) if p))
+    return " · ".join(parts)
