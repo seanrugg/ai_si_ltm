@@ -468,6 +468,7 @@ HISTORY_KINDS = {
     "cognition_change": "membership", "member_revoke": "membership",
     "memory_wipe": "admin", "record_delete": "admin", "network_change": "admin",
     "swarm_appoint_hub": "membership",
+    "swarm_appoint_leader": "membership", "swarm_remove_leader": "membership",
 }
 WHERE_AI = {"onboard": "on board", "offboard": "off board"}
 
@@ -490,6 +491,11 @@ def _event_text(action: str, d: dict, swarm_names: dict,
     if action == "swarm_appoint_hub":
         old = member_names.get(d.get("replaced"))
         return f"Appointed hub of {d.get('swarm')}", f"replacing {old}" if old else None
+    if action == "swarm_appoint_leader":
+        old = member_names.get(d.get("replaced"))
+        return f"Appointed leader of {d.get('swarm')}", f"replacing {old}" if old else None
+    if action == "swarm_remove_leader":
+        return f"Removed as leader of {d.get('swarm')}", None
     if action == "swarm_appoint_hub_replaced":
         return f"Replaced as hub of {d.get('swarm')}", f"by {d['hub']}" if d.get("hub") else None
     if action == "swarm_leave":
@@ -531,7 +537,8 @@ async def history(session: AsyncSession, subject: Subject) -> dict:
                                or_(AuditLog.member_id.in_(ids), deletes, replaced))
         .order_by(AuditLog.ts.desc(), AuditLog.id.desc()).limit(MAX_EVENTS)))
     swarm_names = dict((await session.execute(select(Swarm.id, Swarm.name))).all())
-    replaced_ids = {(a.detail or {}).get("replaced") for a in rows if a.action == "swarm_appoint_hub"} - {None}
+    replaced_ids = {(a.detail or {}).get("replaced") for a in rows
+                    if a.action in ("swarm_appoint_hub", "swarm_appoint_leader")} - {None}
     member_names = {}
     if replaced_ids:
         wanted = []

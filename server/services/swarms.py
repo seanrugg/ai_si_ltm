@@ -321,6 +321,131 @@ async def appoint_hub(session: AsyncSession, swarm: Swarm, appointment: dict, *,
     return row
 
 
+def _leader_types() -> list[str]:
+    from ltms_contract import RECORD_TYPES
+
+    return [t for t in RECORD_TYPES if t != "system"]
+
+
+def _grant_leader_recall(member: Member, swarm_name: str) -> dict:
+    """Scoped recall of the swarm's records for the leader (#308). Returns what was added,
+    so removing the leader takes away exactly that and nothing else."""
+    perms, scope = list(member.permissions or []), dict(member.scope or {})
+    if "recall" in perms:
+        return {}  # already sees everything
+    granted: dict = {}
+    if "recall:scoped" not in perms:
+        perms.append("recall:scoped")
+        granted["permission"] = True
+        scope = {}
+    if scope.get("swarms") is None and not granted.get("permission"):
+        return granted  # an existing scope over every swarm: widening it to more types would over-grant
+    swarms_ = list(scope.get("swarms") or [])
+    if swarm_name not in swarms_:
+        swarms_.append(swarm_name)
+        granted["swarm"] = swarm_name
+    types = list(scope.get("types") or [])
+    added_types = [t for t in _leader_types() if t not in types]
+    granted["types"] = added_types
+    scope.update(swarms=swarms_, types=types + added_types)
+    member.permissions, member.scope = perms, scope
+    return granted
+
+
+def _revoke_leader_recall(member: Member, granted: dict | None) -> None:
+    if not granted:
+        return
+    perms, scope = list(member.permissions or []), dict(member.scope or {})
+    if granted.get("permission"):
+        perms = [p for p in perms if p != "recall:scoped"]
+        member.permissions, member.scope = perms, None
+        return
+    if granted.get("swarm"):
+        scope["swarms"] = [x for x in scope.get("swarms") or [] if x != granted["swarm"]]
+    if granted.get("types"):
+        scope["types"] = [t for t in scope.get("types") or [] if t not in granted["types"]]
+    member.scope = scope
+
+
+async def appoint_leader(session: AsyncSession, swarm: Swarm, appointment: dict, *,
+                         actor: str = "cli", now: datetime | None = None) -> Member:
+    """Make an active member the swarm's leader, on the strength of a root-key signature (#308)."""
+    now = _now(now)
+    try:
+        statement, sig = appointment["statement"], appointment["sig"]
+        ok_shape = (statement.get("v") == 1 and statement.get("action") == "appoint_leader"
+                    and isinstance(statement.get("leader"), str) and isinstance(statement.get("leader_key"), str)
+                    and isinstance(sig, str))
+    except (KeyError, TypeError, AttributeError):
+        ok_shape = False
+    if not ok_shape:
+        raise ServiceError(422, "bad_appointment", "not a leader appointment (see scripts/swarm_key.py)")
+    if statement.get("swarm") != swarm.id:
+        raise ServiceError(422, "bad_appointment", "the appointment is for a different swarm")
+    if not verify_signature(swarm.public_key, appointment_message(statement), sig):
+        raise ServiceError(422, "bad_appointment", "the signature doesn't match this swarm's root key")
+    try:
+        signed_at = parse_ts(statement["ts"])
+    except Exception:
+        raise ServiceError(422, "bad_appointment", "bad ts in the appointment") from None
+    if not (now - APPOINTMENT_MAX_AGE <= signed_at <= now + timedelta(minutes=5)):
+        raise ServiceError(422, "stale_appointment", "the appointment is older than 30 days or in the future; sign a new one")
+    if swarm.status != "active":
+        raise ServiceError(409, "swarm_revoked", f"swarm {swarm.name!r} is revoked")
+    member = await session.scalar(select(Member).where(Member.name == statement["leader"]))
+    if member is None:
+        raise ServiceError(404, "no_member", f"no member named {statement['leader']!r}")
+    if bytes(member.public_key).hex() != statement["leader_key"].lower():
+        raise ServiceError(422, "bad_appointment", "leader_key doesn't match that member's enrolled key")
+    if member.status != "active":
+        raise ServiceError(409, "not_active", f"member {member.name!r} is {member.status}")
+    hub = await session.scalar(select(SwarmMember).where(
+        SwarmMember.swarm_id == swarm.id, SwarmMember.role == "hub", SwarmMember.left_at.is_(None),
+        SwarmMember.member_id == member.id))
+    if hub is not None:
+        raise ServiceError(409, "is_hub", f"{member.name} is this swarm's hub; a member can't be both")
+
+    old_id = swarm.leader_member_id
+    if old_id is not None and old_id != member.id:
+        old = await session.get(Member, old_id)
+        if old is not None:
+            _revoke_leader_recall(old, (swarm.leader_appointment or {}).get("granted"))
+        from server.services import directives
+
+        await directives.inherit_from(session, swarm, old.name if old else None)
+    granted = (swarm.leader_appointment or {}).get("granted") if old_id == member.id else _grant_leader_recall(member, swarm.name)
+    swarm.leader_member_id = member.id
+    swarm.leader_appointment = {"statement": statement, "sig": sig, "granted": granted}
+    _audit(session, actor, "swarm_appoint_leader",
+           {"swarm": swarm.name, "leader": member.name, "replaced": str(old_id) if old_id and old_id != member.id else None},
+           member_id=member.id)
+    await session.flush()
+    return member
+
+
+async def remove_leader(session: AsyncSession, swarm: Swarm, *, actor: str = "cli") -> bool:
+    if swarm.leader_member_id is None:
+        return False
+    old = await session.get(Member, swarm.leader_member_id)
+    if old is not None:
+        _revoke_leader_recall(old, (swarm.leader_appointment or {}).get("granted"))
+    _audit(session, actor, "swarm_remove_leader", {"swarm": swarm.name, "leader": old.name if old else None},
+           member_id=swarm.leader_member_id)
+    from server.services import directives
+
+    await directives.inherit_from(session, swarm, old.name if old else None)
+    swarm.leader_member_id, swarm.leader_appointment = None, None
+    await session.flush()
+    return True
+
+
+async def leader_of(session: AsyncSession, swarm: Swarm) -> dict | None:
+    if swarm.leader_member_id is None:
+        return None
+    m = await session.get(Member, swarm.leader_member_id)
+    return {"name": m.name, "public_key": bytes(m.public_key).hex()} if m is not None else None
+
+
 async def remove_member(session: AsyncSession, member: Member, *, actor: str = "cli",
                         now: datetime | None = None) -> bool:
     """Make a member a free agent. A hub loses its relay permission."""

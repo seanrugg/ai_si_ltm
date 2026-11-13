@@ -237,3 +237,19 @@ ignored and recorded once as an `event` tagged `directive-invalid`. Handled ids
 are kept in `directives.json`, so a retained directive isn't acknowledged twice.
 The admin's directive list shows, per directive, how many members it was meant
 for and how many received, accepted and declined it, with each decline's reason.
+## Swarm leader (#308)
+
+A swarm can have one **leader**: any active member (a cloud agent may lead), but
+not its hub. Like the hub, it's appointed with the swarm's root key:
+
+```bash
+python -m scripts.swarm_key appoint-leader --key /Volumes/KEY/<swarm>.swarm.json \
+    --leader <member> --leader-key <64 hex> > appoint-leader.json
+# then POST it to /api/admin/swarms/<swarm>/leader (or use the dashboard)
+```
+
+The appointment must be applied within 30 days of signing. It gives the leader
+scoped recall of the swarm's records (every type except `system`), and removing
+or replacing the leader takes back exactly what the appointment added. A member
+that already has full recall keeps it unchanged. `GET /api/swarm` shows the
+leader's name and public key, so members can verify its directives (#310).

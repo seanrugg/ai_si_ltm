@@ -6,7 +6,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, Index, String, Text, Uuid
+from sqlalchemy import Boolean, CheckConstraint, Index, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from server.models.base import Base, JSONType, UTCDateTime, utcnow
@@ -36,3 +36,6 @@ class Directive(Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     cancel_statement: Mapped[str | None] = mapped_column(Text)
     cancel_signature: Mapped[str | None] = mapped_column(String(128))
+    # Leader change (#310): an old leader's open directive, waiting for the new leader.
+    inherited: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    confirmed_by: Mapped[str | None] = mapped_column(String(128))

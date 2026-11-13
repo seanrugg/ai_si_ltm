@@ -690,6 +690,22 @@ async def list_swarms(request: Request, admin: AdminAuth = ADMIN) -> list[dict]:
         return await swarms.describe(session)
 
 
+@router.post("/admin/swarms/{name}/leader")
+async def appoint_swarm_leader(name: str, request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    """``{"statement", "sig"}`` signed with the swarm's root key (#308)."""
+    async with transaction(request) as session:
+        swarm = await swarms.get_swarm(session, name)
+        await swarms.appoint_leader(session, swarm, body, actor=f"admin:{admin.username}")
+        return {"swarm": swarm.name, "leader": await swarms.leader_of(session, swarm)}
+
+
+@router.delete("/admin/swarms/{name}/leader")
+async def remove_swarm_leader(name: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        swarm = await swarms.get_swarm(session, name)
+        return {"swarm": swarm.name, "removed": await swarms.remove_leader(session, swarm, actor=f"admin:{admin.username}")}
+
+
 @router.post("/admin/swarms")
 async def create_swarm_endpoint(request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
     async with transaction(request) as session:
