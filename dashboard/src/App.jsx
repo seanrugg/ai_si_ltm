@@ -4,6 +4,7 @@ import { api, setUnauthorizedHandler } from "./api/client.js";
 import Shell from "./components/Shell.jsx";
 import { Loading } from "./components/ui.jsx";
 import Conversation from "./pages/Conversation.jsx";
+import Directives from "./pages/Directives.jsx";
 import DecisionTrace from "./pages/DecisionTrace.jsx";
 import Integrity from "./pages/Integrity.jsx";
 import Lessons from "./pages/Lessons.jsx";
@@ -87,6 +88,7 @@ const router = createHashRouter([
       { path: "/swarms/:name/profile", element: <Profile key="swarm" subject="swarm" /> },
       { path: "/record/:agent/:seq", element: <RecordPage /> },
       { path: "/conversation", element: <Conversation /> },
+      { path: "/directives", element: <Directives /> },
       { path: "/decision-trace/:agent/:seq", element: <DecisionTrace /> },
       { path: "/outcomes", element: <Outcomes /> },
       { path: "/lessons", element: <Lessons /> },

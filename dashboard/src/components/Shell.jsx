@@ -16,6 +16,7 @@ const NAV = [
   { to: "/datasets", label: "Datasets" },
   { to: "/charter", label: "Charter" },
   { to: "/conversation", label: "Conversation" },
+  { to: "/directives", label: "Directives" },
   { to: "/outcomes", label: "Outcomes" },
   { to: "/lessons", label: "Lessons" },
   { to: "/audit-log", label: "Audit log" },
