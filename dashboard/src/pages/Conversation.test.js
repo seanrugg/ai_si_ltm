@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import React from "react";
 import { MemoryRouter } from "react-router-dom";
-import Conversation, { authorChipClass } from "./Conversation.jsx";
+import Conversation, { authorChipClass, isIntroduction } from "./Conversation.jsx";
 
 describe("Conversation view switch", () => {
   it("defaults to the Swarm view", () => {
@@ -25,5 +25,17 @@ describe("author filter chip", () => {
   });
   it("is muted when not selected", () => {
     expect(authorChipClass(false)).toContain("text-paper-muted");
+  });
+});
+
+describe("introductions (#334)", () => {
+  it("recognises an introduction and offers the filter", () => {
+    expect(isIntroduction({ tags: ["swarm-message", "introduction"] })).toBe(true);
+    expect(isIntroduction({ tags: ["swarm-message"] })).toBe(false);
+    expect(isIntroduction({})).toBe(false);
+    const html = renderToStaticMarkup(
+      React.createElement(MemoryRouter, null, React.createElement(Conversation))
+    );
+    expect(html).toContain("Introductions only");
   });
 });
