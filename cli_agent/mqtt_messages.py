@@ -12,6 +12,9 @@ from typing import Any
 _RECORDS_SUFFIX = "records"
 _ACKS_SUFFIX = "acks"
 _HELLO_SUFFIX = "hello"
+_SAY_SUFFIX = "say"
+SWARM_MESSAGE_TAG = "swarm-message"
+MAX_MESSAGE_SUMMARY = 500
 MAX_HELLO_ADDRESSES = 8
 
 
@@ -30,8 +33,29 @@ def hello_topic(agent: str, swarm: str) -> str:
     return f"{swarm}/{agent}/{_HELLO_SUFFIX}"
 
 
+def say_topic(agent: str, swarm: str) -> str:
+    """member -> swarm: a swarm message, as a signed communication record (#300)."""
+    return f"{swarm}/{agent}/{_SAY_SUFFIX}"
+
+
+def say_subscription(swarm: str) -> str:
+    """Every member's swarm messages."""
+    return f"{swarm}/+/{_SAY_SUFFIX}"
+
+
+def agent_from_say_topic(topic: str, swarm: str) -> str:
+    parts = topic.split("/")
+    if len(parts) != 3 or parts[0] != swarm or parts[2] != _SAY_SUFFIX or not parts[1]:
+        raise ValueError(f"not a say topic for swarm {swarm!r}: {topic!r}")
+    return parts[1]
+
+
+def is_swarm_message(record: dict) -> bool:
+    return record.get("type") == "communication" and SWARM_MESSAGE_TAG in (record.get("tags") or [])
+
+
 def topic_kind(topic: str) -> str:
-    """The last topic segment: "records", "acks" or "hello"."""
+    """The last topic segment: "records", "acks", "hello" or "say"."""
     return topic.rsplit("/", 1)[-1]
 
 

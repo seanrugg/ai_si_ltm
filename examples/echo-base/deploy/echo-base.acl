@@ -5,16 +5,23 @@
 #   sed -e 's/<topic_id>/sw-1a2b3c4d/g' -e 's/<hub-name>/my-hub/g' echo-base.acl | sudo tee /etc/mosquitto/echo-base.acl
 # MQTT usernames are LTMS member names (%u below).
 
-# The hub reads every member's records and hellos, and writes every member's acks.
+# The hub reads every member's records, hellos and swarm messages, and writes every member's acks.
 user <hub-name>
 topic read <topic_id>/+/records
 topic read <topic_id>/+/hello
+topic read <topic_id>/+/say
 topic write <topic_id>/+/acks
 
-# Every member may only write its own records and hello, and read its own acks.
+# Every member may only write its own records, hello and messages, and read its own acks.
 pattern write <topic_id>/%u/records
 pattern write <topic_id>/%u/hello
+pattern write <topic_id>/%u/say
 pattern read <topic_id>/%u/acks
+
+# Swarm messages (#300): every member hears every member. A pattern line applies
+# to every authenticated user of this broker (topic lines would apply only to the
+# user above them): run one broker per swarm, as echo-base does.
+pattern read <topic_id>/+/say
 
 # Migration from name-based topics (#293): while members move over, also allow the
 # old prefix. Uncomment, replace <old-name>, and set SWARM_LEGACY_NAME on the hub.

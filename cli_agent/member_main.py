@@ -22,7 +22,10 @@ from typing import Mapping
 from cli_agent.direct_link import DirectLink, Transport
 from cli_agent.member_link import MemberLink
 from cli_agent.client import local_addresses
-from cli_agent.mqtt_messages import acks_topic, encode_hello, hello_topic
+from cli_agent.mqtt_messages import (
+    acks_topic, agent_from_say_topic, decode_record, encode_hello, hello_topic, is_swarm_message, say_subscription,
+    topic_kind,
+)
 from cli_agent.outbox import Outbox
 from cli_agent.swarm_topic import NoSwarmTopic, check_prefix, resolve
 from ltms_contract import load_key
@@ -129,21 +132,55 @@ def member_prefix(cfg: MemberConfig, lookup=None) -> tuple[str, str]:
     return resolve(None, None, lookup)
 
 
-def make_on_message(acks: "queue.Queue[bytes]"):
+def make_on_message(acks: "queue.Queue[bytes]", messages: "queue.Queue | None" = None):
+    """Acks go to ``acks``; swarm messages (#300) go to ``messages`` as (topic, payload)."""
     def on_message(client, userdata, msg) -> None:
         try:
-            acks.put(msg.payload)
+            if messages is not None and topic_kind(msg.topic) == "say":
+                messages.put((msg.topic, msg.payload))
+            else:
+                acks.put(msg.payload)
         except Exception:  # never raise on the MQTT thread
             logging.exception("Member: on_message failed")
 
     return on_message
 
 
-def make_on_connect(acks_topic_name: str, wanted: threading.Event, hello=None):
-    """``hello`` is an optional ``() -> (topic, payload)``: published on every connect (#216)."""
+def log_message(rec: dict) -> None:
+    """Default handler for swarm messages: log them. Behaviour code replaces this."""
+    to = ", ".join(rec.get("peers") or []) or "the swarm"
+    logging.info("Member: message from %s to %s: %s", rec["agent"], to, rec.get("summary"))
+
+
+def drain_messages(messages: "queue.Queue", name: str, prefix: str, handler=log_message) -> int:
+    """Decode and hand on every swarm message waiting (main thread only). Never raises."""
+    handled = 0
+    while True:
+        try:
+            topic, payload = messages.get_nowait()
+        except queue.Empty:
+            return handled
+        try:
+            agent = agent_from_say_topic(topic, prefix)
+            if agent == name:
+                continue  # our own message, echoed by the broker
+            rec = decode_record(payload, agent)
+            if not is_swarm_message(rec):
+                raise ValueError("not a swarm message")
+            handler(rec)
+            handled += 1
+        except Exception as exc:  # noqa: BLE001 - a bad message or handler must not stop the member
+            logging.warning("Member: ignored message on %s: %s", topic, exc)
+
+
+def make_on_connect(acks_topic_name: str, wanted: threading.Event, hello=None, say_sub: str | None = None):
+    """``hello`` is an optional ``() -> (topic, payload)``: published on every connect (#216).
+    ``say_sub``: the swarm's messages to subscribe to (#300)."""
     def on_connect(client, userdata, flags, reason_code, properties) -> None:
         try:
             client.subscribe(acks_topic_name, qos=1)
+            if say_sub:
+                client.subscribe(say_sub, qos=1)
             wanted.set()
             if hello is not None:
                 topic, payload = hello()
@@ -225,7 +262,8 @@ def main() -> None:
             network = []
         return hello_topic(name, prefix), encode_hello(name, network)
 
-    connected_cb = make_on_connect(acks_topic(name, prefix), resend_wanted, hello)
+    messages: "queue.Queue" = queue.Queue()
+    connected_cb = make_on_connect(acks_topic(name, prefix), resend_wanted, hello, say_subscription(prefix))
 
     def on_connect(client, userdata, flags, reason_code, properties) -> None:
         transport.on_connect()
@@ -238,7 +276,7 @@ def main() -> None:
     if use_mqtt:
         mqtt_client.on_connect = on_connect
         mqtt_client.on_disconnect = on_disconnect
-        mqtt_client.on_message = make_on_message(acks)
+        mqtt_client.on_message = make_on_message(acks, messages)
         if cfg.mqtt_username is not None:
             mqtt_client.username_pw_set(cfg.mqtt_username, cfg.mqtt_password)
         mqtt_client.connect_async(cfg.mqtt_host, cfg.mqtt_port)
@@ -258,6 +296,7 @@ def main() -> None:
     try:
         while running:
             drain_acks(link, acks)
+            drain_messages(messages, name, prefix)
             if resend_wanted.is_set():
                 resend_wanted.clear()
                 link.resend_pending()

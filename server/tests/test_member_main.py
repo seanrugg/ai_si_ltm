@@ -213,3 +213,49 @@ def test_member_needs_some_way_to_find_its_topic():
     cfg = load_config({"LTMS_KEY_PATH": "k.json", "LTMS_SERVER": "http://x"})
     with pytest.raises(NoSwarmTopic):
         member_prefix(cfg, lambda: None)  # a free agent, or LTMS unreachable
+
+
+# --- swarm messages (#300) ---
+def test_member_receives_swarm_messages_but_not_its_own(tmp_path):
+    import queue
+    from cli_agent.member_link import MemberLink
+    from cli_agent.member_main import drain_messages, make_on_message
+    from cli_agent.outbox import Outbox
+    from ltms_contract import generate_key
+
+    published = []
+    other = MemberLink("vector", generate_key(), Outbox(tmp_path / "v.db"), tmp_path / "v.json",
+                       lambda t, p, retain=False: published.append((t, p)), "sw-1a2b3c4d")
+    other.send_message("hello swarm")
+    mine = MemberLink("z3-r0", generate_key(), Outbox(tmp_path / "z.db"), tmp_path / "z.json",
+                      lambda t, p, retain=False: published.append((t, p)), "sw-1a2b3c4d")
+    mine.send_message("talking to myself")
+
+    acks, messages = queue.Queue(), queue.Queue()
+    on_message = make_on_message(acks, messages)
+
+    class Msg:
+        def __init__(self, topic, payload):
+            self.topic, self.payload = topic, payload
+    for topic, payload in published:
+        on_message(None, None, Msg(topic, payload))
+    on_message(None, None, Msg("sw-1a2b3c4d/z3-r0/acks", b'{"last_ack_seq": 0}'))
+    on_message(None, None, Msg("sw-1a2b3c4d/rogue/say", b"not json"))
+    assert acks.qsize() == 1
+
+    got = []
+    assert drain_messages(messages, "z3-r0", "sw-1a2b3c4d", got.append) == 1
+    assert [r["summary"] for r in got] == ["hello swarm"] and got[0]["agent"] == "vector"
+
+
+def test_send_message_validates_text(tmp_path):
+    from cli_agent.member_link import MemberLink
+    from cli_agent.outbox import Outbox
+    from ltms_contract import generate_key
+    link = MemberLink("z3-r0", generate_key(), Outbox(tmp_path / "z.db"), tmp_path / "z.json",
+                      lambda *a, **k: None, "sw-1a2b3c4d")
+    for bad in ("", "x" * 501):
+        with pytest.raises(ValueError):
+            link.send_message(bad)
+    rec = link.send_message("to two", to="vector")
+    assert rec["peers"] == ["vector"]

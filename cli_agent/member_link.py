@@ -12,7 +12,9 @@ import logging
 import os
 from pathlib import Path
 
-from cli_agent.mqtt_messages import decode_ack, encode_record, records_topic
+from cli_agent.mqtt_messages import (
+    MAX_MESSAGE_SUMMARY, SWARM_MESSAGE_TAG, decode_ack, encode_record, records_topic, say_topic,
+)
 from cli_agent.outbox import Outbox
 from ltms_contract import GENESIS_HASH, build_record
 
@@ -59,6 +61,31 @@ class MemberLink:
     def append(
         self, type: str, *, payload: dict | None = None, ts: str | None = None, **header
     ) -> dict:
+        rec = self._sign_and_store(type, payload=payload, ts=ts, **header)
+        self._send(records_topic(self._name, self._swarm), rec)
+        return rec
+
+    def send_message(self, text: str, *, to=None, reply_to: str | None = None,
+                     payload: dict | None = None) -> dict:
+        """Say something to the swarm (#300): a signed ``communication`` record on the say topic.
+
+        ``to``: recipient member names (omit for the whole swarm). ``reply_to``:
+        ``"agent:seq"`` of the message this answers. The hub forwards it to LTMS like a
+        record; until LTMS acks it, it stays in the outbox and is resent as a record.
+        """
+        if not isinstance(text, str) or not text or len(text) > MAX_MESSAGE_SUMMARY:
+            raise ValueError(f"a swarm message needs text of 1..{MAX_MESSAGE_SUMMARY} characters")
+        header = {"summary": text, "tags": [SWARM_MESSAGE_TAG]}
+        if to:
+            header["peers"] = [to] if isinstance(to, str) else list(to)
+        if reply_to:
+            header["refs"] = {"reply_to": reply_to}
+        rec = self._sign_and_store("communication", payload=payload, **header)
+        self._send(say_topic(self._name, self._swarm), rec)
+        return rec
+
+    def _sign_and_store(self, type: str, *, payload: dict | None = None, ts: str | None = None,
+                        **header) -> dict:
         head = self.head
         rec = build_record(
             self._signing_key,
@@ -80,8 +107,9 @@ class MemberLink:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self._head, f)
         os.replace(tmp, self._state_path)
+        return rec
 
-        topic = records_topic(self._name, self._swarm)
+    def _send(self, topic: str, rec: dict) -> None:
         try:
             self._publish(topic, encode_record(rec))
         except Exception:  # keep the record in the outbox for resend_pending
@@ -90,7 +118,6 @@ class MemberLink:
                 self._name,
                 rec["seq"],
             )
-        return rec
 
     def on_ack(self, payload: bytes) -> int:
         head = decode_ack(payload)  # ValueError propagates to the caller
