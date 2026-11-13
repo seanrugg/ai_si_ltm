@@ -1,0 +1,20 @@
+[Unit]
+Description=LTMS robot sidecar (#312)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=robot-sidecar
+EnvironmentFile=/etc/robot-sidecar/sidecar.env
+WorkingDirectory=/opt/ai_si_ltm
+Environment=PYTHONPATH=/opt/ai_si_ltm
+ExecStart=/opt/ai_si_ltm/.venv/bin/python examples/robot-sidecar/sidecar.py
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/robot-sidecar
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target

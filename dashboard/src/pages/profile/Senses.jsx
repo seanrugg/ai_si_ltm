@@ -6,6 +6,7 @@ import { relativeTime } from "../../lib/format.js";
 import { sparkPoints } from "../../lib/profile.js";
 import { category } from "../../lib/visual.js";
 import { memberWithRole } from "../Profile.jsx";
+import MachineHealth from "./MachineHealth.jsx";
 
 function Spark({ series, label }) {
   const sense = category("sense");
@@ -23,7 +24,16 @@ function reading(last) {
   return `${v.length > 40 ? `${v.slice(0, 40)}…` : v} · ${relativeTime(last.ts)}`;
 }
 
-export default function Senses({ subject, name, range, members, swarms }) {
+export default function Senses(props) {
+  return (
+    <>
+      {props.subject === "member" && <MachineHealth name={props.name} />}
+      <SensorTable {...props} />
+    </>
+  );
+}
+
+function SensorTable({ subject, name, range, members, swarms }) {
   const senses = useApi("/admin/profile/senses", { [subject]: name, hours: range.hours });
   if (senses.loading && !senses.data) return <Loading what="Loading sensors" />;
   if (senses.error) return <ErrorNote error={senses.error} onRetry={senses.reload} />;
