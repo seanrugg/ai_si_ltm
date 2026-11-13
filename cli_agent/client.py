@@ -249,6 +249,15 @@ class LTMSClient:
         """
         return self._call("POST", "/api/records", json={"records": records})
 
+    def pings(self) -> list[str]:
+        """Pending admin pings (#356): this member's name if it was pinged, plus (for a hub)
+        pinged members of its swarm. Fetching marks them delivered. Never raises."""
+        try:
+            return list(self._call("GET", "/api/members/me/pings").get("pings") or [])
+        except Exception as exc:  # noqa: BLE001 - a missed ping is retried by the admin
+            log.warning("pings failed: %s", exc)
+            return []
+
     def swarm(self) -> dict | None:
         """This member's swarm (#292): ``{"id", "topic_id", "name", "role"}``, or None.
 

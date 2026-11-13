@@ -18,7 +18,7 @@ from cli_agent.client import LTMSClient
 from cli_agent.hub import HeartbeatTimer, Hub
 from cli_agent.member_link import MemberLink
 from cli_agent.swarm_topic import check_prefix, resolve
-from cli_agent.mqtt_messages import say_subscription, topic_kind
+from cli_agent.mqtt_messages import ping_topic, say_subscription, topic_kind
 from cli_agent.outbox import Outbox
 from ltms_contract import load_key
 
@@ -35,7 +35,8 @@ class HubConfig:
     swarm: str | None          # SWARM                (deprecated: the swarm's name as topic prefix)
     tick_seconds: float        # TICK_SECONDS         (default 10.0; must be > 0)
     max_msgs_per_second: int = 10      # HUB_MAX_MSGS_PER_SECOND (swarm messages per member, #300)
-    heartbeat_seconds: float = 300.0  # HUB_HEARTBEAT_SECONDS (default 300; must be > 0)
+    heartbeat_seconds: float = 43200.0  # HUB_HEARTBEAT_SECONDS (default 43200, twice daily; must be > 0, #356)
+    ping_poll_seconds: float = 30.0   # PING_POLL_SECONDS: check LTMS for admin pings (#356)
     state_path: str = "hub-head.json"  # HUB_STATE_PATH (default: hub-head.json beside the outbox)
     swarm_topic_id: str | None = None  # SWARM_TOPIC_ID (preferred; else looked up from LTMS, #293)
     legacy_name: str | None = None     # SWARM_LEGACY_NAME (migration: also serve <name>/+/...)
@@ -92,11 +93,18 @@ def load_config(env: Mapping[str, str]) -> HubConfig:
         raise ValueError("HUB_MAX_MSGS_PER_SECOND must be > 0")
 
     try:
-        heartbeat_seconds = float(env.get("HUB_HEARTBEAT_SECONDS", "300"))
+        heartbeat_seconds = float(env.get("HUB_HEARTBEAT_SECONDS", "43200"))
     except (TypeError, ValueError):
         raise ValueError("HUB_HEARTBEAT_SECONDS must be a number") from None
     if heartbeat_seconds <= 0:
         raise ValueError("HUB_HEARTBEAT_SECONDS must be > 0")
+
+    try:
+        ping_poll_seconds = float(env.get("PING_POLL_SECONDS", "30"))
+    except (TypeError, ValueError):
+        raise ValueError("PING_POLL_SECONDS must be a number") from None
+    if ping_poll_seconds <= 0:
+        raise ValueError("PING_POLL_SECONDS must be > 0")
 
     state_path = env.get("HUB_STATE_PATH") or os.path.join(os.path.dirname(outbox_path), "hub-head.json")
 
@@ -125,6 +133,7 @@ def load_config(env: Mapping[str, str]) -> HubConfig:
         swarm=swarm,
         tick_seconds=tick_seconds,
         heartbeat_seconds=heartbeat_seconds,
+        ping_poll_seconds=ping_poll_seconds,
         state_path=state_path,
         max_msgs_per_second=max_msgs,
         swarm_topic_id=swarm_topic_id,
@@ -135,6 +144,18 @@ def load_config(env: Mapping[str, str]) -> HubConfig:
         health_services=env.get("HUB_HEALTH_SERVICES", ""),
         health_state_path=health_state_path,
     )
+
+
+def deliver_pings(hub, own, client, started_at: float, now: float) -> list[str]:
+    """Admin pings (#356): answer the hub's own with a heartbeat; pass members' on over MQTT."""
+    names = client.pings()
+    for agent in names:
+        if agent == hub.name:
+            hub.heartbeat(own, started_at, now, ping=True)
+        else:
+            for prefix in hub.prefixes:
+                hub.publish(ping_topic(agent, prefix), b"", retain=False)
+    return names
 
 
 def make_health_monitor(cfg: HubConfig, now: float, root: str = "/"):
@@ -247,6 +268,7 @@ def main() -> None:
     own = MemberLink(name, key, outbox, cfg.state_path, lambda *a, **k: None, prefix)
     started_at = time.monotonic()
     beat = HeartbeatTimer(cfg.heartbeat_seconds, started_at)
+    next_ping_poll = started_at
     health = make_health_monitor(cfg, started_at)
     if health is not None:
         logging.info("Hub: machine health every %ss (state file %s)", int(cfg.health_seconds), cfg.health_state_path)
@@ -269,6 +291,10 @@ def main() -> None:
     try:
         while running:
             now = time.monotonic()
+            if now >= next_ping_poll:
+                next_ping_poll = now + cfg.ping_poll_seconds
+                for agent in deliver_pings(hub, own, ltms_client, started_at, now):
+                    logging.info("Hub: admin ping for %s %s", agent, "answered" if agent == hub.name else "passed on")
             if beat.due(now):
                 hub.heartbeat(own, started_at, now)
                 current = ltms_client.swarm()  # never raises; keeps the log in human terms
