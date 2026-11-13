@@ -119,9 +119,9 @@ export function KeyOnceDialog({ swarmName, swarmId, keyString, onDone }) {
   );
 }
 
-function CreateSwarm({ onCreated }) {
+export function CreateSwarm({ onCreated, initialName = "" }) {
   const [mode, setMode] = useState("generate"); // "generate" | "existing"
-  const [name, setName] = useState("");
+  const [name, setName] = useState(initialName);
   const [publicKey, setPublicKey] = useState("");
   const [description, setDescription] = useState("");
   const [home, setHome] = useState(false);

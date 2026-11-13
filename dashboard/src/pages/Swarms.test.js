@@ -95,7 +95,7 @@ describe("one-time key panel", () => {
 });
 
 describe("the root key never reaches storage", () => {
-  it.each(["../lib/swarmKey.js", "./Swarms.jsx", "./profile/Manage.jsx"])("%s uses no web storage or console", (file) => {
+  it.each(["../lib/swarmKey.js", "./Swarms.jsx", "./profile/Manage.jsx", "../components/GuidedSetup.jsx"])("%s uses no web storage or console", (file) => {
     const src = readFileSync(new URL(file, import.meta.url), "utf8");
     expect(src).not.toMatch(/localStorage|sessionStorage|indexedDB|console\./);
   });
