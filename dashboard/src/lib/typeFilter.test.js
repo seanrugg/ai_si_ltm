@@ -8,7 +8,8 @@ describe("parseTypes", () => {
       expect(set.size).toBe(DEFAULT_TYPES.length);
       expect(set.has("sensed")).toBe(false);
       expect(set.has("perception")).toBe(true);
-      expect(ALL_TYPES.filter((t) => t !== "sensed").every((t) => set.has(t))).toBe(true);
+      expect(set.has("self_report")).toBe(false);
+      expect(ALL_TYPES.filter((t) => t !== "sensed" && t !== "self_report").every((t) => set.has(t))).toBe(true);
     }
   });
 

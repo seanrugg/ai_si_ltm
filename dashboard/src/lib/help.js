@@ -68,3 +68,11 @@ export const ROOT_KEY_FORMAT =
   "Save and paste the entire line, label included.";
 export const ROOT_KEY_PASTE =
   "A mistyped or incomplete key is rejected here, before anything is signed or sent. Nothing changes; paste it again.";
+
+// What each count means (#348), so no number looks made up.
+export const COUNT_SENSE = "Sensed records (a sensor reading the world: camera, IMU, microphone) plus perceptions drawn from them. Each is signed by the member that made it. Heartbeats and health reports are not counted here.";
+export const COUNT_ACT = "Thoughts, decisions, actions and events this member signed. The note shows how many actions reported success.";
+export const COUNT_COMM = "Messages this member sent or received, including swarm messages relayed by a hub.";
+export const COUNT_LEARN = "Lessons and policies: what this member learned from outcomes, and the rules it holds.";
+export const COUNT_SELF_REPORT = "The member reporting on itself: heartbeat, uptime, members seen, temperature, memory. Not a perception of the world, so it is counted apart from Sensing.";
+export const COUNT_HEARTBEAT = "A hub sends a heartbeat every few minutes (HUB_HEARTBEAT_SECONDS) so LTMS knows it is alive: uptime, members seen, dropped messages. It's a self-report.";

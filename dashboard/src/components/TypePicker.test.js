@@ -46,12 +46,13 @@ describe("TypePicker", () => {
     const onChange = renderPicker("", vi.fn());
     fireEvent.click(button("All except sensor data"));
     fireEvent.click(checkbox("sensor data"));
-    expect(onChange).toHaveBeenLastCalledWith(ALL_SERIALIZED);
+    // Self-reports (heartbeat, health) stay hidden until chosen on their own (#348).
+    expect(onChange).toHaveBeenLastCalledWith(ALL_TYPES.filter((t) => t !== "self_report").join(","));
   });
 
   it("clears a fully selected group from its checkbox", () => {
-    const onChange = renderPicker("sensed,perception,thought", vi.fn());
-    fireEvent.click(button("3 types"));
+    const onChange = renderPicker("sensed,perception,self_report,thought", vi.fn());
+    fireEvent.click(button("4 types"));
     fireEvent.click(checkbox("Sensing"));
     expect(onChange).toHaveBeenLastCalledWith("thought");
   });
@@ -60,7 +61,7 @@ describe("TypePicker", () => {
     const onChange = renderPicker("thought", vi.fn());
     fireEvent.click(button("thoughts"));
     fireEvent.click(checkbox("Sensing"));
-    expect(onChange).toHaveBeenLastCalledWith("sensed,perception,thought");
+    expect(onChange).toHaveBeenLastCalledWith("sensed,perception,self_report,thought");
   });
 
   it("shows a mixed group checkbox when partly selected", () => {
