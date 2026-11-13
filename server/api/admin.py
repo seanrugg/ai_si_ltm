@@ -157,6 +157,41 @@ async def set_cognition(member_id: str, request: Request, body: dict, admin: Adm
         return enrollment.member_to_dict(m)
 
 
+# Spec sheet (#332): hardware, models and software, with admin overrides.
+async def _member_by_id(session, member_id: str) -> Member:
+    m = await session.get(Member, _uuid(member_id))
+    if m is None:
+        raise ServiceError(404, "not_found", "no such member")
+    return m
+
+
+@router.get("/admin/members/{member_id}/specs")
+async def get_specs(member_id: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    from server.services import specs
+
+    async with transaction(request) as session:
+        return {"specs": specs.resolve(await _member_by_id(session, member_id))}
+
+
+@router.patch("/admin/members/{member_id}/specs")
+async def patch_specs(member_id: str, request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    """Set override fields, or clear them with null. Never edits what the device reported."""
+    from server.services import specs
+
+    async with transaction(request) as session:
+        m = await _member_by_id(session, member_id)
+        return {"specs": await specs.admin_patch(session, m, body, admin=f"admin:{admin.username}")}
+
+
+@router.get("/admin/members/{member_id}/specs/history")
+async def specs_history(member_id: str, request: Request, admin: AdminAuth = ADMIN,
+                        limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0)) -> dict:
+    from server.services import specs
+
+    async with transaction(request) as session:
+        return await specs.history(session, await _member_by_id(session, member_id), limit=limit, offset=offset)
+
+
 @router.post("/admin/members/{member_id}/cognition/observe")
 async def observe_cognition(member_id: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
     """Measure where a robot's decisions are made, now (#199). Other kinds: 422."""
