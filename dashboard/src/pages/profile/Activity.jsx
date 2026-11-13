@@ -1,5 +1,7 @@
 // Profile Activity tab: the chain from sensing to learning (issue #197).
 import { useState } from "react";
+import HelpTip from "../../components/HelpTip.jsx";
+import { COUNT_SELF_REPORT } from "../../lib/help.js";
 import { Link } from "react-router-dom";
 import { useApi } from "../../api/useApi.js";
 import { CategoryLine } from "../../components/visual.jsx";
@@ -8,7 +10,7 @@ import { category } from "../../lib/visual.js";
 
 export const STEPS = [
   { key: "sensed", label: "Sensed", cat: "sense", link: "raw sensor data",
-    note: "Most sensed records are never referenced: they are context. Senses shows which perceptions each sensor fed." },
+    note: "Readings of the world from a sensor. Heartbeats and health reports are self-reports, counted separately below. Most sensed records are never referenced: they are context. Senses shows which perceptions each sensor fed." },
   { key: "perceived", label: "Perceived", cat: "sense", link: "derived_from sensed",
     note: "Perceptions with no sensed reference may be guesses." },
   { key: "reasoned", label: "Reasoned", cat: "act", link: "because perceived",
@@ -122,6 +124,10 @@ export default function Activity({ summary, subject, name, range }) {
           ))}
         </div>
         <p className="mt-3 text-sm" aria-live="polite">{current.note}</p>
+        <p className="mt-2 flex items-center gap-1 text-xs text-paper-muted">
+          Self-reports (heartbeat, health), not part of this chain: {(summary.flow?.self_report ?? 0).toLocaleString()}
+          <HelpTip id="chain-self-report" label="What a self-report is">{COUNT_SELF_REPORT}</HelpTip>
+        </p>
       </section>
 
       <section aria-labelledby="outcomes-h" className="mb-6">

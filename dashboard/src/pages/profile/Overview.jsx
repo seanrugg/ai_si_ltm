@@ -1,9 +1,20 @@
 // Profile Overview tab: category tiles, activity trend, top peers (issue #192).
 import { useState } from "react";
+import HelpTip from "../../components/HelpTip.jsx";
+import { COUNT_ACT, COUNT_COMM, COUNT_LEARN, COUNT_SELF_REPORT, COUNT_SENSE } from "../../lib/help.js";
 import { CategoryLine, MemberMark } from "../../components/visual.jsx";
 import { bucketIndex, dayTotal, niceMax, percent, stackDay, wipesOf } from "../../lib/profile.js";
 import { CATEGORIES, NEUTRAL } from "../../lib/visual.js";
 import { memberWithRole } from "../Profile.jsx";
+
+const HELP = { sense: COUNT_SENSE, act: COUNT_ACT, comm: COUNT_COMM, learn: COUNT_LEARN };
+
+/** Self-reports (heartbeat, health) are counted apart from sensing (#348). */
+export function selfReportNote(summary) {
+  const n = summary?.flow?.self_report || 0;
+  if (!n) return null;
+  return `${n.toLocaleString()} self-report${n === 1 ? "" : "s"} (heartbeat, health) not counted here`;
+}
 
 const NOTES = {
   sense: () => "sensed and perceived records",
@@ -20,9 +31,16 @@ function Tiles({ summary }) {
           <div className="flex items-center gap-2 text-sm">
             <CategoryLine category={c} />
             <span>{c.label}</span>
+            <HelpTip id={`tile-${c.key}`} label={`What ${c.label} counts`}>{HELP[c.key]}</HelpTip>
           </div>
           <p className="mt-1 text-2xl font-bold">{summary.categories[c.key].toLocaleString()}</p>
           <p className="text-xs text-paper-muted">{NOTES[c.key](summary)}</p>
+          {c.key === "sense" && selfReportNote(summary) && (
+            <p className="flex items-center gap-1 text-xs text-paper-muted">
+              {selfReportNote(summary)}
+              <HelpTip id="tile-self-report" label="What a self-report is">{COUNT_SELF_REPORT}</HelpTip>
+            </p>
+          )}
         </li>
       ))}
     </ul>

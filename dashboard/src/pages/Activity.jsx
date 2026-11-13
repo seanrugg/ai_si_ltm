@@ -185,7 +185,7 @@ export default function Activity() {
               onChange={() => setIncludeTelemetry((x) => !x)}
               className="accent-led"
             />
-            Include telemetry
+            Include telemetry (heartbeats, health, sensor readings)
           </label>
           <label className="flex items-center gap-2 text-sm text-paper-muted cursor-pointer">
             <input
