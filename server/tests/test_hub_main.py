@@ -171,7 +171,7 @@ def test_make_publish_always_uses_qos_one():
 # --- hub heartbeat (#281) ---
 def test_load_config_heartbeat_defaults_and_state_path():
     cfg = load_config(base_env())
-    assert cfg.heartbeat_seconds == 300.0
+    assert cfg.heartbeat_seconds == 43200.0  # twice daily (#356)
     assert cfg.state_path == "hub-head.json"
     cfg = load_config({**base_env(), "HUB_OUTBOX_PATH": "/var/lib/hub/hub-outbox.db"})
     assert cfg.state_path == "/var/lib/hub/hub-head.json"  # beside the outbox by default

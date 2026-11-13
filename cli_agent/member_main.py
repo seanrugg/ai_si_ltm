@@ -23,8 +23,8 @@ from cli_agent.direct_link import DirectLink, Transport
 from cli_agent.member_link import MemberLink
 from cli_agent.client import local_addresses
 from cli_agent.mqtt_messages import (
-    acks_topic, agent_from_say_topic, decode_record, encode_hello, hello_topic, is_swarm_message, say_subscription,
-    topic_kind,
+    acks_topic, agent_from_say_topic, decode_record, encode_hello, hello_topic, is_swarm_message, ping_topic,
+    say_subscription, topic_kind,
 )
 from cli_agent.outbox import Outbox
 from cli_agent.swarm_topic import NoSwarmTopic, check_prefix, resolve
@@ -41,11 +41,13 @@ class MemberConfig:
     mqtt_username: str | None  # MQTT_USERNAME
     mqtt_password: str | None  # MQTT_PASSWORD
     swarm: str | None          # SWARM                (deprecated: the swarm's name as topic prefix)
-    heartbeat_seconds: float   # HEARTBEAT_SECONDS    (default 60.0; must be > 0)
+    heartbeat_seconds: float   # HEARTBEAT_SECONDS    (default 43200, twice daily; must be > 0, #356)
     swarm_topic_id: str | None = None  # SWARM_TOPIC_ID (preferred, #293)
     ltms_server: str | None = None     # LTMS_SERVER    (optional: topic lookup, and direct mode)
     transport: str = "auto"            # TRANSPORT      mqtt | direct | auto (#297)
     fallback_after_seconds: float = 120.0  # FALLBACK_AFTER_SECONDS (auto: broker down this long -> direct)
+    resend_seconds: float = 60.0       # RESEND_SECONDS: resend unacked records this often (#356)
+    ping_poll_seconds: float = 30.0    # PING_POLL_SECONDS: with LTMS_SERVER, check for admin pings (#356)
 
 
 def load_config(env: Mapping[str, str]) -> MemberConfig:
@@ -89,11 +91,19 @@ def load_config(env: Mapping[str, str]) -> MemberConfig:
             check_prefix(value, setting)
 
     try:
-        heartbeat_seconds = float(env.get("HEARTBEAT_SECONDS", "60.0"))
+        heartbeat_seconds = float(env.get("HEARTBEAT_SECONDS", "43200"))
     except (TypeError, ValueError):
         raise ValueError("HEARTBEAT_SECONDS must be a number")
     if heartbeat_seconds <= 0:
         raise ValueError("HEARTBEAT_SECONDS must be > 0")
+    timers = {}
+    for setting, default in (("RESEND_SECONDS", "60"), ("PING_POLL_SECONDS", "30")):
+        try:
+            timers[setting] = float(env.get(setting, default))
+        except (TypeError, ValueError):
+            raise ValueError(f"{setting} must be a number") from None
+        if timers[setting] <= 0:
+            raise ValueError(f"{setting} must be > 0")
 
     return MemberConfig(
         key_path=key_path,
@@ -109,6 +119,8 @@ def load_config(env: Mapping[str, str]) -> MemberConfig:
         ltms_server=ltms_server,
         transport=transport,
         fallback_after_seconds=fallback_after,
+        resend_seconds=timers["RESEND_SECONDS"],
+        ping_poll_seconds=timers["PING_POLL_SECONDS"],
     )
 
 
@@ -132,11 +144,15 @@ def member_prefix(cfg: MemberConfig, lookup=None) -> tuple[str, str]:
     return resolve(None, None, lookup)
 
 
-def make_on_message(acks: "queue.Queue[bytes]", messages: "queue.Queue | None" = None):
-    """Acks go to ``acks``; swarm messages (#300) go to ``messages`` as (topic, payload)."""
+def make_on_message(acks: "queue.Queue[bytes]", messages: "queue.Queue | None" = None,
+                    pinged: "threading.Event | None" = None):
+    """Acks go to ``acks``; swarm messages (#300) go to ``messages`` as (topic, payload);
+    an admin ping (#356) sets ``pinged``."""
     def on_message(client, userdata, msg) -> None:
         try:
-            if messages is not None and topic_kind(msg.topic) == "say":
+            if pinged is not None and topic_kind(msg.topic) == "ping":
+                pinged.set()
+            elif messages is not None and topic_kind(msg.topic) == "say":
                 messages.put((msg.topic, msg.payload))
             else:
                 acks.put(msg.payload)
@@ -173,12 +189,15 @@ def drain_messages(messages: "queue.Queue", name: str, prefix: str, handler=log_
             logging.warning("Member: ignored message on %s: %s", topic, exc)
 
 
-def make_on_connect(acks_topic_name: str, wanted: threading.Event, hello=None, say_sub: str | None = None):
+def make_on_connect(acks_topic_name: str, wanted: threading.Event, hello=None, say_sub: str | None = None,
+                    ping_sub: str | None = None):
     """``hello`` is an optional ``() -> (topic, payload)``: published on every connect (#216).
-    ``say_sub``: the swarm's messages to subscribe to (#300)."""
+    ``say_sub``: the swarm's messages to subscribe to (#300). ``ping_sub``: admin pings (#356)."""
     def on_connect(client, userdata, flags, reason_code, properties) -> None:
         try:
             client.subscribe(acks_topic_name, qos=1)
+            if ping_sub:
+                client.subscribe(ping_sub, qos=1)
             if say_sub:
                 client.subscribe(say_sub, qos=1)
             wanted.set()
@@ -210,16 +229,24 @@ def drain_acks(link, acks: "queue.Queue[bytes]") -> int:
     return pruned
 
 
-def heartbeat(link, started_at: float, now: float) -> dict:
+def heartbeat(link, started_at: float, now: float, ping: bool = False) -> dict:
+    """A self-report that this member is alive. ``ping``: answering an admin's ping (#356)."""
+    payload = {"uptime_s": round(now - started_at, 1)}
+    if ping:
+        payload["ping"] = True
     return link.append(
         "perception",
-        summary="heartbeat",
+        summary="heartbeat (ping)" if ping else "heartbeat",
         tags=["telemetry", "internal"],
-        payload={"uptime_s": round(now - started_at, 1)},
+        payload=payload,
     )
 
 
-def main() -> None:
+def main(poll=None) -> None:
+    """Run the member. ``poll(link, now)``, if given, is called once a loop (about every
+    second) so a program built on the member (a robot sidecar, #312) can sign its own
+    records into the same chain and transport. An exception in it is logged, never fatal.
+    """
     # paho is imported here so the rest of the module imports without it.
     import paho.mqtt.client as mqtt
 
@@ -263,7 +290,9 @@ def main() -> None:
         return hello_topic(name, prefix), encode_hello(name, network)
 
     messages: "queue.Queue" = queue.Queue()
-    connected_cb = make_on_connect(acks_topic(name, prefix), resend_wanted, hello, say_subscription(prefix))
+    pinged = threading.Event()
+    connected_cb = make_on_connect(acks_topic(name, prefix), resend_wanted, hello, say_subscription(prefix),
+                                   ping_topic(name, prefix))
 
     def on_connect(client, userdata, flags, reason_code, properties) -> None:
         transport.on_connect()
@@ -276,7 +305,7 @@ def main() -> None:
     if use_mqtt:
         mqtt_client.on_connect = on_connect
         mqtt_client.on_disconnect = on_disconnect
-        mqtt_client.on_message = make_on_message(acks, messages)
+        mqtt_client.on_message = make_on_message(acks, messages, pinged)
         if cfg.mqtt_username is not None:
             mqtt_client.username_pw_set(cfg.mqtt_username, cfg.mqtt_password)
         mqtt_client.connect_async(cfg.mqtt_host, cfg.mqtt_port)
@@ -293,6 +322,8 @@ def main() -> None:
 
     started_at = time.monotonic()
     next_heartbeat = started_at + cfg.heartbeat_seconds
+    next_resend = started_at + cfg.resend_seconds
+    next_ping_poll = started_at
     try:
         while running:
             drain_acks(link, acks)
@@ -301,12 +332,27 @@ def main() -> None:
                 resend_wanted.clear()
                 link.resend_pending()
             now = time.monotonic()
-            if now >= next_heartbeat:
-                # Also resend anything unacked: covers a hub restart while we stayed
+            if now >= next_resend:
+                # Resend anything unacked: covers a hub restart while we stayed
                 # connected. Duplicates are harmless (hub and LTMS both dedupe).
                 link.resend_pending()
+                next_resend = now + cfg.resend_seconds
+            if ltms is not None and now >= next_ping_poll:
+                next_ping_poll = now + cfg.ping_poll_seconds
+                if name in ltms.pings():
+                    pinged.set()
+            if pinged.is_set():
+                pinged.clear()
+                heartbeat(link, started_at, now, ping=True)
+                logging.info("Member: answered an admin ping")
+            elif now >= next_heartbeat:
                 heartbeat(link, started_at, now)
                 next_heartbeat = now + cfg.heartbeat_seconds
+            if poll is not None:
+                try:
+                    poll(link, now)
+                except Exception:  # noqa: BLE001 - a source's bug must not stop the member
+                    logging.exception("Member: poll failed")
             if direct is not None and transport.choose(time.monotonic()) == "direct":
                 direct.flush()
             # Sleep up to 1 second, waking early if asked to stop.
