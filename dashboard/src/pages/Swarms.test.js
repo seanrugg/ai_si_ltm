@@ -120,3 +120,22 @@ describe("wipe swarm memory", () => {
     expect(screen.getByRole("button", { name: /Wipe 2 active members/ }).disabled).toBe(true);
   });
 });
+
+describe("swarm home location (#285)", () => {
+  it("suggests a city from a member's network estimate, never a declared one", async () => {
+    const { networkSuggestion } = await import("./Swarms.jsx");
+    const swarm = { name: "echo-base", members: [{ name: "a" }, { name: "b" }] };
+    const locations = { members: [
+      { name: "a", all: [{ source: "declared", label: "Lab", inherited_from: "swarm echo-base" }] },
+      { name: "b", all: [{ source: "network", label: "Stafford, VA", lat: 38.4, lon: -77.4 }] },
+      { name: "z", all: [{ source: "network", label: "Elsewhere" }] },
+    ] };
+    expect(networkSuggestion(swarm, locations)).toEqual({ label: "Stafford, VA", lat: 38.4, lon: -77.4 });
+    expect(networkSuggestion({ name: "x", members: [] }, locations)).toBeNull();
+  });
+
+  it("prompts for a home location when the swarm has none", () => {
+    const html = page();
+    expect(html).toContain("Set a home location: every member without its own location will use it.");
+  });
+});

@@ -300,7 +300,18 @@ function AppointHub({ swarm, allMembers, busy, act }) {
   );
 }
 
-function SwarmCard({ swarm, swarms, allMembers, location, onReload }) {
+/** A city estimate from a member's network address (#285), to pre-fill a swarm's home location. */
+export function networkSuggestion(swarm, locations) {
+  const names = new Set((swarm.members || []).map((m) => m.name));
+  for (const l of locations?.members || []) {
+    if (!names.has(l.name)) continue;
+    const net = (l.all || []).find((e) => e.source === "network" && e.label);
+    if (net) return { label: net.label, lat: net.lat ?? "", lon: net.lon ?? "" };
+  }
+  return null;
+}
+
+function SwarmCard({ swarm, swarms, allMembers, location, suggestion, onReload }) {
   const members = swarm.members || [];
   const revoked = swarm.status === "revoked";
   // allMembers is already filtered to active, so this counts who the wipe would reach.
@@ -357,7 +368,8 @@ function SwarmCard({ swarm, swarms, allMembers, location, onReload }) {
       </h2>
       <RenameSwarm name={swarm.name} onDone={onReload} />
       <LocationForm key={JSON.stringify(location)} subjectType="swarm" name={swarm.name} current={location}
-                    title="Home location" onDone={onReload} />
+                    title="Home location" suggestion={suggestion} onDone={onReload}
+                    prompt="Set a home location: every member without its own location will use it." />
       <p className="mb-3 text-xs text-paper-muted">
         <StatusBadge status={swarm.status} /> {swarm.home && <span className="ml-2">home swarm</span>}
         {swarm.description && <span className="ml-2">— {swarm.description}</span>}
@@ -482,6 +494,7 @@ export default function Swarms() {
       <ul className="panel" aria-label="Swarms">
         {swarms.map((s) => <SwarmCard key={s.id} swarm={s} swarms={swarms} allMembers={allMembers}
                                      location={locations.data?.swarms?.[s.name] ?? null}
+                                     suggestion={networkSuggestion(s, locations.data)}
                                      onReload={() => { reload(); locations.reload(); }} />)}
       </ul>
     </>

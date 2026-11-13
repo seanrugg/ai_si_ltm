@@ -5,6 +5,7 @@ import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import { ErrorNote, Loading, StatusBadge } from "../components/ui.jsx";
 import { Legend, MemberMark } from "../components/visual.jsx";
+import ProxiedBadge from "../components/ProxiedBadge.jsx";
 import { localTime, relativeTime } from "../lib/format.js";
 import { DEFAULT_TAB, RANGES, nextTab, rangeOf, swarmCount, tabOf, tabsFor } from "../lib/profile.js";
 import { KINDS, NEUTRAL, ROLES, kindOf, roleOf } from "../lib/visual.js";
@@ -161,7 +162,7 @@ export default function Profile({ subject }) {
           ? <MemberMark member={member || {}} size={44} />
           : <SwarmMark size={44} />}
         <div className="mr-4">
-          <h1 className="text-xl font-bold">{name}</h1>
+          <h1 className="text-xl font-bold">{name} {member?.proxied_by && <ProxiedBadge proxiedBy={member.proxied_by} />}</h1>
           <span className="text-sm text-paper-muted">
             {subject === "member"
               ? `${ROLES[role]?.label ?? "Free agent"} · ${KINDS[kind]?.label ?? ""}`

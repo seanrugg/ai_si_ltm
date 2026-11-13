@@ -111,6 +111,7 @@ CREATE TABLE members (
 	cognition_declared JSONB, 
 	cognition_observed JSONB, 
 	intended JSONB, 
+	proxied_by VARCHAR(128), 
 	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
 	PRIMARY KEY (id), 
 	CONSTRAINT ck_members_kind CHECK (kind IN ('robot', 'agent', 'assistant', 'relay')), 

@@ -16,6 +16,7 @@ class EnrollRequest(BaseModel):
     note: str | None = Field(None, max_length=1000)
     swarm: str | None = Field(None, max_length=64)
     invite: str | None = Field(None, max_length=128)
+    proxied_by: str | None = Field(None, max_length=128)  # key held by a sidecar on this host (#311)
     intended: dict | None = None  # {"swarm", "role"}: what it's for; shown to the admin, never granted (#295)
 
 

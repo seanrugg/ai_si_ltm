@@ -15,16 +15,23 @@ export function locationBody(draft) {
   return { label: draft.label.trim(), room: draft.room.trim() || null, lat: num(draft.lat), lon: num(draft.lon) };
 }
 
-export default function LocationForm({ subjectType, name, current, onDone, title }) {
+/**
+ * ``inherited``: a declared location this subject gets from its swarm (#285), shown when it has none of its own.
+ * ``suggestion``: a network estimate to pre-fill the form with; it is never saved without the admin pressing Save.
+ */
+export default function LocationForm({ subjectType, name, current, onDone, title, inherited, suggestion, prompt }) {
   const [open, setOpen] = useState(false);
+  const seed = current ?? suggestion ?? null;
   const [draft, setDraft] = useState({
-    label: current?.label ?? "", room: current?.room ?? "", lat: current?.lat ?? "", lon: current?.lon ?? "",
+    label: seed?.label ?? "", room: current?.room ?? "", lat: seed?.lat ?? "", lon: seed?.lon ?? "",
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const id = `loc-${subjectType}-${name}`;
   const path = `/admin/locations/${subjectType}/${encodeURIComponent(name)}`;
-  const shown = current ? [current.label, current.room].filter(Boolean).join(", ") : "not set";
+  const shown = current ? [current.label, current.room].filter(Boolean).join(", ")
+    : inherited ? `${[inherited.label, inherited.room].filter(Boolean).join(", ")} (from ${inherited.inherited_from})`
+      : "not set";
 
   async function send(method, body) {
     setBusy(true);
@@ -44,6 +51,7 @@ export default function LocationForm({ subjectType, name, current, onDone, title
   return (
     <div className="mt-2 text-sm">
       <span className="text-paper-muted">{title || "Location"}: <span className="text-paper">{shown}</span></span>
+      {!current && prompt && <span className="ml-2 text-xs text-paper-muted">{prompt}</span>}
       <button type="button" className="btn ml-2 py-0.5" aria-expanded={open} aria-controls={`${id}-form`}
               onClick={() => setOpen((v) => !v)}>{open ? "Cancel" : "Edit"}</button>
       {open && (
@@ -60,6 +68,11 @@ export default function LocationForm({ subjectType, name, current, onDone, title
           <button className="btn btn-primary" disabled={busy}>Save</button>
           {current && <button type="button" className="btn" disabled={busy} onClick={() => send("DELETE")}>Clear</button>}
           <HelpTip id={`${id}-help`} label="About locations">{LOCATION_HELP}</HelpTip>
+          {!current && suggestion && (
+            <p className="w-full text-xs text-warn">
+              Suggested from a member&apos;s network address ({suggestion.label}); check it before saving.
+            </p>
+          )}
           <p className="w-full text-xs text-paper-muted">Rooms group members in the Home view. Coordinates place the site on the globe.</p>
           <ErrorNote error={error} />
         </form>

@@ -9,6 +9,7 @@ import { EmptyState, ErrorNote, HashStrip, Loading, PageHeader, StatusBadge } fr
 import { localTime, plural, relativeTime } from "../lib/format.js";
 import { describeChange, HUB_WARNING, membershipChange } from "../lib/membership.js";
 import { KINDS, kindOf } from "../lib/visual.js";
+import ProxiedBadge from "../components/ProxiedBadge.jsx";
 
 const PERMISSIONS = [
   { id: "contribute", help: "Write records under its own name" },
@@ -130,6 +131,10 @@ function PendingCard({ m, selected, onToggle, onDone }) {
         <dt className="text-paper-muted">Public key (first 16 characters)</dt>
         <dd><HashStrip hash={m.public_key} label={m.public_key.slice(0, 16)} /></dd>
         {m.note && (<><dt className="text-paper-muted">Note</dt><dd>{m.note}</dd></>)}
+        {m.proxied_by && (<>
+          <dt className="text-paper-muted">Proxied</dt>
+          <dd>Its key is held by {m.proxied_by}</dd>
+        </>)}
         {m.intended?.role && m.intended?.swarm && (<>
           <dt className="text-paper-muted">Intended</dt>
           <dd>Wants to be the <strong>{m.intended.role}</strong> of <strong>{m.intended.swarm}</strong></dd>
@@ -296,7 +301,7 @@ export function CognitionControl({ m, onDone }) {
   );
 }
 
-function MemberRow({ m, swarm, swarms, location, onDone }) {
+function MemberRow({ m, swarm, swarms, location, inherited, onDone }) {
   const [mode, setMode] = useState(null); // null | "edit" | "revoke" | "wipe"
   const [reason, setReason] = useState("");
   const [confirmWipe, setConfirmWipe] = useState("");
@@ -349,6 +354,7 @@ function MemberRow({ m, swarm, swarms, location, onDone }) {
                 aria-label={`Profile of ${m.name}`}>{m.name}</Link>
           <Link to={`/?agent=${encodeURIComponent(m.name)}`} className="text-xs text-paper-muted underline hover:text-paper"
                 aria-label={`Timeline of ${m.name}`}>Timeline</Link>
+          <ProxiedBadge proxiedBy={m.proxied_by} />
         </span>
         <span><StatusBadge status={m.status} /></span>
         <span className="text-sm text-paper-muted">
@@ -379,7 +385,8 @@ function MemberRow({ m, swarm, swarms, location, onDone }) {
         <CognitionControl key={`${m.cognition?.source ?? ""}:${m.cognition?.value ?? ""}`} m={m} onDone={onDone} />
       )}
       {m.status === "active" && mode === null && (
-        <LocationForm key={JSON.stringify(location)} subjectType="member" name={m.name} current={location} onDone={onDone} />
+        <LocationForm key={JSON.stringify(location)} subjectType="member" name={m.name} current={location}
+                      inherited={inherited} onDone={onDone} />
       )}
       {mode === "edit" && (
         <PermissionEditor initial={m.permissions} initialScope={m.scope} saveLabel="Save permissions" busy={busy}
@@ -456,6 +463,8 @@ export default function Members() {
   const locations = useApi("/admin/locations");
   const declaredOf = (name) => (locations.data?.members || []).find((l) => l.name === name)?.all
     ?.find((e) => e.source === "declared" && !e.inherited_from) ?? null;
+  const inheritedOf = (name) => (locations.data?.members || []).find((l) => l.name === name)?.all
+    ?.find((e) => e.source === "declared" && e.inherited_from) ?? null;
   const [showPast, setShowPast] = useState(false);
   const [params, setParams] = useSearchParams();
   const [selected, setSelected] = useState(new Set());
@@ -665,7 +674,7 @@ export default function Members() {
             </select>
             {list.length ? (
               <ul className="panel mt-3">{list.map((m) => <MemberRow key={m.id} m={m} swarm={swarmOf.get(m.name)} swarms={swarmsData}
-                                                      location={declaredOf(m.name)} onDone={() => { reload(); locations.reload(); }} />)}</ul>
+                                                      location={declaredOf(m.name)} inherited={inheritedOf(m.name)} onDone={() => { reload(); locations.reload(); }} />)}</ul>
             ) : (
               <EmptyState title={emptyTitle}>{emptyBody}</EmptyState>
             )}

@@ -106,6 +106,26 @@ def _validate_intended(intended: dict | None) -> dict | None:
     return {"swarm": swarm, "role": role}
 
 
+def _validate_proxied_by(value: str | None) -> str | None:
+    """Who holds a proxied member's key (#311): free text, at most 128 characters; blank means not proxied."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value) > 128:
+        raise ServiceError(422, "bad_proxied_by", "proxied_by is text of at most 128 characters")
+    return value.strip() or None
+
+
+async def set_proxied_by(session: AsyncSession, member_id, *, admin: str, proxied_by: str | None) -> Member:
+    """Admin sets or clears who holds a member's key (#311). Audited."""
+    m = await get_member(session, member_id)
+    new = _validate_proxied_by(proxied_by)
+    old, m.proxied_by = m.proxied_by, new
+    session.add(AuditLog(member_id=m.id, actor=f"admin:{admin}", action="member_proxied",
+                         detail={"old": old, "new": new}))
+    await session.flush()
+    return m
+
+
 async def create_invite(
     session: AsyncSession, swarm: Swarm, *, uses: int, expires_at: datetime | None,
     actor: str = "cli", role: str = "member",
@@ -173,6 +193,7 @@ async def request_enrollment(
     invite: str | None = None,
     enrollment_policy: str = "manual",
     intended: dict | None = None,
+    proxied_by: str | None = None,
 ) -> Member:
     if not NAME_RE.match(name or ""):
         raise ServiceError(422, "bad_name", "name must match ^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -187,6 +208,7 @@ async def request_enrollment(
         raise ServiceError(422, "bad_public_key", "public_key must be 64 hex chars (Ed25519)") from None
     requested = _validate_permissions(permissions)
     intended = _validate_intended(intended)
+    proxied_by = _validate_proxied_by(proxied_by)
     join_role = "member"
 
     now = datetime.now(timezone.utc)
@@ -226,6 +248,7 @@ async def request_enrollment(
                     name=name, kind=kind, public_key=pk, operator=operator, note=note,
                     requested_permissions=requested, permissions=["recall"],
                     status="active", request_ip=remote_ip, enrolled_at=now, intended=intended,
+                    proxied_by=proxied_by,
                 )
                 session.add(member)
                 await session.flush()
@@ -295,6 +318,7 @@ async def request_enrollment(
         request_ip=remote_ip,
         enrolled_at=now if auto else None,
         intended=intended,
+        proxied_by=proxied_by,
     )
     session.add(member)
     await session.flush()
@@ -417,6 +441,7 @@ def member_to_dict(m: Member) -> dict:
         "recall_floor_id": m.recall_floor_id,
         "cognition": cognition.resolve(m),
         "intended": m.intended,
+        "proxied_by": m.proxied_by,
         "enrolled_at": m.enrolled_at.isoformat() if m.enrolled_at else None,
         "revoked_at": m.revoked_at.isoformat() if m.revoked_at else None,
         "last_seen_at": m.last_seen_at.isoformat() if m.last_seen_at else None,

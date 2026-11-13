@@ -65,4 +65,3 @@ export const ROOT_KEY_FORMAT =
   "Save and paste the entire line, label included.";
 export const ROOT_KEY_PASTE =
   "A mistyped or incomplete key is rejected here, before anything is signed or sent. Nothing changes; paste it again.";
-

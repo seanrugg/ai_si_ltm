@@ -43,6 +43,27 @@ describe("LocationForm", () => {
     expect(await screen.findByText("give both lat and lon, or neither")).toBeDefined();
   });
 
+  it("shows an inherited location as coming from the swarm (#285)", () => {
+    render(React.createElement(LocationForm, { subjectType: "member", name: "z3-r0",
+      current: null, inherited: { label: "Home", room: null, inherited_from: "swarm echo-base" } }));
+    expect(screen.getByText("Home (from swarm echo-base)")).toBeDefined();
+  });
+
+  it("pre-fills a suggestion but saves only when the admin presses Save (#285)", async () => {
+    vi.mocked(api).mockReset();
+    vi.mocked(api).mockResolvedValue({});
+    render(React.createElement(LocationForm, { subjectType: "swarm", name: "echo-base", current: null,
+      suggestion: { label: "Stafford, VA", lat: 38.4, lon: -77.4 }, prompt: "Set a home location" }));
+    expect(screen.getByText("Set a home location")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByLabelText("Label").value).toBe("Stafford, VA");
+    expect(screen.getByText(/check it before saving/)).toBeDefined();
+    expect(vi.mocked(api)).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith("/admin/locations/swarm/echo-base",
+      { method: "PUT", body: { label: "Stafford, VA", room: null, lat: 38.4, lon: -77.4 } }));
+  });
+
   it("locationBody turns blanks into nulls", () => {
     expect(locationBody({ label: " A ", room: " ", lat: "", lon: "" })).toEqual({ label: "A", room: null, lat: null, lon: null });
   });
