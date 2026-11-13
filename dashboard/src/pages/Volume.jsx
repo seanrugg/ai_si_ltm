@@ -1,5 +1,8 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useApi } from "../api/useApi.js";
+import HelpTip from "../components/HelpTip.jsx";
+import { MSG_OVER_HALF, MSG_SUMMARY } from "../lib/help.js";
 import { EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui.jsx";
 
 const DAYS = [7, 14, 30, 90];
@@ -14,9 +17,49 @@ function Bar({ value, max, title }) {
   );
 }
 
+/** Swarm messages vs all records, per swarm (#302). */
+export function SwarmMessages({ swarms }) {
+  if (!swarms?.length) return null;
+  return (
+    <section className="panel mb-4 p-4" aria-labelledby="swarm-msgs-h">
+      <h2 id="swarm-msgs-h" className="flex items-center gap-2 font-bold">
+        Swarm messages
+        <HelpTip id="msg-summary" label="About summary mode">{MSG_SUMMARY}</HelpTip>
+      </h2>
+      <ul className="mt-2 space-y-2 text-sm">
+        {swarms.map((s) => (
+          <li key={s.swarm}>
+            <span className="font-bold">{s.swarm}</span>:{" "}
+            {s.messages.toLocaleString()} of {s.records.toLocaleString()} records are messages ({Math.round(s.share * 100)}%)
+            {s.summarised.length > 0 && (
+              <span className="text-paper-muted"> · summarised for the LRS now: {s.summarised.join(", ")}</span>
+            )}
+            {s.days_over_half.length > 0 && (
+              <p role="note" className="mt-1 text-warn">
+                {MSG_OVER_HALF} ({s.days_over_half.length === 1 ? "1 day" : `${s.days_over_half.length} days`} in this range)
+              </p>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export default function Volume() {
   const [days, setDays] = useState("14");
-  const { data, error, loading, reload } = useApi("/admin/volume", { days });
+  const [params, setParams] = useSearchParams();
+  const swarm = params.get("swarm") || "";
+  const { data, error, loading, reload } = useApi("/admin/volume", swarm ? { days, swarm } : { days });
+  const swarmChip = swarm && (
+    <div className="mb-4 flex flex-wrap items-center gap-2" role="group" aria-label="Active filters">
+      <button type="button" aria-label={`Remove filter Swarm: ${swarm}`}
+              className="flex items-center gap-1.5 rounded-full border border-ink-line bg-ink-raised px-3 py-1.5 text-sm hover:bg-ink-hover"
+              onClick={() => setParams((prev) => { const next = new URLSearchParams(prev); next.delete("swarm"); return next; })}>
+        Swarm: {swarm}<span aria-hidden="true" className="text-paper-muted">&times;</span>
+      </button>
+    </div>
+  );
   const rows = data?.rows || [];
   const period = data?.days || Number(days) || 1;
 
@@ -26,6 +69,7 @@ export default function Volume() {
     return (
       <>
         <PageHeader title="Volume" />
+        {swarmChip}
         <EmptyState title="No volume yet">
           Records appear here once approved members send them.
         </EmptyState>
@@ -53,6 +97,8 @@ export default function Volume() {
           <button className="btn btn-primary">Refresh</button>
         </form>
       </PageHeader>
+      {swarmChip}
+      <SwarmMessages swarms={data?.swarms} />
       <ul className="panel" aria-label="Volume by member">
         {members.map((m) => {
           const mrows = rows.filter((r) => r.agent === m);

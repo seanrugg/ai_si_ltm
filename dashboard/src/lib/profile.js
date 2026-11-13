@@ -19,6 +19,7 @@ export const TABS = [
   { key: "activity", label: "Activity" },
   { key: "senses", label: "Senses" },
   { key: "history", label: "History" },
+  { key: "manage", label: "Manage", swarmOnly: true },
 ];
 export const DEFAULT_TAB = "overview";
 
