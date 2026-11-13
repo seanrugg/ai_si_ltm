@@ -266,6 +266,28 @@ class LTMSClient:
         so the caller keeps its cursor."""
         return self._call("GET", "/api/relay/downlink", params={"since": cursor} if cursor else {})
 
+    def issue_directive(self, text: str, payload: dict | None = None, expires_in: float | None = None) -> dict:
+        """As the swarm's leader, issue a directive to the swarm, signed with this member's key (#310).
+
+        ``expires_in``: seconds (default 7 days). Raises LTMSError on refusal (not the leader, ...).
+        """
+        import uuid as _uuid
+        from datetime import datetime, timedelta, timezone
+
+        from ltms_contract import canonicalize
+
+        swarm = self._call("GET", "/api/swarm").get("leads")
+        if not swarm:
+            raise LTMSError(403, "not_leader", "this member doesn't lead a swarm")
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        fmt = "%Y-%m-%dT%H:%M:%SZ"
+        stmt = {"v": 1, "id": str(_uuid.uuid4()), "scope": {"swarm": swarm["id"]}, "text": text, "payload": payload,
+                "issued_by": self.name, "issued_at": now.strftime(fmt),
+                "expires_at": (now + timedelta(seconds=expires_in or 7 * 86400)).strftime(fmt)}
+        raw = canonicalize(stmt)
+        sig = self.key.sign(b"ltms-directive-v1\n" + raw).signature.hex()
+        return self._call("POST", "/api/directives", json={"statement": raw.decode("utf-8"), "signature": sig})
+
     def fleet_key(self) -> str | None:
         """The fleet's public key (#303), to verify directives. None on error."""
         try:

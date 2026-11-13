@@ -64,6 +64,40 @@ async def chain_head(request: Request, agent: str | None = None,
         return head
 
 
+@router.post("/directives", status_code=201)
+async def leader_issue(request: Request, body: dict, auth: MemberAuth = Depends(current_member)) -> dict:
+    """A swarm leader issues a directive to its own swarm, signed with its own key (#310)."""
+    from server.services import directives
+
+    async with transaction(request) as session:
+        return await directives.issue_as_leader(session, request.app.state.config,
+                                                await session.get(Member, auth.member_id), body)
+
+
+@router.get("/directives")
+async def leader_directives(request: Request, inherited: int = 0, auth: MemberAuth = Depends(current_member)) -> dict:
+    """``?inherited=1``: the old leader's open directives waiting for this leader (#310)."""
+    from server.services import directives
+
+    if not inherited:
+        raise ServiceError(422, "bad_request", "use ?inherited=1")
+    async with transaction(request) as session:
+        return {"directives": await directives.inherited_for(session, await session.get(Member, auth.member_id))}
+
+
+@router.post("/directives/{directive_id}/{action}")
+async def leader_decide(directive_id: str, action: str, request: Request,
+                        auth: MemberAuth = Depends(current_member)) -> dict:
+    """``confirm`` or ``cancel`` an inherited directive (#310)."""
+    from server.services import directives
+
+    if action not in ("confirm", "cancel"):
+        raise ServiceError(404, "not_found", "use /confirm or /cancel")
+    async with transaction(request) as session:
+        return await directives.leader_decides(session, request.app.state.config,
+                                               await session.get(Member, auth.member_id), directive_id, action)
+
+
 @router.get("/fleet-key")
 async def get_fleet_key(request: Request) -> dict:
     """The fleet's public key (#303), to verify directives. Public: it's a public key."""
@@ -84,7 +118,12 @@ async def my_swarm(request: Request, auth: MemberAuth = Depends(current_member))
 
             # The leader (#308): name and public key, so members can verify its directives.
             swarm["leader"] = await swarms.leader_of(session, await session.get(SwarmRow, swarm["id"]))
-        return {"swarm": swarm}
+        from server.models import Swarm as SwarmRow2
+
+        # The swarm this member leads (#310), which may not be the one it belongs to.
+        led = await session.scalar(select(SwarmRow2).where(SwarmRow2.leader_member_id == member.id,
+                                                           SwarmRow2.status == "active"))
+        return {"swarm": swarm, "leads": {"id": led.id, "name": led.name} if led is not None else None}
 
 
 async def _roster(session, swarm_id: str) -> list[dict]:

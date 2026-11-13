@@ -122,7 +122,8 @@ async def to_dict(session, d: Directive) -> dict:
             "expires_at": _iso(d.expires_at), "status": status_of(d), "signer": d.signer,
             "statement": d.statement, "signature": d.signature,
             "cancel": ({"statement": d.cancel_statement, "signature": d.cancel_signature}
-                       if d.cancel_statement else None)}
+                       if d.cancel_statement else None),
+            "inherited": bool(getattr(d, "inherited", False)), "confirmed_by": getattr(d, "confirmed_by", None)}
 
 
 ACK_TAG = "directive-ack"
@@ -191,3 +192,93 @@ async def inherit_from(session, swarm, leader_name: str | None) -> int:
             d.inherited = True
             n += 1
     return n
+
+
+async def issue_as_leader(session, cfg, leader, body: dict) -> dict:
+    """A swarm's current leader issues a directive for its own swarm (#310).
+
+    The leader signs it with its own key: ``{"statement": <JCS text>, "signature": <hex>}``.
+    The server checks the leader is current, the statement is well formed and canonical,
+    addressed to the leader's swarm only, fresh, and signed by the leader.
+    """
+    import json as _json
+
+    from nacl.signing import VerifyKey
+
+    swarm = await session.scalar(select(Swarm).where(Swarm.leader_member_id == leader.id, Swarm.status == "active"))
+    if swarm is None:
+        raise ServiceError(403, "not_leader", "only a swarm's current leader can issue its directives")
+    raw, sig = body.get("statement") if isinstance(body, dict) else None, body.get("signature") if isinstance(body, dict) else None
+    if not isinstance(raw, str) or not isinstance(sig, str):
+        raise ServiceError(422, "bad_directive", "send {statement, signature}, signed with the leader's key")
+    try:
+        stmt = _json.loads(raw)
+        canonical = canonicalize(stmt).decode("utf-8") == raw
+    except Exception:  # noqa: BLE001
+        raise ServiceError(422, "bad_directive", "the statement isn't JSON") from None
+    if not canonical:
+        raise ServiceError(422, "bad_directive", "the statement must be JCS (canonical JSON)")
+    if stmt.get("scope") != {"swarm": swarm.id}:
+        raise ServiceError(403, "not_your_swarm", "a leader can only issue directives to its own swarm")
+    if stmt.get("v") != 1 or stmt.get("issued_by") != leader.name:
+        raise ServiceError(422, "bad_directive", "v must be 1 and issued_by the leader's name")
+    text = stmt.get("text")
+    if not isinstance(text, str) or not text.strip() or len(text) > MAX_TEXT:
+        raise ServiceError(422, "bad_directive", f"text is required, at most {MAX_TEXT} characters")
+    try:
+        did = uuid.UUID(str(stmt.get("id")))
+        issued = datetime.fromisoformat(str(stmt["issued_at"]).replace("Z", "+00:00"))
+        expires = datetime.fromisoformat(str(stmt["expires_at"]).replace("Z", "+00:00"))
+    except (KeyError, ValueError):
+        raise ServiceError(422, "bad_directive", "id, issued_at and expires_at are required") from None
+    now = _now()
+    if abs((issued - now).total_seconds()) > 300 or not issued < expires <= issued + timedelta(days=MAX_DAYS):
+        raise ServiceError(422, "bad_directive", "issued_at must be now (±5 min) and expires_at within 90 days")
+    try:
+        VerifyKey(bytes(leader.public_key)).verify(DOMAIN.encode() + raw.encode(), bytes.fromhex(sig))
+    except Exception:  # noqa: BLE001
+        raise ServiceError(422, "bad_signature", "the signature doesn't match the leader's key") from None
+    if await session.get(Directive, did) is not None:
+        raise ServiceError(409, "duplicate", "a directive with this id exists")
+    d = Directive(id=did, scope_swarm_id=swarm.id, text=text.strip(), payload=stmt.get("payload"),
+                  issued_by=leader.name, issued_at=issued, expires_at=expires, status="open",
+                  statement=raw, signature=sig, signer="leader")
+    session.add(d)
+    session.add(AuditLog(actor=leader.name, member_id=leader.id, action="directive_issue",
+                         detail={"directive": str(did), "scope": {"swarm": swarm.id}, "signer": "leader"}))
+    await session.flush()
+    return await to_dict(session, d)
+
+
+async def _leader_swarm(session, leader) -> Swarm:
+    swarm = await session.scalar(select(Swarm).where(Swarm.leader_member_id == leader.id, Swarm.status == "active"))
+    if swarm is None:
+        raise ServiceError(403, "not_leader", "only a swarm's current leader can do this")
+    return swarm
+
+
+async def inherited_for(session, leader) -> list[dict]:
+    swarm = await _leader_swarm(session, leader)
+    rows = await session.scalars(select(Directive).where(
+        Directive.scope_swarm_id == swarm.id, Directive.inherited.is_(True), Directive.status == "open"))
+    return [await to_dict(session, d) for d in rows if status_of(d) == "open"]
+
+
+async def leader_decides(session, cfg, leader, directive_id, action: str) -> dict:
+    """The new leader confirms or cancels an inherited directive (#310). Audited."""
+    swarm = await _leader_swarm(session, leader)
+    d = await get(session, directive_id)
+    if d.scope_swarm_id != swarm.id:
+        raise ServiceError(403, "not_your_swarm", "that directive isn't for your swarm")
+    if action == "confirm":
+        if not d.inherited:
+            raise ServiceError(409, "not_inherited", "only an inherited directive needs confirming")
+        d.inherited, d.confirmed_by = False, leader.name
+        session.add(AuditLog(actor=leader.name, member_id=leader.id, action="directive_confirm",
+                             detail={"directive": str(d.id)}))
+        await session.flush()
+        return await to_dict(session, d)
+    if d.signer != "leader":
+        raise ServiceError(403, "fleet_directive", "a leader can't cancel the fleet's directives")
+    # The cancel statement is signed with the fleet key: LTMS attests the current leader asked.
+    return await cancel(session, cfg, d.id, actor=leader.name)

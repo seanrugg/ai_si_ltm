@@ -340,8 +340,19 @@ def main(poll=None) -> None:
             with open(fleet_key_cache, "w", encoding="utf-8") as f:
                 f.write(key)
         return key
+    leader_cache = {"at": -1e9, "key": None}
+
+    def leader_key() -> str | None:
+        """The current swarm leader's public key (#310), from GET /api/swarm, kept for 10 minutes."""
+        if ltms is None:
+            return None
+        if time.monotonic() - leader_cache["at"] > 600:
+            swarm = ltms.swarm()
+            leader_cache.update(at=time.monotonic(), key=((swarm or {}).get("leader") or {}).get("public_key"))
+        return leader_cache["key"]
     directives = DirectiveHandler(link, fleet_key,
-                                  os.path.join(os.path.dirname(os.path.abspath(cfg.state_path)), "directives.json"))
+                                  os.path.join(os.path.dirname(os.path.abspath(cfg.state_path)), "directives.json"),
+                                  leader_key=leader_key)
 
     def on_connect(client, userdata, flags, reason_code, properties) -> None:
         transport.on_connect()

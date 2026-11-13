@@ -13,6 +13,7 @@ AUDIT_ACTIONS = (
     "recall",
     "directive_issue",
     "directive_cancel",
+    "directive_confirm",
     "swarm_appoint_leader",
     "swarm_remove_leader",
     "admin_login",

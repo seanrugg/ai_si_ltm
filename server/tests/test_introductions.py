@@ -24,7 +24,7 @@ def test_roster_has_names_roles_kinds_and_summaries_only(mesh, admin, db_exec):
     assert s["name"] == "echo-base"
     assert s["roster"] == [{"name": "cam", "role": "observer", "kind": "robot", "summary": ""},
                            {"name": "z3-r0", "role": "member", "kind": "robot", "summary": "UNO Q 2 GB · qwen3:0.6b on board"}]
-    assert _get(mesh.member("free"), "/api/swarm").json() == {"swarm": None}
+    assert _get(mesh.member("free"), "/api/swarm").json() == {"swarm": None, "leads": None}  # leads: #310
 
 
 SWARM = {"id": "s1", "name": "echo-base", "role": "member",
