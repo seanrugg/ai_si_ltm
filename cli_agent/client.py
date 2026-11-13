@@ -261,6 +261,19 @@ class LTMSClient:
             log.warning("report_specs failed: %s", exc)
             return None
 
+    def downlink(self, cursor: str | None = None) -> dict:
+        """Directives and swarm-addressed messages for this hub's swarm (#304). Raises on error,
+        so the caller keeps its cursor."""
+        return self._call("GET", "/api/relay/downlink", params={"since": cursor} if cursor else {})
+
+    def fleet_key(self) -> str | None:
+        """The fleet's public key (#303), to verify directives. None on error."""
+        try:
+            return self._call("GET", "/api/fleet-key", auth=False)["public_key"]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("fleet key lookup failed: %s", exc)
+            return None
+
     def pings(self) -> list[str]:
         """Pending admin pings (#356): this member's name if it was pinged, plus (for a hub)
         pinged members of its swarm. Fetching marks them delivered. Never raises."""
