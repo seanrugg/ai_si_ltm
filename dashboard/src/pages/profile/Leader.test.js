@@ -6,7 +6,7 @@ import { ROLES } from "../../lib/visual.js";
 import { encodeKey, hexToBytes } from "../../lib/swarmKey.js";
 import vectors from "../../lib/swarm-key-vectors.json";
 
-afterEach(() => cleanup());
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 const v = vectors.leader_appointments[0];
 const swarm = { id: v.statement.swarm, name: "echo-base", leader: null,
@@ -19,6 +19,9 @@ const members = [
 
 describe("Appoint leader (#309)", () => {
   it("offers any active member except the hub, and clears the key field", async () => {
+    // The real api() is called through act; stub fetch so nothing reaches the network.
+    const fetch = vi.fn(async () => new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetch);
     const act = vi.fn(async (fn) => fn());
     render(React.createElement(AppointLeader, { swarm, allMembers: members, busy: false, act }));
     const options = [...screen.getByLabelText("Leader").querySelectorAll("option")].map((o) => o.value);
@@ -31,6 +34,8 @@ describe("Appoint leader (#309)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sign and appoint" }));
     await waitFor(() => expect(act).toHaveBeenCalled());
     expect(key.value).toBe("");
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(String(fetch.mock.calls[0][0])).toContain("/admin/swarms/echo-base/leader");
   });
 
   it("removes the leader only after confirming", () => {
