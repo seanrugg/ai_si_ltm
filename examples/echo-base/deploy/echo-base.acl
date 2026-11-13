@@ -11,12 +11,15 @@ topic read <topic_id>/+/records
 topic read <topic_id>/+/hello
 topic read <topic_id>/+/say
 topic write <topic_id>/+/acks
+# admin pings (#356): the hub passes them on
+topic write <topic_id>/+/ping
 
 # Every member may only write its own records, hello and messages, and read its own acks.
 pattern write <topic_id>/%u/records
 pattern write <topic_id>/%u/hello
 pattern write <topic_id>/%u/say
 pattern read <topic_id>/%u/acks
+pattern read <topic_id>/%u/ping
 
 # Swarm messages (#300): every member hears every member. A pattern line applies
 # to every authenticated user of this broker (topic lines would apply only to the

@@ -105,6 +105,16 @@ async def report_read(request: Request, body: dict, auth: MemberAuth = Depends(c
         return await integrations.report_read(session, member_id=auth.member_id, body=body)
 
 
+@router.get("/members/me/pings")
+async def get_pings(request: Request, auth: MemberAuth = Depends(current_member)) -> dict:
+    """Pending admin pings (#356): this member's own, plus its swarm members' for a hub.
+    Fetching marks them delivered. Answer with a heartbeat (``"ping": true``)."""
+    from server.services import ping
+
+    async with transaction(request) as session:
+        return {"pings": await ping.take_for(session, auth.member_id)}
+
+
 @router.put("/relay/network/{agent}")
 async def put_relay_network(agent: str, request: Request, body: dict,
                             auth: MemberAuth = Depends(current_member)) -> dict:
