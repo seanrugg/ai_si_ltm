@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from server.models import AuditLog
 from server.services import location
-from server.tests.test_swarms import Home
+from server.tests.test_swarms import Home, sign
 
 
 @pytest.fixture
@@ -35,7 +35,8 @@ def test_member_declared_beats_swarm_and_gps_beats_both(mesh, admin, db_exec):
     home = Home(mesh, db_exec)
     z3 = mesh.member("z3-r0")
     home.add(z3)
-    assert _loc(admin, "z3-r0") == {"name": "z3-r0", "best": None, "all": []}
+    first = _loc(admin, "z3-r0")
+    assert first["best"] is None and first["all"] == [] and "no declared home" in first["unplaced"]
 
     assert admin.put("/api/admin/locations/swarm/echo-base", json={"label": "Site A"}).status_code == 200
     assert admin.get("/api/admin/locations").json()["swarms"]["echo-base"]["label"] == "Site A"
@@ -111,3 +112,50 @@ def test_the_server_location_needs_no_member_row(mesh, admin):
     assert r.status_code == 200, r.text
     server = admin.get("/api/admin/locations").json()["server"]
     assert (server["source"], server["label"], server["lat"]) == ("declared", "Rack room", 1.0)
+
+
+def _city(monkeypatch, app):
+    calls = []
+    monkeypatch.setattr(location, "lookup_city", lambda path, addr: calls.append(addr) or {
+        "label": "Example City, Example Country", "lat": 1.0, "lon": 2.0, "accuracy_km": 20})
+    app.state.config.geoip_db_path = "/nonexistent/city.mmdb"
+    return calls
+
+
+def test_relayed_member_takes_the_hubs_estimate_and_swarm_mates_inherit(mesh, admin, app, db_exec, monkeypatch, ip):
+    """#346: a member on the LAN behind a hub is placed by the hub's public address."""
+    calls = _city(monkeypatch, app)
+    home = Home(mesh, db_exec)
+    z3, vector = mesh.member("z3-r0"), mesh.member("vector")
+    z3.login()
+    vector.login()            # both only ever seen from the LAN
+    home.add(z3)
+    home.add(vector)
+    ip["ip"] = "8.8.8.8"
+    hub = mesh.member("jetson-hub", kind="relay")
+    home.appoint(hub)
+    hub.relay(sign(z3, 1))   # the hub reaches LTMS from a public address
+
+    z = _loc(admin, "z3-r0")
+    assert z["best"]["source"] == "network" and z["best"]["via_hub"] == "jetson-hub" and "unplaced" not in z
+    assert calls and set(calls) == {"8.8.8.8"}
+    # vector never had a record relayed, but its swarm has an estimate now.
+    v = _loc(admin, "vector")
+    assert v["best"]["lat"] == 1.0 and v["best"]["inherited_from"] == "swarm echo-base (network estimate from jetson-hub)"
+    # A declared swarm home replaces the estimate for members with nothing better.
+    admin.put("/api/admin/locations/swarm/echo-base", json={"label": "Home", "lat": 5.0, "lon": 6.0})
+    assert _loc(admin, "vector")["best"]["source"] == "declared"
+
+
+def test_unplaced_reasons_and_geo_status(mesh, admin, app, ip):
+    ip["ip"] = "10.0.0.50"
+    hub = mesh.member("jetson-hub", kind="relay")
+    hub.login()
+    r = admin.get("/api/admin/locations").json()
+    assert r["geo"]["enabled"] is False and "LTMS_GEOIP_DB" in r["geo"]["reason"]
+    (m,) = [x for x in r["members"] if x["name"] == "jetson-hub"]
+    assert "10.0.0.50" in m["unplaced"] and "can't be located" in m["unplaced"]
+
+    app.state.config.geoip_db_path = "/nonexistent/city.mmdb"
+    geo = admin.get("/api/admin/locations").json()["geo"]
+    assert geo["enabled"] is False and geo["reason"]  # extra missing or file missing: either way, said plainly
