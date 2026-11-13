@@ -48,6 +48,8 @@ class MemberConfig:
     fallback_after_seconds: float = 120.0  # FALLBACK_AFTER_SECONDS (auto: broker down this long -> direct)
     resend_seconds: float = 60.0       # RESEND_SECONDS: resend unacked records this often (#356)
     ping_poll_seconds: float = 30.0    # PING_POLL_SECONDS: with LTMS_SERVER, check for admin pings (#356)
+    intro_reply: str = "reply"         # INTRO_REPLY: reply | off, to other members' introductions (#334)
+    intro_check_seconds: float = 3600.0  # INTRO_CHECK_SECONDS: how often to look for a new swarm or role
 
 
 def load_config(env: Mapping[str, str]) -> MemberConfig:
@@ -97,7 +99,7 @@ def load_config(env: Mapping[str, str]) -> MemberConfig:
     if heartbeat_seconds <= 0:
         raise ValueError("HEARTBEAT_SECONDS must be > 0")
     timers = {}
-    for setting, default in (("RESEND_SECONDS", "60"), ("PING_POLL_SECONDS", "30")):
+    for setting, default in (("RESEND_SECONDS", "60"), ("PING_POLL_SECONDS", "30"), ("INTRO_CHECK_SECONDS", "3600")):
         try:
             timers[setting] = float(env.get(setting, default))
         except (TypeError, ValueError):
@@ -119,9 +121,32 @@ def load_config(env: Mapping[str, str]) -> MemberConfig:
         ltms_server=ltms_server,
         transport=transport,
         fallback_after_seconds=fallback_after,
+        intro_reply=_intro_reply(env),
+        intro_check_seconds=timers["INTRO_CHECK_SECONDS"],
         resend_seconds=timers["RESEND_SECONDS"],
         ping_poll_seconds=timers["PING_POLL_SECONDS"],
     )
+
+
+def _intro_reply(env) -> str:
+    value = (env.get("INTRO_REPLY") or "reply").strip().lower()
+    if value not in ("reply", "off"):
+        raise ValueError("INTRO_REPLY must be reply or off")
+    return value
+
+
+def make_intro_sender(link, direct: bool):
+    """Introductions go on the swarm bus, or (direct transport, #297) straight into the chain."""
+    from cli_agent.introductions import INTRO_TAG
+
+    def send(text: str, payload: dict, reply_to: str | None):
+        if direct:
+            header = {"summary": text, "tags": [INTRO_TAG]}
+            if reply_to:
+                header["refs"] = {"reply_to": reply_to}
+            return link.append("communication", payload=payload, **header)
+        return link.send_message(text, payload=payload, reply_to=reply_to, tags=[INTRO_TAG])
+    return send
 
 
 def member_prefix(cfg: MemberConfig, lookup=None) -> tuple[str, str]:
@@ -317,13 +342,25 @@ def main() -> None:
     signal.signal(signal.SIGINT, stop)
 
     started_at = time.monotonic()
+    introducer = None
+    if ltms is not None:
+        from cli_agent.introductions import Introducer
+        introducer = Introducer(name, os.path.join(os.path.dirname(os.path.abspath(cfg.state_path)), "introduced.json"),
+                                make_intro_sender(link, cfg.transport == "direct"), reply_policy=cfg.intro_reply)
+    next_intro_check = started_at
+
+    def on_swarm_message(rec: dict) -> None:
+        log_message(rec)
+        if introducer is not None:
+            introducer.on_message(rec, time.monotonic())
+
     next_heartbeat = started_at + cfg.heartbeat_seconds
     next_resend = started_at + cfg.resend_seconds
     next_ping_poll = started_at
     try:
         while running:
             drain_acks(link, acks)
-            drain_messages(messages, name, prefix)
+            drain_messages(messages, name, prefix, on_swarm_message)
             if resend_wanted.is_set():
                 resend_wanted.clear()
                 link.resend_pending()
@@ -333,6 +370,14 @@ def main() -> None:
                 # connected. Duplicates are harmless (hub and LTMS both dedupe).
                 link.resend_pending()
                 next_resend = now + cfg.resend_seconds
+            if introducer is not None:
+                if now >= next_intro_check:
+                    next_intro_check = now + cfg.intro_check_seconds
+                    try:
+                        introducer.check(ltms.swarm())
+                    except Exception:  # noqa: BLE001 - an introduction must not stop the member
+                        logging.exception("Member: introduction failed")
+                introducer.due(now)
             if ltms is not None and now >= next_ping_poll:
                 next_ping_poll = now + cfg.ping_poll_seconds
                 if name in ltms.pings():
