@@ -66,7 +66,7 @@ describe("swarm Members tab (#282)", () => {
     expect(screen.queryByRole("button", { name: "Remove hub-one" })).toBeNull();
     expect(screen.getByRole("button", { name: "Remove z3-r0" })).toBeDefined();
     expect(screen.getByRole("link", { name: "z3-r0" }).getAttribute("href")).toBe("/members/z3-r0/profile");
-    expect(screen.getByText("Swarm · 1 hub · 1 member · 1 observer")).toBeDefined();
+    expect(screen.getByText("Swarm · 1 hub · 1 member · 1 observer · No leader")).toBeDefined();
     const add = screen.getByRole("form", { name: "Add member" });
     expect(within(add).getByRole("option", { name: "loose" })).toBeDefined();
   });

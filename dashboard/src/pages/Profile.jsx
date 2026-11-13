@@ -168,7 +168,7 @@ export default function Profile({ subject }) {
           <span className="text-sm text-paper-muted">
             {subject === "member"
               ? `${ROLES[role]?.label ?? "Free agent"} · ${KINDS[kind]?.label ?? ""}`
-              : `Swarm · ${swarmCount(swarm?.members)}`}
+              : `Swarm · ${swarmCount(swarm?.members)} · ${swarm?.leader ? `Leader: ${swarm.leader}` : "No leader"}`}
           </span>
         </div>
         {member && (

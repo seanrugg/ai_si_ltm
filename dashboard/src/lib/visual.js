@@ -7,6 +7,8 @@ export const ROLES = {
   member: { color: "#00e5ff", label: "Member" },
   observer: { color: "#ffd166", label: "Observer" },
   free: { color: "#8aa4c2", label: "Free agent" },
+  // The swarm leader (#309): directs the swarm; shown alongside the member's swarm role.
+  leader: { color: "#ff8fb1", label: "Leader" },
 };
 
 export const KINDS = {

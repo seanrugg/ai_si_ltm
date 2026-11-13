@@ -164,3 +164,24 @@ export function signAppointment(keyText, { swarm, hub, hubKey, ts = nowTs() }) {
     seed.fill(0);
   }
 }
+
+/** A swarm leader appointment (#309): the hub's framing, action ``appoint_leader``. */
+export function leaderStatement({ swarmId, leader, leaderKey, ts }) {
+  return { v: 1, action: "appoint_leader", swarm: swarmId, leader, leader_key: leaderKey.toLowerCase(), ts };
+}
+
+/** Sign a leader appointment with the root key in the browser; the seed is wiped after. */
+export function appointLeader(keyText, { swarm, leader, leaderKey, ts = nowTs() }) {
+  const seed = decodeKey(keyText);
+  try {
+    if (swarmIdFor(publicKeyHex(seed)) !== swarm.id) {
+      throw new SwarmKeyError(`this key doesn't belong to swarm ${swarm.name}`);
+    }
+    if (!/^[0-9a-f]{64}$/i.test(leaderKey || "")) throw new SwarmKeyError("the leader's public key is missing");
+    const statement = leaderStatement({ swarmId: swarm.id, leader, leaderKey, ts });
+    const sig = bytesToHex(ed.sign(appointmentMessage(statement), seed));
+    return { statement, sig };
+  } finally {
+    seed.fill(0);
+  }
+}
