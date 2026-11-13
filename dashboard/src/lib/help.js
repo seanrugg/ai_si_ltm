@@ -68,6 +68,7 @@ export const ROOT_KEY_FORMAT =
   "Save and paste the entire line, label included.";
 export const ROOT_KEY_PASTE =
   "A mistyped or incomplete key is rejected here, before anything is signed or sent. Nothing changes; paste it again.";
+export const HEALTH_ABOUT = "The hub reading its own machine: temperatures, load, memory, power mode and over-current counters, as min/max/last over each window. A self-report, signed by the hub; not counted as sensing.";
 
 // What each count means (#348), so no number looks made up.
 export const COUNT_SENSE = "Sensed records (a sensor reading the world: camera, IMU, microphone) plus perceptions drawn from them. Each is signed by the member that made it. Heartbeats and health reports are not counted here.";
@@ -76,3 +77,7 @@ export const COUNT_COMM = "Messages this member sent or received, including swar
 export const COUNT_LEARN = "Lessons and policies: what this member learned from outcomes, and the rules it holds.";
 export const COUNT_SELF_REPORT = "The member reporting on itself: heartbeat, uptime, members seen, temperature, memory. Not a perception of the world, so it is counted apart from Sensing.";
 export const COUNT_HEARTBEAT = "A hub sends a heartbeat every few minutes (HUB_HEARTBEAT_SECONDS) so LTMS knows it is alive: uptime, members seen, dropped messages. It's a self-report.";
+export const MSG_SUMMARY = "LTMS keeps every swarm message. Only the LRS copy of a busy member's messages (over 60 an hour, for 3 hours) is grouped into one statement per 5 minutes.";
+export const MSG_OVER_HALF = "Messages are over half of this swarm's LRS traffic. Members over 60 messages/hour are already summarised; consider lowering the threshold in Settings.";
+
+export const PING_ABOUT = "Asks the member for a heartbeat now. Its hub (or the member itself, if it talks to LTMS directly) checks for pings every 30 s; the answer is the next record LTMS receives from it. Heartbeats otherwise come twice a day.";

@@ -18,7 +18,7 @@ from cli_agent.client import LTMSClient
 from cli_agent.hub import HeartbeatTimer, Hub
 from cli_agent.member_link import MemberLink
 from cli_agent.swarm_topic import check_prefix, resolve
-from cli_agent.mqtt_messages import say_subscription, topic_kind
+from cli_agent.mqtt_messages import ping_topic, say_subscription, topic_kind
 from cli_agent.outbox import Outbox
 from ltms_contract import load_key
 
@@ -35,10 +35,16 @@ class HubConfig:
     swarm: str | None          # SWARM                (deprecated: the swarm's name as topic prefix)
     tick_seconds: float        # TICK_SECONDS         (default 10.0; must be > 0)
     max_msgs_per_second: int = 10      # HUB_MAX_MSGS_PER_SECOND (swarm messages per member, #300)
-    heartbeat_seconds: float = 300.0  # HUB_HEARTBEAT_SECONDS (default 300; must be > 0)
+    heartbeat_seconds: float = 43200.0  # HUB_HEARTBEAT_SECONDS (default 43200, twice daily; must be > 0, #356)
+    ping_poll_seconds: float = 30.0   # PING_POLL_SECONDS: check LTMS for admin pings (#356)
     state_path: str = "hub-head.json"  # HUB_STATE_PATH (default: hub-head.json beside the outbox)
     swarm_topic_id: str | None = None  # SWARM_TOPIC_ID (preferred; else looked up from LTMS, #293)
     legacy_name: str | None = None     # SWARM_LEGACY_NAME (migration: also serve <name>/+/...)
+    health: str = "auto"               # HUB_HEALTH: auto (on for a Jetson) | 1 | 0 (#349)
+    health_seconds: float = 300.0      # HUB_HEALTH_SECONDS: one health self-report per window
+    health_sample_seconds: float = 30.0  # HUB_HEALTH_SAMPLE_SECONDS: how often to read the machine
+    health_services: str = ""          # HUB_HEALTH_SERVICES: name=http(s)://url or name=systemd:unit, comma-separated
+    health_state_path: str = "hub-health.json"  # HUB_HEALTH_STATE: newest sample, readable by local programs
 
 
 def load_config(env: Mapping[str, str]) -> HubConfig:
@@ -87,13 +93,34 @@ def load_config(env: Mapping[str, str]) -> HubConfig:
         raise ValueError("HUB_MAX_MSGS_PER_SECOND must be > 0")
 
     try:
-        heartbeat_seconds = float(env.get("HUB_HEARTBEAT_SECONDS", "300"))
+        heartbeat_seconds = float(env.get("HUB_HEARTBEAT_SECONDS", "43200"))
     except (TypeError, ValueError):
         raise ValueError("HUB_HEARTBEAT_SECONDS must be a number") from None
     if heartbeat_seconds <= 0:
         raise ValueError("HUB_HEARTBEAT_SECONDS must be > 0")
 
+    try:
+        ping_poll_seconds = float(env.get("PING_POLL_SECONDS", "30"))
+    except (TypeError, ValueError):
+        raise ValueError("PING_POLL_SECONDS must be a number") from None
+    if ping_poll_seconds <= 0:
+        raise ValueError("PING_POLL_SECONDS must be > 0")
+
     state_path = env.get("HUB_STATE_PATH") or os.path.join(os.path.dirname(outbox_path), "hub-head.json")
+
+    health = (env.get("HUB_HEALTH") or "auto").strip().lower()
+    if health not in ("auto", "1", "0", "on", "off", "true", "false"):
+        raise ValueError("HUB_HEALTH must be auto, 1 or 0")
+    health = {"on": "1", "true": "1", "off": "0", "false": "0"}.get(health, health)
+    health_times = {}
+    for setting, default in (("HUB_HEALTH_SECONDS", "300"), ("HUB_HEALTH_SAMPLE_SECONDS", "30")):
+        try:
+            health_times[setting] = float(env.get(setting, default))
+        except (TypeError, ValueError):
+            raise ValueError(f"{setting} must be a number") from None
+        if health_times[setting] <= 0:
+            raise ValueError(f"{setting} must be > 0")
+    health_state_path = env.get("HUB_HEALTH_STATE") or os.path.join(os.path.dirname(outbox_path), "hub-health.json")
 
     return HubConfig(
         ltms_server=ltms_server,
@@ -106,11 +133,54 @@ def load_config(env: Mapping[str, str]) -> HubConfig:
         swarm=swarm,
         tick_seconds=tick_seconds,
         heartbeat_seconds=heartbeat_seconds,
+        ping_poll_seconds=ping_poll_seconds,
         state_path=state_path,
         max_msgs_per_second=max_msgs,
         swarm_topic_id=swarm_topic_id,
         legacy_name=legacy_name,
+        health=health,
+        health_seconds=health_times["HUB_HEALTH_SECONDS"],
+        health_sample_seconds=health_times["HUB_HEALTH_SAMPLE_SECONDS"],
+        health_services=env.get("HUB_HEALTH_SERVICES", ""),
+        health_state_path=health_state_path,
     )
+
+
+def deliver_pings(hub, own, client, started_at: float, now: float) -> list[str]:
+    """Admin pings (#356): answer the hub's own with a heartbeat; pass members' on over MQTT."""
+    names = client.pings()
+    for agent in names:
+        if agent == hub.name:
+            hub.heartbeat(own, started_at, now, ping=True)
+        else:
+            for prefix in hub.prefixes:
+                hub.publish(ping_topic(agent, prefix), b"", retain=False)
+    return names
+
+
+def make_health_monitor(cfg: HubConfig, now: float, root: str = "/"):
+    """The machine-health monitor (#349), or None when off (or ``auto`` off a Jetson)."""
+    from cli_agent import hub_health
+
+    if cfg.health == "0" or (cfg.health == "auto" and not hub_health.is_jetson(root)):
+        return None
+    reader = hub_health.Reader(root, services=hub_health.parse_services(cfg.health_services))
+    return hub_health.Monitor(reader, cfg.health_seconds, cfg.health_sample_seconds, now,
+                              state_path=cfg.health_state_path)
+
+
+def record_health(link, report: dict | None, alert: dict | None) -> int:
+    """Sign the window's health self-report and any throttle alert into the hub's own chain."""
+    n = 0
+    if alert is not None:
+        link.append("event", summary=alert["summary"], tags=["internal", "health", "throttle"],
+                    payload=alert["payload"])
+        n += 1
+    if report is not None:
+        link.append("perception", summary="machine health", tags=["telemetry", "internal", "health"],
+                    payload=report)
+        n += 1
+    return n
 
 
 def legacy_prefix(cfg: HubConfig, source: str) -> str | None:
@@ -198,6 +268,10 @@ def main() -> None:
     own = MemberLink(name, key, outbox, cfg.state_path, lambda *a, **k: None, prefix)
     started_at = time.monotonic()
     beat = HeartbeatTimer(cfg.heartbeat_seconds, started_at)
+    next_ping_poll = started_at
+    health = make_health_monitor(cfg, started_at)
+    if health is not None:
+        logging.info("Hub: machine health every %ss (state file %s)", int(cfg.health_seconds), cfg.health_state_path)
     mqtt_client.on_connect = make_on_connect(hub.prefixes)
     mqtt_client.on_message = make_on_message(hub)
     if cfg.mqtt_username is not None:
@@ -217,10 +291,19 @@ def main() -> None:
     try:
         while running:
             now = time.monotonic()
+            if now >= next_ping_poll:
+                next_ping_poll = now + cfg.ping_poll_seconds
+                for agent in deliver_pings(hub, own, ltms_client, started_at, now):
+                    logging.info("Hub: admin ping for %s %s", agent, "answered" if agent == hub.name else "passed on")
             if beat.due(now):
                 hub.heartbeat(own, started_at, now)
                 current = ltms_client.swarm()  # never raises; keeps the log in human terms
                 logging.info("Hub: heartbeat; swarm %s (topic %s)", (current or {}).get("name", "unknown"), prefix)
+            if health is not None:
+                try:
+                    record_health(own, *health.poll(now))
+                except Exception:  # noqa: BLE001 - health must never stop relaying
+                    logging.exception("Hub: health reading failed")
             hub.tick()
             if hub.stuck:
                 for agent, info in hub.stuck.items():

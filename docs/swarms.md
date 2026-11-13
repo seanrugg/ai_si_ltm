@@ -180,3 +180,39 @@ change it) and lands in the author's chain like anything else.
 
 In Python: `MemberLink.send_message(text, to=None, reply_to=None, payload=None)`;
 `member_main` hands received messages to a handler (by default it logs them).
+
+### Busy members: summaries to the LRS (#301)
+
+LTMS keeps every swarm message. Only what goes to an LRS changes: a member that
+sent more than `LTMS_LRS_MSG_SUMMARY_PER_HOUR` (60) swarm messages in each of
+the last `LTMS_LRS_MSG_SUMMARY_SUSTAIN_HOURS` (3) clock hours is in *summary
+mode*. Its swarm messages then go to the LRS as one `communicated` statement
+per `LTMS_LRS_MSG_SUMMARY_WINDOW_MINUTES` (5) window, with `count`, the distinct
+`peers`, the `first` and `last` record refs and the window's start and end
+(`result.extensions`, `…/message-summary/*`). It's counting, not summarising
+text. One full hour under the limit ends it. Entering and leaving are audited
+(`lrs_summary_on`, `lrs_summary_off`). The forwarder waits for a window to close
+before sending it, so it can run up to one window behind.
+
+## Heartbeats and ping (#356)
+
+Hubs and members sign a heartbeat (a self-report: `perception` tagged
+`telemetry,internal`) on start and then every `HUB_HEARTBEAT_SECONDS` /
+`HEARTBEAT_SECONDS`, by default **twice a day** (43200 s), so they don't flood
+LTMS or the LRS. A hub's relay traffic already keeps its *last seen* current.
+
+To check a member now, press **Ping** on its profile. LTMS records the request;
+nothing is pushed:
+
+1. The member's hub checks `GET /api/members/me/pings` every
+   `PING_POLL_SECONDS` (30). It answers its own ping with a heartbeat, and
+   publishes `<topic_id>/<agent>/ping` (empty, not retained) for members on MQTT.
+   A member with `LTMS_SERVER` set also checks for itself.
+2. The member answers with a heartbeat whose payload has `"ping": true`.
+3. The profile shows *waiting* → *delivered* → *answered in N s* (the first
+   record LTMS received from it after the request).
+
+The broker's ACL needs `topic write <topic_id>/+/ping` for the hub and
+`pattern read <topic_id>/%u/ping` for members (see `examples/echo-base/deploy/echo-base.acl`).
+Members keep resending unacked records every `RESEND_SECONDS` (60), separately
+from the heartbeat.
