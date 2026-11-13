@@ -174,6 +174,9 @@ class ServerConfig(BaseSettings):
 
     # Fleet datasets (#237): content-addressed files under <data_dir>/datasets.
     data_dir: str = "./data"
+    # Fleet key (#303): signs directives. Default: <data_dir>/fleet-key.json, mode 0600.
+    # Env: LTMS_FLEET_KEY_PATH.
+    fleet_key_path: str | None = None
     dataset_text_max_mb: int = 25
     # Largest file an upload may be (#245); above this, use a catalog integration.
     # Env: LTMS_DATASET_UPLOAD_MAX_MB.

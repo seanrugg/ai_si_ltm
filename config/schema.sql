@@ -50,6 +50,27 @@ CREATE TABLE declared_locations (
 	CONSTRAINT ck_declared_locations_subject_type CHECK (subject_type IN ('member', 'swarm'))
 );
 
+CREATE TABLE directives (
+	id UUID NOT NULL, 
+	scope_swarm_id VARCHAR(64), 
+	text TEXT NOT NULL, 
+	payload JSONB, 
+	issued_by VARCHAR(128) NOT NULL, 
+	issued_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	expires_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	status VARCHAR(16) NOT NULL, 
+	statement TEXT NOT NULL, 
+	signature VARCHAR(128) NOT NULL, 
+	signer VARCHAR(16) NOT NULL, 
+	cancelled_at TIMESTAMP WITH TIME ZONE, 
+	cancel_statement TEXT, 
+	cancel_signature VARCHAR(128), 
+	PRIMARY KEY (id), 
+	CONSTRAINT ck_directives_status CHECK (status IN ('open', 'cancelled'))
+);
+
+CREATE INDEX idx_directives_issued_at ON directives (issued_at);
+
 CREATE TABLE lrs_endpoints (
 	id UUID NOT NULL, 
 	name VARCHAR(64) NOT NULL, 

@@ -64,6 +64,14 @@ async def chain_head(request: Request, agent: str | None = None,
         return head
 
 
+@router.get("/fleet-key")
+async def get_fleet_key(request: Request) -> dict:
+    """The fleet's public key (#303), to verify directives. Public: it's a public key."""
+    from server.services import fleet_key
+
+    return {"public_key": fleet_key.public_hex(request.app.state.config)}
+
+
 @router.get("/swarm")
 async def my_swarm(request: Request, auth: MemberAuth = Depends(current_member)) -> dict:
     """The caller's swarm (#292): permanent ID, MQTT topic ID, current name and role; null for a free agent."""
