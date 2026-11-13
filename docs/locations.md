@@ -17,6 +17,24 @@ Nothing here makes an online lookup: it all works on a closed network.
 `best` is the first available of: gps, the member's declared location, its
 swarm's declared location, network.
 
+### Members behind a hub, and members with nothing (#346)
+
+A member on a local network (a robot behind the swarm's hub) only ever shows
+LTMS a private address, which can't be located. So:
+
+- **Via hub.** If its own address can't be located, it takes the network
+  estimate of the hub that relayed its newest record (`via_hub` in the entry).
+- **Swarm estimate.** If it still has nothing, and its swarm has no declared
+  home, it inherits the swarm's network estimate: the hub's, else the first
+  member's (`inherited_from: "swarm <name> (network estimate from <member>)"`).
+  Declaring the swarm's home replaces this.
+- **Unplaced.** A member with no position gets an `unplaced` sentence saying
+  why (only a LAN address seen, estimates off, never connected directly). The
+  Network tab lists these under "Not on the globe".
+
+`GET /api/admin/locations` also returns `geo`: `{enabled, path, reason}`, shown
+on Settings → Location estimates, so it's clear when estimates are off.
+
 ### GPS
 
 Send GPS fixes as sensed records (a `perception` tagged `telemetry`; see
