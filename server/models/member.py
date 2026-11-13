@@ -68,4 +68,9 @@ class Member(Base):
     ping_requested_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     ping_requested_by: Mapped[str | None] = mapped_column(String(128))
     ping_delivered_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # Spec sheet (#332): what the device reports, and an admin's per-field overrides.
+    specs_declared: Mapped[dict | None] = mapped_column(JSONType)
+    specs_admin: Mapped[dict | None] = mapped_column(JSONType)
+    specs_reported_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utcnow)
