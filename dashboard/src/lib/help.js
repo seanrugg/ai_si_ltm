@@ -85,4 +85,7 @@ export const MSG_OVER_HALF = "Messages are over half of this swarm's LRS traffic
 export const PING_ABOUT = "Asks the member for a heartbeat now. Its hub (or the member itself, if it talks to LTMS directly) checks for pings every 30 s; the answer is the next record LTMS receives from it. Heartbeats otherwise come twice a day.";
 export const LEADER_ABOUT = "The leader directs the swarm. Members follow its directives by default and record any refusal with a reason. The fleet owner's directives and interventions still come first.";
 
+export const DIRECTIVES_ABOUT = "A directive is signed with this fleet's key and pulled by each swarm's hub onto its bus. Members check the signature, then record that they received it and whether they accepted or declined it, with a reason.";
+export const DIRECTIVE_CONFIRM = "Members follow directives by default.";
+
 export const SPECS_ABOUT = "What the device reports about itself (hardware, models, software), with any field an admin corrected. Each value says which. Not a record: not signed or sent to the LRS.";

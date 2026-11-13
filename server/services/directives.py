@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from ltms_contract import canonicalize
 from server.models import AuditLog, Directive, Swarm
@@ -125,9 +125,57 @@ async def to_dict(session, d: Directive) -> dict:
                        if d.cancel_statement else None)}
 
 
+ACK_TAG = "directive-ack"
+
+
+async def acknowledgements(session, directives_: list[Directive]) -> dict[str, dict]:
+    """Per directive (#306): how many members it was meant for, and who received,
+    accepted or declined it (with reasons), read from members' ``directive-ack`` records."""
+    from server.models import Member, Record, SwarmMember
+    from server.services import recall
+
+    if not directives_:
+        return {}
+    oldest = min(d.issued_at for d in directives_)
+    rows = list(await session.scalars(
+        select(Record).where(Record.type == "communication", Record.received_at >= oldest,
+                             recall._json_list_contains(session, Record.tags, ACK_TAG))
+        .order_by(Record.id)))
+    payloads = await recall.fetch_payloads(session, rows)
+    latest: dict[str, dict[str, dict]] = {}
+    received: dict[str, set] = {}
+    for r in rows:
+        body = getattr(payloads.get(r.id), "body", None) or {}
+        did = body.get("directive")
+        if not did:
+            continue
+        received.setdefault(did, set()).add(r.agent)
+        if body.get("status") in ("accepted", "declined"):
+            latest.setdefault(did, {})[r.agent] = {"status": body["status"], "reason": body.get("reason")}
+    members_by_swarm: dict[str | None, int] = {}
+    for sid, n in (await session.execute(
+            select(SwarmMember.swarm_id, func.count()).join(Member, Member.id == SwarmMember.member_id)
+            .where(SwarmMember.left_at.is_(None), Member.status == "active").group_by(SwarmMember.swarm_id))).all():
+        members_by_swarm[sid] = n
+    out = {}
+    for d in directives_:
+        did = str(d.id)
+        decided = latest.get(did, {})
+        out[did] = {
+            "meant_for": members_by_swarm.get(d.scope_swarm_id, 0) if d.scope_swarm_id else sum(members_by_swarm.values()),
+            "received": len(received.get(did, ())),
+            "accepted": sum(1 for v in decided.values() if v["status"] == "accepted"),
+            "declined": sum(1 for v in decided.values() if v["status"] == "declined"),
+            "declines": [{"member": m, "reason": v["reason"]} for m, v in sorted(decided.items())
+                         if v["status"] == "declined"],
+        }
+    return out
+
+
 async def list_all(session, limit: int = 100) -> list[dict]:
-    rows = await session.scalars(select(Directive).order_by(Directive.issued_at.desc()).limit(limit))
-    return [await to_dict(session, d) for d in rows]
+    rows = list(await session.scalars(select(Directive).order_by(Directive.issued_at.desc()).limit(limit)))
+    acks = await acknowledgements(session, rows)
+    return [{**await to_dict(session, d), "delivery": acks.get(str(d.id))} for d in rows]
 
 
 async def inherit_from(session, swarm, leader_name: str | None) -> int:

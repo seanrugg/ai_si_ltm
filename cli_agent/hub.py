@@ -43,6 +43,7 @@ class Hub:
         self.name = name  # the hub's own member name, if it signs its own records
         self.outbox = outbox
         self.publish = publish
+        self.skip: set[str] = set()  # hashes of messages the hub downlinked itself (#305)
         self.swarm = swarm  # the topic prefix: the swarm's topic ID (#293)
         # Migration (#293): also serve the old name-based prefix while members move over.
         self.prefixes = [swarm] + ([legacy] if legacy and legacy != swarm else [])
@@ -114,6 +115,9 @@ class Hub:
                 return False
         try:
             rec = decode_record(payload, agent)
+            if rec.get("hash") in self.skip:
+                self.skip.discard(rec["hash"])
+                return False  # our own downlink (#305): already in LTMS
             if not is_swarm_message(rec):
                 raise ValueError("not a swarm message (a communication record tagged swarm-message)")
             with self.lock:
