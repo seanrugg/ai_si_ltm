@@ -13,6 +13,11 @@ function recipientText(r) {
   return peers.length === 0 ? "everyone" : peers.join(", ");
 }
 
+/** A swarm introduction (#334): a communication tagged ``introduction``. */
+export function isIntroduction(r) {
+  return (r?.tags || []).includes("introduction");
+}
+
 function RecordRow({ r, twoMember, firstMember }) {
   const payloadText = r.payload && typeof r.payload.text === "string" ? r.payload.text : null;
   const mine = twoMember && firstMember && r.agent === firstMember;
@@ -29,6 +34,9 @@ function RecordRow({ r, twoMember, firstMember }) {
             <span className="ml-2 border border-led/40 rounded px-1.5 py-0.5 text-[10px] text-led">
               from outside
             </span>
+          )}
+          {isIntroduction(r) && (
+            <span className="ml-2 rounded border border-ink-line px-1.5 py-0.5 text-[10px] text-paper">Introduction</span>
           )}
           {r.relayed_by && (
             <span className="ml-2 border border-led/40 rounded px-1.5 py-0.5 text-[10px] text-led">
@@ -70,6 +78,7 @@ export default function Conversation() {
   // Swarm view state
   const [swarm, setSwarm] = useState("");
   const [memberFilters, setMemberFilters] = useState(new Set());
+  const [introsOnly, setIntrosOnly] = useState(false);
   const [records, setRecords] = useState([]);
   const [cursor, setCursor] = useState(null); // {ts, id} of the oldest record on the page
   const [canLoadMore, setCanLoadMore] = useState(false);
@@ -157,10 +166,11 @@ export default function Conversation() {
     });
   }
 
-  const displayRecords =
+  const displayRecords = (
     view === "swarm"
       ? records.filter((r) => memberFilters.size === 0 || memberFilters.has(r.agent))
-      : records;
+      : records
+  ).filter((r) => !introsOnly || isIntroduction(r));
   const twoMember = view === "members" && selectedMembers.length === 2;
   const swarmEmpty = view === "swarm" && !swarm;
   const membersEmpty = view === "members" && selectedMembers.length < 2;
@@ -211,6 +221,11 @@ export default function Conversation() {
             ))}
             <option value="free">Free agents</option>
           </select>
+          <label className="ml-4 flex items-center gap-2 text-sm text-paper-muted">
+            <input type="checkbox" className="accent-led" checked={introsOnly}
+                   onChange={(e) => setIntrosOnly(e.target.checked)} />
+            Introductions only
+          </label>
           {memberNames.length > 0 && (
             <div className="ml-4 flex flex-wrap gap-2" aria-label="Filter timeline by author">
               <span className="text-xs text-paper-muted">Filter authors:</span>
