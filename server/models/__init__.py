@@ -3,6 +3,7 @@ from server.models.auth import AdminSession, AdminUser, AuthChallenge, Token
 from server.models.base import Base
 from server.models.enrollment_request import EnrollmentSwarmRequest
 from server.models.invite import Invite
+from server.models.directive import Directive
 from server.models.dataset import CatalogIntegration, Dataset, DatasetItem, DatasetRead, DatasetUpload, DatasetVersion
 from server.models.location import DeclaredLocation
 from server.models.lrs import LrsEndpoint
@@ -26,6 +27,7 @@ __all__ = [
     "DatasetUpload",
     "DatasetVersion",
     "DeclaredLocation",
+    "Directive",
     "EnrollmentSwarmRequest",
     "Invite",
     "LrsEndpoint",

@@ -380,6 +380,32 @@ async def profile_history(request: Request, admin: AdminAuth = ADMIN, member: st
         return await profile_service.history(session, subject)
 
 
+# Directives (#303): signed instructions to one swarm or all swarms.
+@router.post("/admin/directives", status_code=201)
+async def issue_directive(request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    """``{"scope": {"swarm": <name|id>} | {"all": true}, "text", "payload"?, "expires_in_days"?}``."""
+    from server.services import directives
+
+    async with transaction(request) as session:
+        return await directives.issue(session, request.app.state.config, body, issued_by=f"admin:{admin.username}")
+
+
+@router.get("/admin/directives")
+async def list_directives(request: Request, admin: AdminAuth = ADMIN) -> dict:
+    from server.services import directives
+
+    async with transaction(request) as session:
+        return {"directives": await directives.list_all(session)}
+
+
+@router.post("/admin/directives/{directive_id}/cancel")
+async def cancel_directive(directive_id: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    from server.services import directives
+
+    async with transaction(request) as session:
+        return await directives.cancel(session, request.app.state.config, directive_id, actor=f"admin:{admin.username}")
+
+
 # Admin ping (#356): ask a member for a heartbeat.
 @router.post("/admin/members/{name}/ping")
 async def ping_member(name: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
