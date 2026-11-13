@@ -12,7 +12,7 @@ import NetworkTable from "./NetworkTable.jsx";
 
 const POLL_MS = 10000;
 
-export default function Network({ subject, name, members }) {
+export default function Network({ subject, name, members, swarms }) {
   const params = { [subject]: name };
   const net = useApi("/admin/network", params);
   const locs = useApi("/admin/locations", params);
@@ -25,6 +25,8 @@ export default function Network({ subject, name, members }) {
   const netRows = useMemo(() => net.data?.members || [], [net.data]);
   const locRows = useMemo(() => locs.data?.members || [], [locs.data]);
   const sites = useMemo(() => sitesOf(locRows, memberRows), [locRows, memberRows]);
+  const roles = useMemo(() => new Map((swarms || []).flatMap((s) => (s.members || []).map((m) => [m.name, m.role]))),
+    [swarms]);
   const home = sites.find((s) => s.home) || null;
   const server = locs.data?.server && locs.data.server.lat != null ? locs.data.server : null;
   const initial = useMemo(() => ({ lon: home?.lon ?? server?.lon ?? 0, lat: home?.lat ?? server?.lat ?? 20, zoom: 1 }),
@@ -97,6 +99,7 @@ export default function Network({ subject, name, members }) {
                     onExit={() => { setMode("globe"); setViewState({ lon: home.lon, lat: home.lat, zoom: HOME_ZOOM }); }} />
         ) : (
           <Globe view={current} setView={(v) => setView(v)} sites={sites} server={server} rates={rates} home={home}
+                 roleOf={(n) => roles.get(n)}
                  onHome={() => setMode("home")} onSelectSite={(s) => setCard({ type: "site", site: s })} />
         )}
         {cardView}
