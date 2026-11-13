@@ -284,6 +284,7 @@ The new leader lists them (`GET /api/directives?inherited=1`) and must
 Unconfirmed ones stay open. The fleet outranks the leader: an admin can cancel
 any directive, and a leader can't cancel the fleet's.
 
+
 ## Introductions (#334)
 
 `GET /api/swarm` includes the swarm's `roster`: each active member's name, role,
