@@ -149,6 +149,16 @@ async def get_pings(request: Request, auth: MemberAuth = Depends(current_member)
         return {"pings": await ping.take_for(session, auth.member_id)}
 
 
+@router.get("/relay/downlink")
+async def relay_downlink(request: Request, since: str | None = None,
+                         auth: MemberAuth = Depends(current_member)) -> dict:
+    """Directives and swarm-addressed messages for the caller's swarm (#304). Hub only."""
+    from server.services import downlink
+
+    async with transaction(request) as session:
+        return await downlink.pull(session, await session.get(Member, auth.member_id), since)
+
+
 @router.put("/relay/network/{agent}")
 async def put_relay_network(agent: str, request: Request, body: dict,
                             auth: MemberAuth = Depends(current_member)) -> dict:
