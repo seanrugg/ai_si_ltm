@@ -185,6 +185,13 @@ class ServerConfig(BaseSettings):
     # ("docs.ros.org") or "*.example.org". Empty (the default) means off.
     # Env: LTMS_DATASET_URL_ALLOW.
     dataset_url_allow: str = ""
+    # Swarm-message summaries to the LRS (#301): a member that sent more than
+    # LTMS_LRS_MSG_SUMMARY_PER_HOUR swarm messages in each of the last
+    # LTMS_LRS_MSG_SUMMARY_SUSTAIN_HOURS clock hours has them sent as one
+    # statement per LTMS_LRS_MSG_SUMMARY_WINDOW_MINUTES window. LTMS keeps every message.
+    lrs_msg_summary_per_hour: int = 60
+    lrs_msg_summary_sustain_hours: int = 3
+    lrs_msg_summary_window_minutes: int = 5
     # Built-in reference sources (#351): once imported from the dashboard, LTMS
     # checks each for a new publication this often (hours); 0 = never. New
     # publications arrive as pending versions. Env: LTMS_REFERENCE_REFRESH_HOURS.

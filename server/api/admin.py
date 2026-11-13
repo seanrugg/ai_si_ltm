@@ -493,7 +493,41 @@ async def volume(
                 {"day": r.day, "agent": r.agent, "type": r.type, "records": r.records, "payload_bytes": r.payload_bytes}
                 for r in rows
             ],
+            "swarms": await _swarm_message_share(session, day, since),
         }
+
+
+async def _swarm_message_share(session, day, since) -> list[dict]:
+    """Per swarm (#302): swarm messages vs all records, per day, and who is summarised now (#301)."""
+    from sqlalchemy import case
+
+    from server.models import RecordProvenance, Swarm, SwarmMember
+    from server.services.lrs import SWARM_MESSAGE_TAG, _last_summary_state
+
+    is_msg = and_(Record.type == "communication", recall._json_list_contains(session, Record.tags, SWARM_MESSAGE_TAG))
+    rows = (await session.execute(
+        select(day.label("day"), Swarm.name, func.count(Record.id).label("records"),
+               func.sum(case((is_msg, 1), else_=0)).label("messages"))
+        .join(RecordProvenance, RecordProvenance.record_id == Record.id)
+        .join(Swarm, Swarm.id == RecordProvenance.swarm_id)
+        .where(Record.ts >= since).group_by(day, Swarm.name))).all()
+    out: dict[str, dict] = {}
+    for d, name, n, msgs in rows:
+        s = out.setdefault(name, {"swarm": name, "records": 0, "messages": 0, "days_over_half": [],
+                                  "summarised": []})
+        s["records"] += n
+        s["messages"] += int(msgs or 0)
+        if n and (msgs or 0) / n > 0.5:
+            s["days_over_half"].append(d)
+    for s in out.values():
+        s["share"] = round(s["messages"] / s["records"], 3) if s["records"] else 0.0
+        s["days_over_half"].sort()
+        members = await session.scalars(
+            select(Member.name).join(SwarmMember, SwarmMember.member_id == Member.id).join(
+                Swarm, Swarm.id == SwarmMember.swarm_id)
+            .where(Swarm.name == s["swarm"], SwarmMember.left_at.is_(None)).order_by(Member.name))
+        s["summarised"] = [m for m in members if await _last_summary_state(session, m) == "lrs_summary_on"]
+    return sorted(out.values(), key=lambda s: s["swarm"])
 
 
 @router.get("/admin/activity")
