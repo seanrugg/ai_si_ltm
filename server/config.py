@@ -182,6 +182,10 @@ class ServerConfig(BaseSettings):
     # ("docs.ros.org") or "*.example.org". Empty (the default) means off.
     # Env: LTMS_DATASET_URL_ALLOW.
     dataset_url_allow: str = ""
+    # Built-in reference sources (#351): once imported from the dashboard, LTMS
+    # checks each for a new publication this often (hours); 0 = never. New
+    # publications arrive as pending versions. Env: LTMS_REFERENCE_REFRESH_HOURS.
+    reference_refresh_hours: int = 168
     # Fleet charter (#255): days existing members have to read a new version
     # before their writes pause. Env: LTMS_CHARTER_GRACE_DAYS.
     charter_grace_days: int = 14

@@ -30,7 +30,7 @@ from server.services import location as location_service
 from server.services import network as network_service
 from server.services import profile as profile_service
 from server.services import datasets as datasets_service
-from server.services import charter, dataset_uploads, integrations, url_snapshot
+from server.services import charter, dataset_uploads, integrations, reference_sources, url_snapshot
 from server.services import swarm_remove
 from server.services.errors import ServiceError
 
@@ -1356,6 +1356,33 @@ async def upload_dataset_items(dataset_id: str, version: int, request: Request,
         items = await datasets_service.upload_items(session, request.app.state.config, ds, version, files,
                                                     prefix=prefix)
         return {"items": items, "dataset": await datasets_service.dataset_dict(session, ds)}
+
+
+# Built-in reference sources (#351): import from the dashboard, refresh weekly.
+@router.get("/admin/reference-sources")
+async def list_reference_sources(request: Request, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        return {"sources": await reference_sources.status(session, request.app.state.config)}
+
+
+@router.post("/admin/reference-sources/{key}/import")
+async def import_reference_source(key: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    """Fetch the source's latest publication from its own host into a pending version."""
+    async with transaction(request) as session:
+        return await reference_sources.import_latest(
+            session, request.app.state.config, key, admin=f"admin:{admin.username}",
+            transport=getattr(request.app.state, "url_snapshot_transport", None),
+            resolve=getattr(request.app.state, "url_snapshot_resolve", None))
+
+
+@router.post("/admin/reference-sources/{key}/import-file")
+async def import_reference_source_file(key: str, request: Request, file: UploadFile = File(...),
+                                       admin: AdminAuth = ADMIN) -> dict:
+    """The same from a saved copy, for closed networks."""
+    body = await file.read(reference_sources.MAX_DOC_MB * 1024 * 1024 + 1)
+    async with transaction(request) as session:
+        return await reference_sources.import_upload(session, request.app.state.config, key, body,
+                                                     file.filename or "upload", admin=f"admin:{admin.username}")
 
 
 # Fleet charter (#255): publish markdown; see who has read the current version.

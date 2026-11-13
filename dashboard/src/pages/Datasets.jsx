@@ -5,8 +5,8 @@ import HelpTip from "../components/HelpTip.jsx";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, Loading, PageHeader, StatusBadge } from "../components/ui.jsx";
-import { DATASET_APPROVE, DATASET_LARGE, DATASET_SCOPE, INTEGRATION_ABOUT, INTEGRATION_CREDENTIAL, URL_SNAPSHOT } from "../lib/help.js";
-import { CHUNKED_ABOVE, FILTERS, filterDatasets, formatBytes, hasPending, sortDatasets, totalSize, uploadFiles } from "../lib/datasets.js";
+import { DATASET_APPROVE, DATASET_LARGE, DATASET_SCOPE, INTEGRATION_ABOUT, INTEGRATION_CREDENTIAL, INTEGRATION_EMPTY, REFERENCE_REFRESH, REFERENCE_SOURCES, URL_SNAPSHOT } from "../lib/help.js";
+import { CHUNKED_ABOVE, FILTERS, filterDatasets, formatBytes, hasPending, isEmptyIntegration, referenceStatus, refreshLabel, sortDatasets, totalSize, uploadFiles } from "../lib/datasets.js";
 import { localTime } from "../lib/format.js";
 
 function UploadResults({ results }) {
@@ -167,6 +167,83 @@ export function SnapshotUrl({ datasetId, onDone }) {
       {done && <span className="text-sm text-ok" role="status">Saved {done.item.key} as version {done.version}</span>}
       <ErrorNote error={error} />
     </form>
+  );
+}
+
+function ReferenceSource({ source, onChanged }) {
+  const [busy, setBusy] = useState(null);
+  const [error, setError] = useState(null);
+  const [done, setDone] = useState(null);
+  const fid = `ref-file-${source.key}`;
+
+  async function run(kind, file) {
+    setBusy(kind);
+    setError(null);
+    setDone(null);
+    try {
+      const path = `/admin/reference-sources/${encodeURIComponent(source.key)}/${kind === "file" ? "import-file" : "import"}`;
+      let body;
+      if (file) {
+        body = new FormData();
+        body.append("file", file);
+      }
+      setDone(await api(path, { method: "POST", body }));
+      onChanged?.();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <li className="py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-bold">{source.title}</span>
+        <a className="text-sm text-paper-muted underline-offset-2 hover:underline" href={source.url}
+           target="_blank" rel="noreferrer">{source.url}</a>
+      </div>
+      <p className="text-sm text-paper-muted">{source.description}</p>
+      <p className="text-sm" role="status">{referenceStatus(source)}</p>
+      <p className="flex items-center gap-1 text-xs text-paper-muted">
+        Checks for new publications: {source.dataset_id ? refreshLabel(source.refresh_hours) : "after the first import"}
+        <HelpTip id={`ref-refresh-${source.key}`} label="About automatic checks">{REFERENCE_REFRESH}</HelpTip>
+      </p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button type="button" className="btn btn-primary" disabled={!!busy} onClick={() => run("latest")}>
+          {busy === "latest" ? "Importing…" : source.dataset_id ? "Check for a new publication" : "Import latest"}
+        </button>
+        <label htmlFor={fid} className="btn cursor-pointer focus-within:ring-2 focus-within:ring-led">
+          {busy === "file" ? "Importing…" : "Import from a saved file"}
+          <input id={fid} type="file" accept=".jsonld,.json,application/ld+json,application/json" className="sr-only"
+                 disabled={!!busy}
+                 onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) run("file", f); }} />
+        </label>
+      </div>
+      {done && (
+        <p className="mt-1 text-sm text-ok" role="status">
+          {done.status === "unchanged"
+            ? `Already have ${done.publicationVersion} (dataset v${done.version}); nothing to import.`
+            : `Imported ${done.items} entries from ${done.publicationVersion} as v${done.version}. Approve it below so members can read it.`}
+        </p>
+      )}
+      <ErrorNote error={error} />
+    </li>
+  );
+}
+
+export function ReferenceSources({ data, onChanged }) {
+  const sources = data?.sources || [];
+  if (!sources.length) return null;
+  return (
+    <section className="mb-6 rounded-md border border-ink-line bg-ink p-4" aria-labelledby="refsources-h">
+      <h2 id="refsources-h" className="mb-1 text-lg font-bold">
+        Reference sources <HelpTip id="refsources-about" label="About reference sources">{REFERENCE_SOURCES}</HelpTip>
+      </h2>
+      <ul aria-label="Reference sources">
+        {sources.map((s) => <ReferenceSource key={s.key} source={s} onChanged={onChanged} />)}
+      </ul>
+    </section>
   );
 }
 
@@ -461,6 +538,7 @@ export function DatasetDetail({ dataset, onChanged, integrations = [] }) {
 export default function Datasets() {
   const { data, error, loading, reload } = useApi("/admin/datasets");
   const ints = useApi("/admin/integrations");
+  const refs = useApi("/admin/reference-sources");
   const integrations = ints.data?.integrations || [];
   const [filter, setFilter] = useState("all");
   const [open, setOpen] = useState(null);
@@ -486,6 +564,7 @@ export default function Datasets() {
         Reference material for the whole fleet. Members read approved versions; every read is logged and sent
         to the LRS. LTMS doesn&apos;t train on it.
       </p>
+      <ReferenceSources data={refs.data} onChanged={() => { refs.reload(); reload(); }} />
       <Integrations data={ints.data} onChanged={() => { ints.reload(); reload(); }} />
       <AddDataset onCreated={reload} integrations={integrations} />
       {list.length === 0 ? (
@@ -509,6 +588,12 @@ export default function Datasets() {
                   {(ds.versions || []).find((v) => v.version === ds.current_version)?.item_count ?? 0} items ·{" "}
                   {formatBytes(totalSize(ds))} · {ds.licence}
                 </span>
+                {isEmptyIntegration(ds) && (
+                  <span className="flex items-center gap-1 text-sm text-warn">
+                    No items yet
+                    <HelpTip id={`empty-int-${ds.id}`} label="Why this dataset is empty">{INTEGRATION_EMPTY}</HelpTip>
+                  </span>
+                )}
               </div>
               {open === ds.id && <DatasetDetail dataset={ds} onChanged={reload} integrations={integrations} />}
             </li>

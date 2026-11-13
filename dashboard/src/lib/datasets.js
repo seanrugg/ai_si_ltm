@@ -101,3 +101,35 @@ export async function uploadFiles(api, datasetId, version, files, onProgress = (
   }
   return results;
 }
+
+/** One line describing a reference source's state (#351). */
+export function referenceStatus(source) {
+  const pubs = source?.publications || [];
+  if (!source?.dataset_id || pubs.length === 0) return "Not imported yet.";
+  const approved = pubs.filter((p) => p.status === "approved");
+  const pending = pubs.filter((p) => p.status === "pending");
+  const parts = [];
+  if (approved.length) {
+    const p = approved[approved.length - 1];
+    parts.push(`Members read ${p.publicationVersion} (dataset v${p.version}).`);
+  } else {
+    parts.push("No version approved yet: members can't read it.");
+  }
+  if (pending.length) {
+    const p = pending[pending.length - 1];
+    parts.push(`${p.publicationVersion} is waiting for approval (v${p.version}).`);
+  }
+  return parts.join(" ");
+}
+
+/** "every 7 days" / "every 12 hours" / "off". */
+export function refreshLabel(hours) {
+  if (!hours) return "off";
+  if (hours % 24 === 0) return hours === 24 ? "daily" : hours === 168 ? "weekly" : `every ${hours / 24} days`;
+  return hours === 1 ? "hourly" : `every ${hours} hours`;
+}
+
+/** An integration dataset whose versions hold no items is only a bookmark. */
+export function isEmptyIntegration(ds) {
+  return ds?.kind === "integration" && !(ds.versions || []).some((v) => v.item_count > 0);
+}
