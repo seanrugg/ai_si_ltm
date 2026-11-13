@@ -113,6 +113,7 @@ async def my_swarm(request: Request, auth: MemberAuth = Depends(current_member))
         member = await session.get(Member, auth.member_id)
         swarm = await swarm_identity.swarm_of(session, member)
         if swarm is not None:
+            swarm["roster"] = await _roster(session, swarm["id"])
             from server.models import Swarm as SwarmRow
 
             # The leader (#308): name and public key, so members can verify its directives.
@@ -123,6 +124,19 @@ async def my_swarm(request: Request, auth: MemberAuth = Depends(current_member))
         led = await session.scalar(select(SwarmRow2).where(SwarmRow2.leader_member_id == member.id,
                                                            SwarmRow2.status == "active"))
         return {"swarm": swarm, "leads": {"id": led.id, "name": led.name} if led is not None else None}
+
+
+async def _roster(session, swarm_id: str) -> list[dict]:
+    """Active members of a swarm, for introductions (#334): name, role, kind and a one-line
+    spec summary. No keys, operators or locations."""
+    from server.models import SwarmMember
+    from server.services import specs
+
+    rows = (await session.execute(
+        select(Member, SwarmMember.role).join(SwarmMember, SwarmMember.member_id == Member.id)
+        .where(SwarmMember.swarm_id == swarm_id, SwarmMember.left_at.is_(None), Member.status == "active")
+        .order_by(Member.name))).all()
+    return [{"name": m.name, "role": role, "kind": m.kind, "summary": specs.summary_line(m)} for m, role in rows]
 
 
 @router.put("/members/me/cognition")

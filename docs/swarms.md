@@ -283,3 +283,23 @@ The new leader lists them (`GET /api/directives?inherited=1`) and must
 `POST /api/directives/{id}/confirm` or `/cancel` each one; both are audited.
 Unconfirmed ones stay open. The fleet outranks the leader: an admin can cancel
 any directive, and a leader can't cancel the fleet's.
+
+## Introductions (#334)
+
+`GET /api/swarm` includes the swarm's `roster`: each active member's name, role,
+kind and a one-line spec summary (from the spec sheet, [specs.md](specs.md)).
+No keys, operators or locations.
+
+When the harness starts in a swarm (or its role changes) it introduces itself
+once: a `communication` tagged `introduction` (and `swarm-message` on the bus),
+addressed to the whole swarm, with `{swarm, role, specs_summary, capabilities,
+harness_version}` in the payload. The last swarm and role it introduced itself
+as are kept in `introduced.json` beside its state, so a restart sends nothing.
+With the direct transport it's appended to its chain instead of published.
+
+A member that hears an introduction may reply once (`refs.reply_to`), after a
+random 0 to 30 s delay so a newcomer isn't answered by everyone at once. It
+never replies to a reply. `INTRO_REPLY=off` turns replies off;
+`INTRO_CHECK_SECONDS` (3600) is how often it checks for a new swarm or role.
+Introductions count against the hub's per-member message limit. The
+Conversation page marks them and can show introductions only.
