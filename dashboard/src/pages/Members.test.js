@@ -206,6 +206,32 @@ describe("wipe memory", () => {
   });
 });
 
+describe("intended swarm and role on the pending card (#295)", () => {
+  it("shows what the device is for, and the hub note for a would-be hub", () => {
+    allMembers = [
+      { id: "7", name: "hubby", status: "pending", kind: "relay", permissions: [], requested_permissions: ["contribute"],
+        public_key: "cccc3333cccc3333cccc3333cccc3333cccc3333cccc3333cccc3333cccc3333", created_at: "2026-01-01T00:00:00Z",
+        intended: { swarm: "echo-base", role: "hub" } },
+      { id: "8", name: "plain", status: "pending", kind: "robot", permissions: [], requested_permissions: ["contribute"],
+        public_key: "dddd4444dddd4444dddd4444dddd4444dddd4444dddd4444dddd4444dddd4444", created_at: "2026-01-01T00:00:00Z" },
+    ];
+    const { container } = renderMembers();
+    expect(container.textContent).toContain("Wants to be the hub of echo-base");
+    expect(container.textContent).toContain("Relay rights come from the swarm's root key");
+    expect(container.textContent.match(/Wants to be the/g)).toHaveLength(1);
+  });
+});
+
+describe("approval card fingerprint check (#283)", () => {
+  it("labels the 16 characters as the start of the public key and gives the safe command", () => {
+    const { container } = renderMembers();
+    expect(screen.getAllByText("Public key (first 16 characters)").length).toBe(2);
+    expect(container.textContent).toContain("python -m cli_agent pubkey --key");
+    expect(container.textContent).toContain("Don't open the key file itself: it contains the private key.");
+    expect(container.textContent).not.toContain("against the key file on the device");
+  });
+});
+
 describe("kind and permissions are labelled separately (#280)", () => {
   it("shows Kind and Permissions as two labelled parts, with the profile's kind wording", () => {
     allMembers = [

@@ -186,3 +186,30 @@ def test_on_connect_publishes_hello_when_given():
                                  lambda: ("echo-base/z3-r0/hello", b'{"agent":"z3-r0"}'))
     on_connect(client, None, {}, 0, None)
     assert client.publishes == [("echo-base/z3-r0/hello", b'{"agent":"z3-r0"}', 1, False)]
+
+
+
+# --- topics by swarm topic ID (#293) ---
+def test_member_prefix_precedence(caplog):
+    from cli_agent.member_main import member_prefix
+    info = {"topic_id": "sw-1a2b3c4d", "name": "echo-base"}
+    cfg = load_config({"LTMS_KEY_PATH": "k.json", "SWARM_TOPIC_ID": "sw-1a2b3c4d", "SWARM": "echo-base"})
+    assert member_prefix(cfg, lambda: info) == ("sw-1a2b3c4d", "config")
+    # An explicit SWARM name is kept (the broker ACL may not allow the new topics yet), with a hint.
+    cfg = load_config({"LTMS_KEY_PATH": "k.json", "SWARM": "echo-base", "LTMS_SERVER": "http://x"})
+    with caplog.at_level("WARNING"):
+        assert member_prefix(cfg, lambda: info) == ("echo-base", "name")
+    assert "SWARM_TOPIC_ID=sw-1a2b3c4d" in caplog.text
+    # Neither set: looked up from LTMS.
+    cfg = load_config({"LTMS_KEY_PATH": "k.json", "LTMS_SERVER": "http://x"})
+    assert member_prefix(cfg, lambda: info) == ("sw-1a2b3c4d", "ltms")
+
+
+def test_member_needs_some_way_to_find_its_topic():
+    from cli_agent.member_main import member_prefix
+    from cli_agent.swarm_topic import NoSwarmTopic
+    with pytest.raises(ValueError, match="SWARM_TOPIC_ID"):
+        load_config({"LTMS_KEY_PATH": "k.json"})
+    cfg = load_config({"LTMS_KEY_PATH": "k.json", "LTMS_SERVER": "http://x"})
+    with pytest.raises(NoSwarmTopic):
+        member_prefix(cfg, lambda: None)  # a free agent, or LTMS unreachable
