@@ -72,4 +72,5 @@ class Member(Base):
     specs_declared: Mapped[dict | None] = mapped_column(JSONType)
     specs_admin: Mapped[dict | None] = mapped_column(JSONType)
     specs_reported_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utcnow)

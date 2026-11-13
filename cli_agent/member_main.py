@@ -248,7 +248,11 @@ def heartbeat(link, started_at: float, now: float, ping: bool = False) -> dict:
     )
 
 
-def main() -> None:
+def main(poll=None) -> None:
+    """Run the member. ``poll(link, now)``, if given, is called once a loop (about every
+    second) so a program built on the member (a robot sidecar, #312) can sign its own
+    records into the same chain and transport. An exception in it is logged, never fatal.
+    """
     # paho is imported here so the rest of the module imports without it.
     import paho.mqtt.client as mqtt
 
@@ -379,6 +383,11 @@ def main() -> None:
             elif now >= next_heartbeat:
                 heartbeat(link, started_at, now)
                 next_heartbeat = now + cfg.heartbeat_seconds
+            if poll is not None:
+                try:
+                    poll(link, now)
+                except Exception:  # noqa: BLE001 - a source's bug must not stop the member
+                    logging.exception("Member: poll failed")
             if direct is not None and transport.choose(time.monotonic()) == "direct":
                 direct.flush()
             # Sleep up to 1 second, waking early if asked to stop.

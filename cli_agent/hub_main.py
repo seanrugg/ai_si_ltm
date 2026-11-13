@@ -41,6 +41,11 @@ class HubConfig:
     state_path: str = "hub-head.json"  # HUB_STATE_PATH (default: hub-head.json beside the outbox)
     swarm_topic_id: str | None = None  # SWARM_TOPIC_ID (preferred; else looked up from LTMS, #293)
     legacy_name: str | None = None     # SWARM_LEGACY_NAME (migration: also serve <name>/+/...)
+    health: str = "auto"               # HUB_HEALTH: auto (on for a Jetson) | 1 | 0 (#349)
+    health_seconds: float = 300.0      # HUB_HEALTH_SECONDS: one health self-report per window
+    health_sample_seconds: float = 30.0  # HUB_HEALTH_SAMPLE_SECONDS: how often to read the machine
+    health_services: str = ""          # HUB_HEALTH_SERVICES: name=http(s)://url or name=systemd:unit, comma-separated
+    health_state_path: str = "hub-health.json"  # HUB_HEALTH_STATE: newest sample, readable by local programs
 
 
 def load_config(env: Mapping[str, str]) -> HubConfig:
@@ -104,6 +109,20 @@ def load_config(env: Mapping[str, str]) -> HubConfig:
 
     state_path = env.get("HUB_STATE_PATH") or os.path.join(os.path.dirname(outbox_path), "hub-head.json")
 
+    health = (env.get("HUB_HEALTH") or "auto").strip().lower()
+    if health not in ("auto", "1", "0", "on", "off", "true", "false"):
+        raise ValueError("HUB_HEALTH must be auto, 1 or 0")
+    health = {"on": "1", "true": "1", "off": "0", "false": "0"}.get(health, health)
+    health_times = {}
+    for setting, default in (("HUB_HEALTH_SECONDS", "300"), ("HUB_HEALTH_SAMPLE_SECONDS", "30")):
+        try:
+            health_times[setting] = float(env.get(setting, default))
+        except (TypeError, ValueError):
+            raise ValueError(f"{setting} must be a number") from None
+        if health_times[setting] <= 0:
+            raise ValueError(f"{setting} must be > 0")
+    health_state_path = env.get("HUB_HEALTH_STATE") or os.path.join(os.path.dirname(outbox_path), "hub-health.json")
+
     return HubConfig(
         ltms_server=ltms_server,
         key_path=key_path,
@@ -121,6 +140,11 @@ def load_config(env: Mapping[str, str]) -> HubConfig:
         max_msgs_per_second=max_msgs,
         swarm_topic_id=swarm_topic_id,
         legacy_name=legacy_name,
+        health=health,
+        health_seconds=health_times["HUB_HEALTH_SECONDS"],
+        health_sample_seconds=health_times["HUB_HEALTH_SAMPLE_SECONDS"],
+        health_services=env.get("HUB_HEALTH_SERVICES", ""),
+        health_state_path=health_state_path,
     )
 
 
@@ -134,6 +158,31 @@ def deliver_pings(hub, own, client, started_at: float, now: float) -> list[str]:
             for prefix in hub.prefixes:
                 hub.publish(ping_topic(agent, prefix), b"", retain=False)
     return names
+
+
+def make_health_monitor(cfg: HubConfig, now: float, root: str = "/"):
+    """The machine-health monitor (#349), or None when off (or ``auto`` off a Jetson)."""
+    from cli_agent import hub_health
+
+    if cfg.health == "0" or (cfg.health == "auto" and not hub_health.is_jetson(root)):
+        return None
+    reader = hub_health.Reader(root, services=hub_health.parse_services(cfg.health_services))
+    return hub_health.Monitor(reader, cfg.health_seconds, cfg.health_sample_seconds, now,
+                              state_path=cfg.health_state_path)
+
+
+def record_health(link, report: dict | None, alert: dict | None) -> int:
+    """Sign the window's health self-report and any throttle alert into the hub's own chain."""
+    n = 0
+    if alert is not None:
+        link.append("event", summary=alert["summary"], tags=["internal", "health", "throttle"],
+                    payload=alert["payload"])
+        n += 1
+    if report is not None:
+        link.append("perception", summary="machine health", tags=["telemetry", "internal", "health"],
+                    payload=report)
+        n += 1
+    return n
 
 
 def legacy_prefix(cfg: HubConfig, source: str) -> str | None:
@@ -225,6 +274,10 @@ def main() -> None:
     from cli_agent.hub_downlink import Downlink
     downlink = Downlink(ltms_client, hub, os.path.join(os.path.dirname(os.path.abspath(cfg.state_path)), "hub-downlink.json"))
     next_downlink = started_at
+
+    health = make_health_monitor(cfg, started_at)
+    if health is not None:
+        logging.info("Hub: machine health every %ss (state file %s)", int(cfg.health_seconds), cfg.health_state_path)
     mqtt_client.on_connect = make_on_connect(hub.prefixes)
     mqtt_client.on_message = make_on_message(hub)
     if cfg.mqtt_username is not None:
@@ -260,6 +313,11 @@ def main() -> None:
                 hub.heartbeat(own, started_at, now)
                 current = ltms_client.swarm()  # never raises; keeps the log in human terms
                 logging.info("Hub: heartbeat; swarm %s (topic %s)", (current or {}).get("name", "unknown"), prefix)
+            if health is not None:
+                try:
+                    record_health(own, *health.poll(now))
+                except Exception:  # noqa: BLE001 - health must never stop relaying
+                    logging.exception("Hub: health reading failed")
             hub.tick()
             if hub.stuck:
                 for agent, info in hub.stuck.items():

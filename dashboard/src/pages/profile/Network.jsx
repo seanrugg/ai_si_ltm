@@ -4,13 +4,33 @@ import { api } from "../../api/client.js";
 import { useApi } from "../../api/useApi.js";
 import { ErrorNote, Loading } from "../../components/ui.jsx";
 import { HOME_ZOOM } from "../../lib/globe.js";
-import { ratesFrom, sitesOf } from "../../lib/sites.js";
+import { ratesFrom, sitesOf, unplacedOf } from "../../lib/sites.js";
 import DataCard, { MemberFacts } from "./DataCard.jsx";
 import Globe from "./Globe.jsx";
 import HomeView from "./HomeView.jsx";
 import NetworkTable from "./NetworkTable.jsx";
 
 const POLL_MS = 10000;
+
+/** Who isn't on the globe, and why (#346). */
+export function Unplaced({ rows, geo }) {
+  if (!rows.length) return null;
+  return (
+    <section className="mt-3 rounded-md border border-ink-line p-3 text-sm" aria-labelledby="unplaced-h">
+      <h3 id="unplaced-h" className="font-bold">Not on the globe ({rows.length})</h3>
+      <ul className="mt-1 space-y-1">
+        {rows.map((r) => (
+          <li key={r.name}><span className="font-bold">{r.name}</span>: <span className="text-paper-muted">{r.reason}</span></li>
+        ))}
+      </ul>
+      {geo && !geo.enabled && (
+        <p className="mt-2 text-xs text-paper-muted">
+          Network estimates are off: {geo.reason}. See Settings → Location estimates.
+        </p>
+      )}
+    </section>
+  );
+}
 
 export default function Network({ subject, name, members }) {
   const params = { [subject]: name };
@@ -106,6 +126,7 @@ export default function Network({ subject, name, members }) {
           Declare the server&apos;s location (a member location named <code>ltms-server</code>) to draw data flowing to it.
         </p>
       )}
+      <Unplaced rows={unplacedOf(locRows)} geo={locs.data?.geo} />
       <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="Sites and members">
         {sites.map((s) => (
           <button key={s.key} type="button" className="btn" onClick={() => setCard({ type: "site", site: s })}>
