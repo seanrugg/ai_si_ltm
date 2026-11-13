@@ -253,3 +253,20 @@ scoped recall of the swarm's records (every type except `system`), and removing
 or replacing the leader takes back exactly what the appointment added. A member
 that already has full recall keeps it unchanged. `GET /api/swarm` shows the
 leader's name and public key, so members can verify its directives (#310).
+
+### Leader directives (#310)
+
+The current leader issues directives to its own swarm through LTMS, signed with
+**its own key** (same statement and `ltms-directive-v1\n` prefix as the fleet's,
+`issued_by` = the leader): `LTMSClient.issue_directive(text, payload=None,
+expires_in=None)`, i.e. `POST /api/directives` with `{statement, signature}`.
+LTMS checks the issuer is the current leader and the scope is its own swarm
+(403 otherwise), then the downlink delivers it like any directive. Members
+verify it with the leader's key from `GET /api/swarm` (`leader.public_key`).
+`GET /api/swarm` also says which swarm a member leads (`leads`).
+
+When the leader changes, the old leader's open directives become `inherited`.
+The new leader lists them (`GET /api/directives?inherited=1`) and must
+`POST /api/directives/{id}/confirm` or `/cancel` each one; both are audited.
+Unconfirmed ones stay open. The fleet outranks the leader: an admin can cancel
+any directive, and a leader can't cancel the fleet's.
