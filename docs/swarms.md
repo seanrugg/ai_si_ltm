@@ -222,3 +222,18 @@ publishing, so a crash re-delivers instead of losing. It doesn't forward
 downlinked messages back to LTMS. The ACL needs `topic write <topic_id>/fleet/#`
 and `topic write <topic_id>/+/say` for the hub, and `pattern read <topic_id>/fleet/#`
 for members.
+
+### Acknowledging directives (#306)
+
+A member subscribes to `<topic_id>/fleet` and `<topic_id>/fleet/+`, checks each
+directive's signature with the fleet's public key (fetched from
+`GET /api/fleet-key` once and kept in `fleet-key.pub` beside its state, or
+`FLEET_PUBLIC_KEY`), and records as itself a `communication` tagged
+`directive-ack`: first `{"directive": id, "status": "received"}`, then
+`accepted`, or `declined` with a `reason`. **Directives are followed by
+default**: behaviour code replaces the default decision, and a decline needs a
+reason (safety envelope, permissions, or the charter). An invalid signature is
+ignored and recorded once as an `event` tagged `directive-invalid`. Handled ids
+are kept in `directives.json`, so a retained directive isn't acknowledged twice.
+The admin's directive list shows, per directive, how many members it was meant
+for and how many received, accepted and declined it, with each decline's reason.

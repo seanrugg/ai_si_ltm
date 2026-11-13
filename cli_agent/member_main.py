@@ -24,7 +24,7 @@ from cli_agent.member_link import MemberLink
 from cli_agent.client import local_addresses
 from cli_agent.mqtt_messages import (
     acks_topic, agent_from_say_topic, decode_record, encode_hello, hello_topic, is_swarm_message, ping_topic,
-    say_subscription, topic_kind,
+    fleet_subscription, say_subscription, topic_kind,
 )
 from cli_agent.outbox import Outbox
 from cli_agent.swarm_topic import NoSwarmTopic, check_prefix, resolve
@@ -145,13 +145,15 @@ def member_prefix(cfg: MemberConfig, lookup=None) -> tuple[str, str]:
 
 
 def make_on_message(acks: "queue.Queue[bytes]", messages: "queue.Queue | None" = None,
-                    pinged: "threading.Event | None" = None):
+                    pinged: "threading.Event | None" = None, fleet: "queue.Queue | None" = None):
     """Acks go to ``acks``; swarm messages (#300) go to ``messages`` as (topic, payload);
     an admin ping (#356) sets ``pinged``."""
     def on_message(client, userdata, msg) -> None:
         try:
             if pinged is not None and topic_kind(msg.topic) == "ping":
                 pinged.set()
+            elif fleet is not None and "/fleet" in msg.topic and msg.topic.split("/")[1] == "fleet":
+                fleet.put(msg.payload)  # a directive or a cancel (#306)
             elif messages is not None and topic_kind(msg.topic) == "say":
                 messages.put((msg.topic, msg.payload))
             else:
@@ -192,7 +194,7 @@ def drain_messages(messages: "queue.Queue", name: str, prefix: str, handler=log_
 
 
 def make_on_connect(acks_topic_name: str, wanted: threading.Event, hello=None, say_sub: str | None = None,
-                    ping_sub: str | None = None):
+                    ping_sub: str | None = None, fleet_subs: list[str] | None = None):
     """``hello`` is an optional ``() -> (topic, payload)``: published on every connect (#216).
     ``say_sub``: the swarm's messages to subscribe to (#300). ``ping_sub``: admin pings (#356)."""
     def on_connect(client, userdata, flags, reason_code, properties) -> None:
@@ -200,6 +202,8 @@ def make_on_connect(acks_topic_name: str, wanted: threading.Event, hello=None, s
             client.subscribe(acks_topic_name, qos=1)
             if ping_sub:
                 client.subscribe(ping_sub, qos=1)
+            for sub in fleet_subs or []:
+                client.subscribe(sub, qos=1)
             if say_sub:
                 client.subscribe(say_sub, qos=1)
             wanted.set()
@@ -290,7 +294,25 @@ def main() -> None:
     messages: "queue.Queue" = queue.Queue()
     pinged = threading.Event()
     connected_cb = make_on_connect(acks_topic(name, prefix), resend_wanted, hello, say_subscription(prefix),
-                                   ping_topic(name, prefix))
+                                   ping_topic(name, prefix), fleet_subscription(prefix))
+    fleet_msgs: "queue.Queue" = queue.Queue()
+    from cli_agent.directives import DirectiveHandler
+    fleet_key_cache = os.path.join(os.path.dirname(os.path.abspath(cfg.state_path)), "fleet-key.pub")
+
+    def fleet_key() -> str | None:
+        """The fleet's public key: cached beside the state, fetched from LTMS if missing (#306)."""
+        try:
+            with open(fleet_key_cache, encoding="utf-8") as f:
+                return f.read().strip() or None
+        except OSError:
+            pass
+        key = os.environ.get("FLEET_PUBLIC_KEY") or (ltms.fleet_key() if ltms is not None else None)
+        if key:
+            with open(fleet_key_cache, "w", encoding="utf-8") as f:
+                f.write(key)
+        return key
+    directives = DirectiveHandler(link, fleet_key,
+                                  os.path.join(os.path.dirname(os.path.abspath(cfg.state_path)), "directives.json"))
 
     def on_connect(client, userdata, flags, reason_code, properties) -> None:
         transport.on_connect()
@@ -303,7 +325,7 @@ def main() -> None:
     if use_mqtt:
         mqtt_client.on_connect = on_connect
         mqtt_client.on_disconnect = on_disconnect
-        mqtt_client.on_message = make_on_message(acks, messages, pinged)
+        mqtt_client.on_message = make_on_message(acks, messages, pinged, fleet_msgs)
         if cfg.mqtt_username is not None:
             mqtt_client.username_pw_set(cfg.mqtt_username, cfg.mqtt_password)
         mqtt_client.connect_async(cfg.mqtt_host, cfg.mqtt_port)
