@@ -129,12 +129,14 @@ class LTMSClient:
 
     # ------------------------------------------------------------------ enroll / login
     def enroll(self, kind: str, permissions: list[str], operator: str | None = None, note: str | None = None,
-               intended: dict | None = None) -> dict:
+               intended: dict | None = None, proxied_by: str | None = None) -> dict:
         """``intended`` = ``{"swarm", "role"}``: what this member is for (#295). A request, never a grant."""
         body = {"name": self.name, "kind": kind, "public_key": public_key_hex(self.key),
                 "permissions": permissions, "operator": operator, "note": note}
         if intended:
             body["intended"] = intended
+        if proxied_by:
+            body["proxied_by"] = proxied_by  # #311: this key is held by a sidecar, not the device
         return self._call("POST", "/api/auth/enroll", auth=False, json=body)
 
     def login(self) -> dict:
