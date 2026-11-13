@@ -46,6 +46,8 @@ async def enroll(body: EnrollRequest, request: Request) -> dict:
             swarm=body.swarm,
             invite=body.invite,
             enrollment_policy=effective["policy"],
+            intended=body.intended,
+            proxied_by=body.proxied_by,
         )
         return {"id": str(member.id), "name": member.name, "status": member.status}
 

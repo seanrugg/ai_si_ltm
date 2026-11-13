@@ -1,7 +1,7 @@
 import { useState } from "react";
 import HelpTip from "../components/HelpTip.jsx";
 import LocationForm from "../components/LocationForm.jsx";
-import { FINGERPRINT_CHECK, SWARM_MOVE, SWARM_ROLE, MEMORY_WIPE, WIPE_VS_DELETE } from "../lib/help.js";
+import { FINGERPRINT_CHECK, HUB_INTENT, SWARM_MOVE, SWARM_ROLE, MEMORY_WIPE, WIPE_VS_DELETE } from "../lib/help.js";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
@@ -9,6 +9,7 @@ import { EmptyState, ErrorNote, HashStrip, Loading, PageHeader, StatusBadge } fr
 import { localTime, plural, relativeTime } from "../lib/format.js";
 import { describeChange, HUB_WARNING, membershipChange } from "../lib/membership.js";
 import { KINDS, kindOf } from "../lib/visual.js";
+import ProxiedBadge from "../components/ProxiedBadge.jsx";
 
 const PERMISSIONS = [
   { id: "contribute", help: "Write records under its own name" },
@@ -130,8 +131,19 @@ function PendingCard({ m, selected, onToggle, onDone }) {
         <dt className="text-paper-muted">Public key (first 16 characters)</dt>
         <dd><HashStrip hash={m.public_key} label={m.public_key.slice(0, 16)} /></dd>
         {m.note && (<><dt className="text-paper-muted">Note</dt><dd>{m.note}</dd></>)}
+        {m.proxied_by && (<>
+          <dt className="text-paper-muted">Proxied</dt>
+          <dd>Its key is held by {m.proxied_by}</dd>
+        </>)}
+        {m.intended?.role && m.intended?.swarm && (<>
+          <dt className="text-paper-muted">Intended</dt>
+          <dd>Wants to be the <strong>{m.intended.role}</strong> of <strong>{m.intended.swarm}</strong></dd>
+        </>)}
       </dl>
       <p className="mt-2 text-xs text-paper-faint">{FINGERPRINT_CHECK}</p>
+      {m.intended?.role === "hub" && (
+        <p className="mt-1 text-xs text-paper-muted">{HUB_INTENT}</p>
+      )}
       <ErrorNote error={error} />
       {mode === null && (
         <div className="mt-3 flex gap-2">
@@ -342,6 +354,7 @@ function MemberRow({ m, swarm, swarms, location, inherited, onDone }) {
                 aria-label={`Profile of ${m.name}`}>{m.name}</Link>
           <Link to={`/?agent=${encodeURIComponent(m.name)}`} className="text-xs text-paper-muted underline hover:text-paper"
                 aria-label={`Timeline of ${m.name}`}>Timeline</Link>
+          <ProxiedBadge proxiedBy={m.proxied_by} />
         </span>
         <span><StatusBadge status={m.status} /></span>
         <span className="text-sm text-paper-muted">

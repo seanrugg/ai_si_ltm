@@ -19,6 +19,7 @@ import time
 from dataclasses import dataclass
 from typing import Mapping
 
+from cli_agent.direct_link import DirectLink, Transport
 from cli_agent.member_link import MemberLink
 from cli_agent.client import local_addresses
 from cli_agent.mqtt_messages import acks_topic, encode_hello, hello_topic
@@ -39,7 +40,9 @@ class MemberConfig:
     swarm: str | None          # SWARM                (deprecated: the swarm's name as topic prefix)
     heartbeat_seconds: float   # HEARTBEAT_SECONDS    (default 60.0; must be > 0)
     swarm_topic_id: str | None = None  # SWARM_TOPIC_ID (preferred, #293)
-    ltms_server: str | None = None     # LTMS_SERVER    (optional: look the topic ID up at start)
+    ltms_server: str | None = None     # LTMS_SERVER    (optional: topic lookup, and direct mode)
+    transport: str = "auto"            # TRANSPORT      mqtt | direct | auto (#297)
+    fallback_after_seconds: float = 120.0  # FALLBACK_AFTER_SECONDS (auto: broker down this long -> direct)
 
 
 def load_config(env: Mapping[str, str]) -> MemberConfig:
@@ -65,7 +68,18 @@ def load_config(env: Mapping[str, str]) -> MemberConfig:
     swarm = env.get("SWARM") or None
     swarm_topic_id = env.get("SWARM_TOPIC_ID") or None
     ltms_server = env.get("LTMS_SERVER") or None
-    if not (swarm or swarm_topic_id or ltms_server):
+    transport = env.get("TRANSPORT", "auto")
+    if transport not in ("mqtt", "direct", "auto"):
+        raise ValueError("TRANSPORT must be mqtt, direct or auto")
+    if transport == "direct" and not ltms_server:
+        raise ValueError("TRANSPORT=direct needs LTMS_SERVER")
+    try:
+        fallback_after = float(env.get("FALLBACK_AFTER_SECONDS", "120"))
+    except (TypeError, ValueError):
+        raise ValueError("FALLBACK_AFTER_SECONDS must be a number") from None
+    if fallback_after <= 0:
+        raise ValueError("FALLBACK_AFTER_SECONDS must be > 0")
+    if transport != "direct" and not (swarm or swarm_topic_id or ltms_server):
         raise ValueError("missing SWARM_TOPIC_ID (or LTMS_SERVER to look it up, or the deprecated SWARM)")
     for value, setting in ((swarm, "SWARM"), (swarm_topic_id, "SWARM_TOPIC_ID")):
         if value is not None:
@@ -90,6 +104,8 @@ def load_config(env: Mapping[str, str]) -> MemberConfig:
         heartbeat_seconds=heartbeat_seconds,
         swarm_topic_id=swarm_topic_id,
         ltms_server=ltms_server,
+        transport=transport,
+        fallback_after_seconds=fallback_after,
     )
 
 
@@ -174,22 +190,31 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     name, key = load_key(cfg.key_path)
-    lookup = None
-    if cfg.ltms_server and not cfg.swarm_topic_id:
+    ltms = None
+    if cfg.ltms_server:
         from cli_agent.client import LTMSClient
-        lookup = LTMSClient(cfg.ltms_server, key_path=cfg.key_path).swarm
-    try:
-        prefix, source = member_prefix(cfg, lookup)
-    except NoSwarmTopic as exc:
-        raise SystemExit(f"Member: {exc}") from None
-    logging.info("Member: %s publishing under topic prefix %s (from %s)", name, prefix, source)
+        ltms = LTMSClient(cfg.ltms_server, key_path=cfg.key_path)
+    if cfg.transport == "direct":
+        prefix, source = "", "direct"
+    else:
+        try:
+            prefix, source = member_prefix(cfg, ltms.swarm if ltms is not None and not cfg.swarm_topic_id else None)
+        except NoSwarmTopic as exc:
+            raise SystemExit(f"Member: {exc}") from None
+    logging.info("Member: %s, transport %s, topic prefix %s (from %s)", name, cfg.transport, prefix or "-", source)
     outbox = Outbox(cfg.outbox_path)
+    if cfg.transport == "auto" and ltms is None:
+        logging.info("Member: no LTMS_SERVER, so no direct fallback; MQTT only")
+    transport = Transport(cfg.transport, cfg.fallback_after_seconds, time.monotonic(), can_direct=ltms is not None)
+    direct = DirectLink(ltms, outbox, name) if ltms is not None else None
 
     mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=name)
     acks: "queue.Queue[bytes]" = queue.Queue()
     resend_wanted = threading.Event()
 
     def publish(topic: str, payload: bytes, retain: bool = False) -> None:
+        if cfg.transport == "direct":
+            return  # records stay in the outbox; DirectLink sends them
         mqtt_client.publish(topic, payload, qos=1, retain=retain)
 
     link = MemberLink(name, key, outbox, cfg.state_path, publish, prefix)
@@ -200,12 +225,24 @@ def main() -> None:
             network = []
         return hello_topic(name, prefix), encode_hello(name, network)
 
-    mqtt_client.on_connect = make_on_connect(acks_topic(name, prefix), resend_wanted, hello)
-    mqtt_client.on_message = make_on_message(acks)
-    if cfg.mqtt_username is not None:
-        mqtt_client.username_pw_set(cfg.mqtt_username, cfg.mqtt_password)
-    mqtt_client.connect_async(cfg.mqtt_host, cfg.mqtt_port)
-    mqtt_client.loop_start()
+    connected_cb = make_on_connect(acks_topic(name, prefix), resend_wanted, hello)
+
+    def on_connect(client, userdata, flags, reason_code, properties) -> None:
+        transport.on_connect()
+        connected_cb(client, userdata, flags, reason_code, properties)
+
+    def on_disconnect(client, userdata, *args) -> None:
+        transport.on_disconnect(time.monotonic())
+
+    use_mqtt = cfg.transport != "direct"
+    if use_mqtt:
+        mqtt_client.on_connect = on_connect
+        mqtt_client.on_disconnect = on_disconnect
+        mqtt_client.on_message = make_on_message(acks)
+        if cfg.mqtt_username is not None:
+            mqtt_client.username_pw_set(cfg.mqtt_username, cfg.mqtt_password)
+        mqtt_client.connect_async(cfg.mqtt_host, cfg.mqtt_port)
+        mqtt_client.loop_start()
 
     running = True
 
@@ -231,12 +268,15 @@ def main() -> None:
                 link.resend_pending()
                 heartbeat(link, started_at, now)
                 next_heartbeat = now + cfg.heartbeat_seconds
+            if direct is not None and transport.choose(time.monotonic()) == "direct":
+                direct.flush()
             # Sleep up to 1 second, waking early if asked to stop.
             deadline = time.monotonic() + 1.0
             while running and time.monotonic() < deadline:
                 time.sleep(min(0.25, deadline - time.monotonic()))
     finally:
-        mqtt_client.loop_stop()
+        if use_mqtt:
+            mqtt_client.loop_stop()
         outbox.close()
 
 
