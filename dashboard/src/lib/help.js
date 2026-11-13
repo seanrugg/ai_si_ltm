@@ -77,3 +77,4 @@ export const COUNT_LEARN = "Lessons and policies: what this member learned from 
 export const COUNT_SELF_REPORT = "The member reporting on itself: heartbeat, uptime, members seen, temperature, memory. Not a perception of the world, so it is counted apart from Sensing.";
 export const COUNT_HEARTBEAT = "A hub sends a heartbeat every few minutes (HUB_HEARTBEAT_SECONDS) so LTMS knows it is alive: uptime, members seen, dropped messages. It's a self-report.";
 export const PING_ABOUT = "Asks the member for a heartbeat now. Its hub (or the member itself, if it talks to LTMS directly) checks for pings every 30 s; the answer is the next record LTMS receives from it. Heartbeats otherwise come twice a day.";
+export const SPECS_ABOUT = "What the device reports about itself (hardware, models, software), with any field an admin corrected. Each value says which. Not a record: not signed or sent to the LRS.";
