@@ -56,6 +56,27 @@ export function groupSettings(settings) {
   return out.filter((g) => g.keys.length);
 }
 
+/** Whether LTMS can estimate locations from addresses (#346). */
+export function GeoStatus({ geo }) {
+  if (!geo) return null;
+  return (
+    <section className="panel mb-6 p-4" aria-labelledby="geo-h">
+      <h2 id="geo-h" className="font-bold">Location estimates</h2>
+      {geo.enabled ? (
+        <p className="text-sm" role="status">On: city database at <code className="hash">{geo.path}</code>.</p>
+      ) : (
+        <p className="text-sm" role="status">Off: {geo.reason}.</p>
+      )}
+      <p className="mt-1 max-w-prose text-xs text-paper-muted">
+        LTMS can place a member from the public address it connects from, using an offline city database
+        (<code className="hash">pip install &quot;ltms[geo]&quot;</code> and <code className="hash">LTMS_GEOIP_DB</code>
+        pointing at a <code className="hash">.mmdb</code> file; see docs/locations.md). Nothing is looked up online.
+        Members on a local network are placed through their hub, or by their swarm&apos;s declared home.
+      </p>
+    </section>
+  );
+}
+
 export default function Settings() {
   const { data, error, loading, reload } = useApi("/admin/settings");
   const locations = useApi("/admin/locations");
@@ -73,6 +94,7 @@ export default function Settings() {
         <LocationForm key={JSON.stringify(locations.data?.server ?? null)} subjectType="member" name="ltms-server"
                       title="Server" current={locations.data?.server ?? null} onDone={locations.reload} />
       </section>
+      <GeoStatus geo={locations.data?.geo} />
       {loading && <Loading />}
       <ErrorNote error={error} onRetry={reload} />
       {data && (
