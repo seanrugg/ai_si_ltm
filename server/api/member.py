@@ -80,6 +80,16 @@ async def put_cognition(request: Request, body: dict, auth: MemberAuth = Depends
         return {"cognition": await cognition.declare(session, member, body)}
 
 
+@router.put("/members/me/specs")
+async def put_specs(request: Request, body: dict, auth: MemberAuth = Depends(current_member)) -> dict:
+    """The device reports its spec sheet (#332): hardware, models, software, notes."""
+    from server.services import specs
+
+    async with transaction(request) as session:
+        member = await session.get(Member, auth.member_id)
+        return {"specs": await specs.report(session, member, body)}
+
+
 @router.put("/members/me/network")
 async def put_network(request: Request, body: dict, auth: MemberAuth = Depends(current_member)) -> dict:
     """LAN addresses this member reports (#190). Unverified, and labelled so."""
