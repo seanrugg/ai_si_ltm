@@ -14,7 +14,7 @@ MEMBER_STATUSES = ("pending", "active", "revoked", "rejected")
 COGNITION_LOCATIONS = ("onboard", "offboard")
 # "relay": submit records written by other members of the same swarm, unchanged.
 # Granted together with the swarm's hub role (see server/services/swarms.py).
-PERMISSIONS = ("contribute", "recall", "recall:scoped", "policy", "relay")
+PERMISSIONS = ("contribute", "recall", "recall:scoped", "policy", "relay", "speak:swarm")  # speak:swarm: #304
 
 
 class Member(Base):
