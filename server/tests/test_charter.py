@@ -164,3 +164,114 @@ def test_limits(admin, mesh):
     z3 = _quiet(mesh.member("z3-r0"))
     r = z3.http.get("/api/charter", headers={"Authorization": f"Bearer {z3.token}"})
     assert r.status_code == 404 and r.json()["error"]["code"] == "no_charter"
+
+
+# Version control (#345) -----------------------------------------------------
+
+def _view(admin):
+    return admin.get("/api/admin/charter").json()
+
+
+def _rows(admin):
+    return {v["version"]: v for v in _view(admin)["versions"]}
+
+
+def test_publish_with_a_change_note(admin, db_exec):
+    _publish(admin, V1)
+    r = admin.put("/api/admin/charter", json={"markdown": V2, "note": "  Added  Article 2 "})
+    assert r.json()["note"] == "Added Article 2"
+    rows = _rows(admin)
+    assert rows[2]["note"] == "Added Article 2" and rows[2]["status"] == "current"
+    assert rows[1]["note"] is None and rows[1]["status"] == "superseded"
+    assert admin.put("/api/admin/charter?note=" + "x" * 201, content=b"# v3").json()["error"]["code"] == "bad_note"
+    notes = db_exec(lambda s: s.scalars(select(AuditLog.detail).where(AuditLog.action == "charter_publish")))
+    assert [d.get("note") for d in notes] == [None, "Added Article 2"]
+
+
+def test_make_current_republishes_the_old_bytes(admin, mesh, db_exec, monkeypatch):
+    first = _publish(admin, V1)
+    z3 = _quiet(mesh.member("z3-r0"))
+    z3.read_charter()  # reads version 1
+    _publish(admin, V2)
+    assert z3.sync_head()["charter"]["read"] is False
+    r = admin.post("/api/admin/charter/versions/1/make-current").json()
+    assert r["published"] and r["version"] == 3 and r["hash"] == first["hash"] and r["reverted_from"] == 1
+    assert r["note"] == "Reverted to version 1"
+    # z3 read these bytes as version 1, so it may write without reading again, even past any grace period.
+    import server.services.ingest as ingest
+    real = ingest.datetime
+
+    class Later(real):
+        @classmethod
+        def now(cls, tz=None):
+            return real.now(tz) + timedelta(days=60)
+    monkeypatch.setattr(ingest, "datetime", Later)
+    z3.append("event", summary="after the revert", ts=datetime.now(timezone.utc).isoformat())
+    z3.flush()
+    assert z3.sync_head()["charter"]["read"] is True
+    rows = _rows(admin)
+    assert [rows[n]["status"] for n in (3, 2, 1)] == ["current", "superseded", "superseded"]
+    assert admin.post("/api/admin/charter/versions/3/make-current").json()["error"]["code"] == "already_current"
+    detail = db_exec(lambda s: s.scalars(select(AuditLog.detail).where(AuditLog.action == "charter_publish")))
+    assert list(detail)[-1]["reverted_from"] == 1
+
+
+def test_publishing_old_bytes_is_make_current(admin):
+    _publish(admin, V1)
+    _publish(admin, V2)
+    r = _publish(admin, V1)
+    assert r["published"] and r["version"] == 3 and r["reverted_from"] == 1
+    assert _rows(admin)[3]["note"] == "Reverted to version 1"
+
+
+def test_withdraw(admin, mesh):
+    _publish(admin, V1)
+    z3 = _quiet(mesh.member("z3-r0"))
+    z3.read_charter()
+    _publish(admin, V2)
+    r = admin.post("/api/admin/charter/versions/2/withdraw", json={"reason": "wrong"})
+    assert r.json()["error"]["code"] == "current"
+    assert admin.post("/api/admin/charter/versions/1/withdraw", json={}).json()["error"]["code"] == "bad_reason"
+    assert admin.post("/api/admin/charter/versions/1/withdraw", json={"reason": "Superseded by a typo fix"}).status_code == 200
+    rows = _rows(admin)
+    assert rows[1]["status"] == "withdrawn" and rows[1]["withdrawn"]["reason"] == "Superseded by a typo fix"
+    assert rows[1]["reads"] == 1  # reads stay logged
+    # Never served to members: the charter is v2, and the dataset paths don't serve v1.
+    assert z3.read_charter()["version"] == 2
+    assert admin.post("/api/admin/charter/versions/1/make-current").json()["error"]["code"] == "withdrawn"
+    assert admin.get("/api/admin/charter/versions/1").json()["status"] == "withdrawn"  # admins can still view it
+
+
+def test_withdrawn_version_is_not_readable_as_a_dataset(admin, mesh, db_exec):
+    from server.models import Dataset
+    _publish(admin, V1)
+    _publish(admin, V2)
+    admin.post("/api/admin/charter/versions/1/withdraw", json={"reason": "gone"})
+    ds_id = db_exec(lambda s: s.scalar(select(Dataset.id).where(Dataset.name == "fleet-charter")))
+    z3 = mesh.member("z3-r0")
+    z3.login()
+    auth = {"Authorization": f"Bearer {z3.token}"}
+    # A superseded version is still readable this way; a withdrawn one isn't.
+    assert z3.http.get(f"/api/datasets/{ds_id}/items/charter.md", params={"version": 2}, headers=auth).status_code == 200
+    r = z3.http.get(f"/api/datasets/{ds_id}/items/charter.md", params={"version": 1}, headers=auth)
+    assert r.status_code == 404
+
+
+def test_delete(admin, mesh, db_exec, data_dir):  # noqa: F811
+    _publish(admin, V1)
+    z3 = _quiet(mesh.member("z3-r0"))
+    z3.read_charter()
+    _publish(admin, V2)
+    _publish(admin, V2 + "\nTypo.\n")  # v3, nobody reads v2
+    assert admin.delete("/api/admin/charter/versions/3?confirm=3").json()["error"]["code"] == "current"
+    assert admin.delete("/api/admin/charter/versions/1?confirm=1").json()["error"]["code"] == "has_reads"
+    assert admin.delete("/api/admin/charter/versions/2?confirm=1").json()["error"]["code"] == "confirm"
+    assert admin.delete("/api/admin/charter/versions/2?confirm=2").json() == {"version": 2, "status": "deleted"}
+    rows = _rows(admin)
+    assert rows[2]["status"] == "deleted" and rows[2]["hash"] == hashlib.sha256(V2.encode()).hexdigest()
+    assert rows[2]["deleted_by"].startswith("admin:")
+    assert admin.get("/api/admin/charter/versions/2").status_code == 404
+    audit = db_exec(lambda s: s.scalars(select(AuditLog.detail).where(AuditLog.action == "charter_delete")))
+    assert [d["version"] for d in audit] == [2]
+    # Numbers aren't reused.
+    assert _publish(admin, V1 + "\nv4\n")["version"] == 4

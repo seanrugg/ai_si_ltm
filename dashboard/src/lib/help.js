@@ -51,6 +51,9 @@ export const URL_SNAPSHOT = "LTMS fetches the page or file once and keeps it as 
 export const CHARTER = "The charter is the fleet's governance: every member reads it when it joins and whenever it changes. Reads are logged and sent to the LRS.";
 // "{days}" is replaced with the server's grace period.
 export const CHARTER_GRACE = "Members must read this version. After {days} days, members who haven't read it can't write records until they do.";
+export const CHARTER_NOTE = "What changed, in a line (up to 200 characters). It's shown in the version history.";
+export const CHARTER_HISTORY = "Every version stays in the history. Make current re-publishes an older version as a new one with the same hash, so members who read it don't read it again.";
+export const CHARTER_WITHDRAW = "Withdraw hides a superseded version and stops it being served. Its reads stay logged. Delete removes a version nobody has read; the audit log keeps its number and hash.";
 
 // #295: a pending member that wants to be a hub.
 export const HUB_INTENT =

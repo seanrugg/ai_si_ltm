@@ -382,7 +382,7 @@ CREATE TABLE dataset_versions (
 	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
 	PRIMARY KEY (id), 
 	CONSTRAINT uq_dataset_versions_version UNIQUE (dataset_id, version), 
-	CONSTRAINT ck_dataset_versions_status CHECK (status IN ('pending', 'approved')), 
+	CONSTRAINT ck_dataset_versions_status CHECK (status IN ('pending', 'approved', 'withdrawn')), 
 	FOREIGN KEY(dataset_id) REFERENCES datasets (id)
 );
 
