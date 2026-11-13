@@ -2,7 +2,7 @@
 // The four groups match the dashboard's data categories (#184).
 
 export const GROUPS = [
-  { label: "Sensing", types: ["sensed", "perception"] },
+  { label: "Sensing", types: ["sensed", "perception", "self_report"] },
   { label: "Deciding & acting", types: ["thought", "decision", "action", "event"] },
   { label: "Communicating", types: ["communication"] },
   { label: "Learning & rules", types: ["lesson", "policy", "system"] },
@@ -10,6 +10,7 @@ export const GROUPS = [
 
 export const LABELS = {
   sensed: "sensor data",
+  self_report: "self-reports (heartbeat, health)",
   perception: "perceptions",
   thought: "thoughts",
   decision: "decisions",
@@ -23,8 +24,8 @@ export const LABELS = {
 
 export const ALL_TYPES = GROUPS.flatMap((g) => g.types);
 
-// Today's default: everything except `sensed` (telemetry hidden).
-export const DEFAULT_TYPES = ALL_TYPES.filter((t) => t !== "sensed");
+// Today's default: everything except `sensed` and `self_report` (telemetry hidden).
+export const DEFAULT_TYPES = ALL_TYPES.filter((t) => t !== "sensed" && t !== "self_report");
 
 /**
  * The `type` query param as a Set of filter types.

@@ -217,8 +217,9 @@ async def bulk_members(request: Request, body: BulkMembersRequest, admin: AdminA
 def _timeline_type_clause(session, type_param: str | None):
     """The ``type`` filter for /admin/timeline only (issue #181).
 
-    ``sensed`` is a perception tagged telemetry; ``perception`` is one that is
-    not. An empty or missing list is today's default: everything except
+    ``sensed`` is a perception tagged telemetry (and not ``internal``);
+    ``self_report`` is one tagged both (heartbeat, health, #348); ``perception``
+    is one not tagged telemetry. An empty or missing list is today's default: everything except
     sensed; ``none`` alone matches nothing. Each selection is a type condition, plus a tag condition for the
     two perception cases, OR'd together. ``RecordFilter`` and ``build_query``
     keep their plain-type semantics for every other caller.
@@ -229,20 +230,24 @@ def _timeline_type_clause(session, type_param: str | None):
         if len(wanted) > 1:
             raise ServiceError(422, "bad_type", "type=none can't be combined with other types")
         return false()
-    unknown = [t for t in wanted if t not in RECORD_TYPES and t != "sensed"]
+    unknown = [t for t in wanted if t not in RECORD_TYPES and t not in ("sensed", "self_report")]
     if unknown:
         raise ServiceError(
             422, "bad_type",
-            f"unknown type(s): {', '.join(unknown)}; must be one of {', '.join(RECORD_TYPES)}, sensed",
+            f"unknown type(s): {', '.join(unknown)}; must be one of {', '.join(RECORD_TYPES)}, sensed, self_report",
         )
-    groups = wanted or list(RECORD_TYPES)  # empty = everything except sensed
+    groups = wanted or list(RECORD_TYPES)  # empty = everything except sensed and self-reports
     conds = []
     for t in groups:
         if t == "sensed":
             conds.append(and_(
                 Record.type == "perception",
                 recall._json_list_contains(session, Record.tags, "telemetry"),
+                ~profile_service.self_report_clause(session),
             ))
+        elif t == "self_report":
+            # A member reporting on itself: heartbeat, health (#348).
+            conds.append(profile_service.self_report_clause(session))
         elif t == "perception":
             # tags may be SQL NULL; "NOT (NULL @> ...)" is NULL, so keep untagged rows
             conds.append(and_(
