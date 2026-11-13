@@ -250,6 +250,7 @@ ignored and recorded once as an `event` tagged `directive-invalid`. Handled ids
 are kept in `directives.json`, so a retained directive isn't acknowledged twice.
 The admin's directive list shows, per directive, how many members it was meant
 for and how many received, accepted and declined it, with each decline's reason.
+
 ## Swarm leader (#308)
 
 A swarm can have one **leader**: any active member (a cloud agent may lead), but
@@ -283,7 +284,6 @@ The new leader lists them (`GET /api/directives?inherited=1`) and must
 `POST /api/directives/{id}/confirm` or `/cancel` each one; both are audited.
 Unconfirmed ones stay open. The fleet outranks the leader: an admin can cancel
 any directive, and a leader can't cancel the fleet's.
-
 
 ## Introductions (#334)
 
