@@ -1,15 +1,15 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { cleanup } from "@testing-library/react";
 import React from "react";
 import { MemoryRouter } from "react-router-dom";
 import Swarms, { KeyOnceDialog } from "./Swarms.jsx";
-import { api } from "../api/client.js";
 
 const swarms = [{
   id: "a".repeat(64), name: "echo-base", status: "active", home: true,
   members: [{ name: "jetson-hub", role: "member" }, { name: "vector", role: "observer" }],
+  metrics: { hubs: 0, members: 1, observers: 1, records_24h: 12, records_7d: 80, last_record_at: null, hub_last_seen_at: null },
 }];
 const members = { members: [
   { name: "jetson-hub", status: "active", public_key: "b".repeat(64) },
@@ -37,14 +37,29 @@ describe("Swarms page", () => {
     expect(html).toContain("Already have a key?");
   });
 
-  it("offers only swarm members (not observers) as the hub, with a password-type key field", () => {
+  it("lists one row per swarm with its metrics and the three links (#331)", () => {
     const html = page();
-    expect(html).toContain('<option value="jetson-hub">jetson-hub</option>');
-    expect(html).not.toContain('<option value="vector">');
-    const input = html.match(/<input[^>]*name="swarm-root-key"[^>]*>/)[0];
-    expect(input).toContain('type="password"');
-    expect(input).toContain('autoComplete="new-password"');
-    expect(html).toContain('aria-label="If the key is pasted wrong"'); // #284
+    expect(html).toContain("<caption");
+    expect(html).toContain(">Swarms</caption>");
+    expect(html).toContain('href="/swarms/echo-base/profile?tab=manage"');
+    expect(html).toContain('href="/?swarm=echo-base"');
+    expect(html).toContain('href="/volume?swarm=echo-base"');
+    expect(html).toContain("12 / 80");
+    expect(html).toContain("1 member · 1 observer");
+    // Management moved to the Manage tab: no wipe or root-key fields on the list.
+    expect(html).not.toContain("Wipe swarm memory");
+    expect(html).not.toContain('name="swarm-root-key"');
+  });
+
+  it("sorts revoked swarms last, then by name or last activity", async () => {
+    const { sortSwarms } = await import("./Swarms.jsx");
+    const rows = [
+      { name: "b", status: "active", metrics: { last_record_at: "2026-11-12T01:00:00Z" } },
+      { name: "a", status: "revoked", metrics: { last_record_at: "2026-11-13T01:00:00Z" } },
+      { name: "c", status: "active", metrics: { last_record_at: "2026-11-13T00:00:00Z" } },
+    ];
+    expect(sortSwarms(rows).map((r) => r.name)).toEqual(["b", "c", "a"]);
+    expect(sortSwarms(rows, "activity").map((r) => r.name)).toEqual(["c", "b", "a"]);
   });
 });
 
@@ -80,62 +95,9 @@ describe("one-time key panel", () => {
 });
 
 describe("the root key never reaches storage", () => {
-  it.each(["../lib/swarmKey.js", "./Swarms.jsx"])("%s uses no web storage or console", (file) => {
+  it.each(["../lib/swarmKey.js", "./Swarms.jsx", "./profile/Manage.jsx", "../components/GuidedSetup.jsx"])("%s uses no web storage or console", (file) => {
     const src = readFileSync(new URL(file, import.meta.url), "utf8");
     expect(src).not.toMatch(/localStorage|sessionStorage|indexedDB|console\./);
   });
 });
 
-describe("wipe swarm memory", () => {
-  it("shows the wipe panel with the active-member count", () => {
-    render(React.createElement(MemoryRouter, null, React.createElement(Swarms)));
-    expect(screen.getByRole("button", { name: /^Wipe swarm memory$/ })).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: /^Wipe swarm memory$/ }));
-    expect(screen.getByText(/Clean slate\. This can't be undone\./)).toBeDefined();
-    expect(screen.getByText(/Wipes memory for 2 active members/)).toBeDefined();
-    expect(screen.getAllByLabelText(/About wiping swarm memory/)).not.toHaveLength(0);
-    expect(screen.getAllByLabelText(/Wipe vs delete/)).not.toHaveLength(0);
-  });
-
-  it("enables the wipe button only when the confirm input matches the swarm name", () => {
-    render(React.createElement(MemoryRouter, null, React.createElement(Swarms)));
-    fireEvent.click(screen.getByRole("button", { name: /^Wipe swarm memory$/ }));
-    const wipeButton = screen.getByRole("button", { name: /Wipe 2 active members/ });
-    expect(wipeButton.disabled).to.equal(true);
-    fireEvent.change(screen.getByLabelText(/Confirm by typing echo-base/), { target: { value: "echo-base" } });
-    expect(wipeButton.disabled).to.equal(false);
-  });
-
-  it("wipes with the typed name, says so in text, and asks for the name again next time", async () => {
-    vi.mocked(api).mockResolvedValue({ swarm: "echo-base", wiped: [{ name: "jetson-hub" }, { name: "vector" }] });
-    render(React.createElement(MemoryRouter, null, React.createElement(Swarms)));
-    fireEvent.click(screen.getByRole("button", { name: /^Wipe swarm memory$/ }));
-    fireEvent.change(screen.getByLabelText(/Confirm by typing echo-base/), { target: { value: "echo-base" } });
-    fireEvent.click(screen.getByRole("button", { name: /Wipe 2 active members/ }));
-    expect(await screen.findByText("Memory wiped for 2 members of echo-base.")).toBeDefined();
-    expect(api).toHaveBeenCalledWith("/admin/swarms/echo-base/wipe", { method: "POST", body: { confirm: "echo-base" } });
-
-    fireEvent.click(screen.getByRole("button", { name: /^Wipe swarm memory$/ }));
-    expect(screen.getByLabelText(/Confirm by typing echo-base/).value).toBe("");
-    expect(screen.getByRole("button", { name: /Wipe 2 active members/ }).disabled).toBe(true);
-  });
-});
-
-describe("swarm home location (#285)", () => {
-  it("suggests a city from a member's network estimate, never a declared one", async () => {
-    const { networkSuggestion } = await import("./Swarms.jsx");
-    const swarm = { name: "echo-base", members: [{ name: "a" }, { name: "b" }] };
-    const locations = { members: [
-      { name: "a", all: [{ source: "declared", label: "Lab", inherited_from: "swarm echo-base" }] },
-      { name: "b", all: [{ source: "network", label: "Stafford, VA", lat: 38.4, lon: -77.4 }] },
-      { name: "z", all: [{ source: "network", label: "Elsewhere" }] },
-    ] };
-    expect(networkSuggestion(swarm, locations)).toEqual({ label: "Stafford, VA", lat: 38.4, lon: -77.4 });
-    expect(networkSuggestion({ name: "x", members: [] }, locations)).toBeNull();
-  });
-
-  it("prompts for a home location when the swarm has none", () => {
-    const html = page();
-    expect(html).toContain("Set a home location: every member without its own location will use it.");
-  });
-});

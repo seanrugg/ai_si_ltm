@@ -11,6 +11,7 @@ export const DEFAULT_RANGE = "7d";
 
 export const TABS = [
   { key: "overview", label: "Overview" },
+  { key: "specs", label: "Specs", memberOnly: true },
   { key: "members", label: "Members", swarmOnly: true },
   { key: "places", label: "Places & movement" },
   { key: "interactions", label: "Interactions" },
@@ -18,6 +19,7 @@ export const TABS = [
   { key: "activity", label: "Activity" },
   { key: "senses", label: "Senses" },
   { key: "history", label: "History" },
+  { key: "manage", label: "Manage", swarmOnly: true },
 ];
 export const DEFAULT_TAB = "overview";
 
@@ -25,9 +27,9 @@ export function rangeOf(param) {
   return RANGES.find((r) => r.key === param) ?? RANGES.find((r) => r.key === DEFAULT_RANGE);
 }
 
-/** The tabs a subject has: the Members tab is for swarm profiles only (#282). */
+/** The tabs a subject has: Members is for swarm profiles only (#282), Specs for members (#333). */
 export function tabsFor(subject) {
-  return TABS.filter((t) => !t.swarmOnly || subject === "swarm");
+  return TABS.filter((t) => (!t.swarmOnly || subject === "swarm") && (!t.memberOnly || subject === "member"));
 }
 
 export function tabOf(param, subject) {
