@@ -10,6 +10,12 @@
 
 ``best`` is the first of gps, declared (member, then swarm), network.
 Admin only; locations are never sent to an LRS.
+
+Members that only reach LTMS through a hub (#346) take the network estimate
+of the hub that relayed their newest record. A member with nothing else
+inherits its swarm's estimate (the hub's, else the first member's) until an
+admin declares a swarm home. Every member with no position gets an
+``unplaced`` reason, and ``geo`` says whether network estimates work at all.
 """
 from __future__ import annotations
 
@@ -20,7 +26,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.models import AuditLog, DeclaredLocation, Member, MemberAddress, Record, Swarm, SwarmMember
+from server.models import AuditLog, DeclaredLocation, Member, MemberAddress, Record, RecordProvenance, Swarm, SwarmMember
 from server.models.location import LOCATION_SUBJECTS
 from server.services import recall
 from server.services.errors import ServiceError
@@ -138,6 +144,24 @@ def lookup_city(db_path: str, ip: str) -> dict | None:
             "accuracy_km": loc.get("accuracy_radius") or DEFAULT_ACCURACY_KM}
 
 
+def geo_status(cfg) -> dict:
+    """Whether network estimates can work, and if not, why (#346)."""
+    import os
+
+    path = getattr(cfg, "geoip_db_path", None)
+    if not path:
+        return {"enabled": False, "path": None,
+                "reason": "LTMS_GEOIP_DB isn't set: no city database, so no network estimates"}
+    try:
+        import maxminddb  # noqa: F401
+    except ImportError:
+        return {"enabled": False, "path": path,
+                "reason": 'the geo extra isn\'t installed (pip install "ltms[geo]")'}
+    if not os.path.isfile(path):
+        return {"enabled": False, "path": path, "reason": f"no file at {path}"}
+    return {"enabled": True, "path": path, "reason": None}
+
+
 def _public(ip: str) -> bool:
     try:
         a = ipaddress.ip_address(ip)
@@ -179,6 +203,51 @@ async def _gps(session: AsyncSession, member: Member) -> dict | None:
 # --------------------------------------------------------------------------- #
 # All sources for each member
 # --------------------------------------------------------------------------- #
+async def _newest_seen(session, member: Member) -> MemberAddress | None:
+    return await session.scalar(
+        select(MemberAddress).where(MemberAddress.member_id == member.id, MemberAddress.source == "seen")
+        .order_by(MemberAddress.last_seen.desc(), MemberAddress.id.desc()).limit(1))
+
+
+async def _network_estimate(session, db_path: str, member: Member, via: str | None = None) -> dict | None:
+    seen = await _newest_seen(session, member)
+    if seen is None or not _public(seen.ip):
+        return None
+    hit = lookup_city(db_path, seen.ip)
+    if not hit:
+        return None
+    extra = {"via_hub": via} if via else {}
+    return _entry("network", hit.get("label"), None, hit.get("lat"), hit.get("lon"),
+                  hit.get("accuracy_km") or DEFAULT_ACCURACY_KM, **extra)
+
+
+async def _relaying_hub(session, member: Member) -> Member | None:
+    """The member that relayed this member's newest relayed record, if any."""
+    hub_id = await session.scalar(
+        select(RecordProvenance.relay_member_id)
+        .join(Record, Record.id == RecordProvenance.record_id)
+        .where(Record.member_id == member.id, RecordProvenance.relay_member_id.is_not(None),
+               RecordProvenance.relay_member_id != member.id)
+        .order_by(RecordProvenance.received_at.desc()).limit(1))
+    return await session.get(Member, hub_id) if hub_id else None
+
+
+async def _unplaced_reason(session, row: dict, geo: dict, declared: dict) -> str:
+    """Why a member has no position on the globe (#346), in one sentence."""
+    no_home = (f"swarm {row['_swarm']} has no declared home" if row["_swarm"]
+               else "it isn't in a swarm with a declared home")
+    member = await session.scalar(select(Member).where(Member.name == row["name"]))
+    seen = await _newest_seen(session, member) if member is not None else None
+    if seen is not None and not _public(seen.ip):
+        return (f"Only a local network address ({seen.ip}) has been seen, which can't be located, "
+                f"and {no_home}. Declare a location for the member or its swarm.")
+    if not geo["enabled"]:
+        return f"No GPS or declared location, {no_home}, and network estimates are off: {geo['reason']}."
+    if seen is None:
+        return f"It has never connected to LTMS directly, and {no_home}."
+    return f"Its address ({seen.ip}) isn't in the city database, and {no_home}."
+
+
 async def describe(session: AsyncSession, cfg, *, swarm: str | None = None, member: str | None = None) -> dict:
     stmt = select(Member).where(Member.status != "rejected").order_by(Member.name)
     if member:
@@ -198,6 +267,7 @@ async def describe(session: AsyncSession, cfg, *, swarm: str | None = None, memb
         select(SwarmMember.member_id, Swarm.name).join(Swarm, Swarm.id == SwarmMember.swarm_id)
         .where(SwarmMember.left_at.is_(None)))).all())
     db_path = getattr(cfg, "geoip_db_path", None)
+    geo = geo_status(cfg)
 
     out = []
     for m in members:
@@ -210,19 +280,47 @@ async def describe(session: AsyncSession, cfg, *, swarm: str | None = None, memb
             if d is not None:
                 entries.append(_entry("declared", d.label, d.room, d.lat, d.lon, None, inherited_from=(
                     f"swarm {name}" if subject_type == "swarm" else None)))
-        if db_path:
-            seen = await session.scalar(
-                select(MemberAddress).where(MemberAddress.member_id == m.id, MemberAddress.source == "seen")
-                .order_by(MemberAddress.last_seen.desc(), MemberAddress.id.desc()).limit(1))
-            if seen is not None and _public(seen.ip):
-                hit = lookup_city(db_path, seen.ip)
-                if hit:
-                    entries.append(_entry("network", hit.get("label"), None, hit.get("lat"), hit.get("lon"),
-                                          hit.get("accuracy_km") or DEFAULT_ACCURACY_KM))
-        out.append({"name": m.name, "best": entries[0] if entries else None, "all": entries})
+        net = None
+        if db_path:  # geo_status only explains; a lookup that can't work just finds nothing
+            net = await _network_estimate(session, db_path, m)
+            if net is None:
+                hub = await _relaying_hub(session, m)
+                if hub is not None:
+                    net = await _network_estimate(session, db_path, hub, via=hub.name)
+            if net is not None:
+                entries.append(net)
+        out.append({"name": m.name, "best": entries[0] if entries else None, "all": entries,
+                    "_swarm": swarm_of.get(m.id)})
+
+    # A swarm with no declared home: members with nothing else inherit its network estimate,
+    # from its hub if the hub has one, else from the first member that does.
+    estimate: dict[str, tuple[dict, str]] = {}
+    if db_path:
+        for sw in {r["_swarm"] for r in out if r["_swarm"] and not r["all"] and ("swarm", r["_swarm"]) not in declared}:
+            ms = list(await session.scalars(
+                select(Member).join(SwarmMember, SwarmMember.member_id == Member.id).join(
+                    Swarm, Swarm.id == SwarmMember.swarm_id)
+                .where(Swarm.name == sw, SwarmMember.left_at.is_(None))
+                .order_by((SwarmMember.role != "hub"), Member.name)))
+            for m in ms:
+                net = await _network_estimate(session, db_path, m)
+                if net is not None:
+                    estimate[sw] = (net, m.name)
+                    break
+    for row in out:
+        sw = row["_swarm"]
+        if not row["all"] and sw in estimate:
+            net, from_member = estimate[sw]
+            inherited = {**net, "inherited_from": f"swarm {sw} (network estimate from {from_member})"}
+            row["all"].append(inherited)
+            row["best"] = inherited
+        if row["best"] is None or row["best"].get("lat") is None:
+            row["unplaced"] = await _unplaced_reason(session, row, geo, declared)
+        row.pop("_swarm")
+
     server = declared.get(("member", SERVER_NAME))
     # Declared swarm locations, for the dashboard's location forms (#228).
     swarms = {name: _entry("declared", d.label, d.room, d.lat, d.lon)
               for (kind, name), d in sorted(declared.items()) if kind == "swarm"}
-    return {"members": out, "swarms": swarms,
+    return {"members": out, "swarms": swarms, "geo": geo,
             "server": _entry("declared", server.label, server.room, server.lat, server.lon) if server else None}
