@@ -216,3 +216,23 @@ The broker's ACL needs `topic write <topic_id>/+/ping` for the hub and
 `pattern read <topic_id>/%u/ping` for members (see `examples/echo-base/deploy/echo-base.acl`).
 Members keep resending unacked records every `RESEND_SECONDS` (60), separately
 from the heartbeat.
+
+## Introductions (#334)
+
+`GET /api/swarm` includes the swarm's `roster`: each active member's name, role,
+kind and a one-line spec summary (from the spec sheet, [specs.md](specs.md)).
+No keys, operators or locations.
+
+When the harness starts in a swarm (or its role changes) it introduces itself
+once: a `communication` tagged `introduction` (and `swarm-message` on the bus),
+addressed to the whole swarm, with `{swarm, role, specs_summary, capabilities,
+harness_version}` in the payload. The last swarm and role it introduced itself
+as are kept in `introduced.json` beside its state, so a restart sends nothing.
+With the direct transport it's appended to its chain instead of published.
+
+A member that hears an introduction may reply once (`refs.reply_to`), after a
+random 0 to 30 s delay so a newcomer isn't answered by everyone at once. It
+never replies to a reply. `INTRO_REPLY=off` turns replies off;
+`INTRO_CHECK_SECONDS` (3600) is how often it checks for a new swarm or role.
+Introductions count against the hub's per-member message limit. The
+Conversation page marks them and can show introductions only.
