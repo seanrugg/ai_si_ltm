@@ -17,12 +17,12 @@ export function haloPx(accuracyKm, R) {
 
 function noteFor(best, member) {
   if (!best) return null;
-  if (best.source === "declared") return "declared";
+  if (best.source === "declared") return best.inherited_from ? `declared for ${best.inherited_from}` : "declared";
   if (best.source === "gps") return "GPS";
   if (best.source === "network") {
-    return member?.kind === "agent" || member?.kind === "assistant"
-      ? "data-center estimate"
-      : `estimate ±${Math.round(best.accuracy_km ?? 50)} km`;
+    if (member?.kind === "agent" || member?.kind === "assistant") return "data-center estimate";
+    const via = best.via_hub ? `, via hub ${best.via_hub}` : best.inherited_from ? `, from ${best.inherited_from}` : "";
+    return `estimate ±${Math.round(best.accuracy_km ?? 50)} km${via}`;
   }
   return best.source;
 }
@@ -80,4 +80,10 @@ export function roomsOf(locations, names) {
 export function flowWidth(perMinute, max) {
   if (!(perMinute > 0) || !(max > 0)) return 1.2;
   return 1.2 + Math.min(1, perMinute / max) * (5 - 1.2);
+}
+
+/** Members with no position, each with the server's reason (#346). */
+export function unplacedOf(locations) {
+  return (locations || []).filter((l) => !l.best || l.best.lat == null || l.best.lon == null)
+    .map((l) => ({ name: l.name, reason: l.unplaced || "No location yet." }));
 }
