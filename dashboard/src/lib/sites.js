@@ -82,6 +82,38 @@ export function flowWidth(perMinute, max) {
   return 1.2 + Math.min(1, perMinute / max) * (5 - 1.2);
 }
 
+/** A site's marker role (#347): hub if any member is a hub, observer if all are, else member. */
+export function siteRole(site, roleOf = () => "member") {
+  const roles = (site?.members || []).map((n) => roleOf(n) || "member");
+  if (roles.includes("hub")) return "hub";
+  if (roles.length && roles.every((r) => r === "observer")) return "observer";
+  return "member";
+}
+
+/** SVG path for a role's shape: hub hexagon, member diamond (observer is a ring, drawn as a circle). */
+export function markerPath(role, x, y, r) {
+  if (role === "hub") {
+    const pts = [...Array(6)].map((_, i) => {
+      const a = (Math.PI / 3) * i - Math.PI / 6;
+      return `${(x + r * Math.cos(a)).toFixed(1)},${(y + r * Math.sin(a)).toFixed(1)}`;
+    });
+    return `M${pts.join("L")}Z`;
+  }
+  return `M${x},${y - r}L${x + r},${y}L${x},${y + r}L${x - r},${y}Z`;
+}
+
+/** Fill and stroke style by location source: GPS solid, declared outlined, network dashed. */
+export function sourceStyle(source) {
+  if (source === "gps") return { fillOpacity: 1, dash: undefined, label: "location from GPS" };
+  if (source === "network") return { fillOpacity: 0, dash: "2 2", label: "location estimated from the network" };
+  return { fillOpacity: 0.15, dash: undefined, label: "location declared" };
+}
+
+/** Accessible name for a marker: "jetson-hub, hub, location declared". */
+export function markerLabel(site, role) {
+  return `${site.label}, ${role}, ${sourceStyle(site.source).label}${site.members?.length > 1 ? `, ${site.members.length} members` : ""}`;
+}
+
 /** Members with no position, each with the server's reason (#346). */
 export function unplacedOf(locations) {
   return (locations || []).filter((l) => !l.best || l.best.lat == null || l.best.lon == null)
