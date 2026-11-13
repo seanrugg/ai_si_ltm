@@ -294,6 +294,16 @@ def _timeline_type_clause(session, type_param: str | None):
     return or_(*conds)
 
 
+async def _in_swarm_clause(session, name: str):
+    """Records whose provenance swarm (the author's swarm when written) is ``name`` (#330)."""
+    from server.models import RecordProvenance, Swarm
+
+    sid = await session.scalar(select(Swarm.id).where(Swarm.name == name, Swarm.status != "removed"))
+    if sid is None:
+        raise ServiceError(404, "no_swarm", f"no swarm {name!r}")
+    return Record.id.in_(select(RecordProvenance.record_id).where(RecordProvenance.swarm_id == sid))
+
+
 @router.get("/admin/timeline")
 async def timeline(
     request: Request,
@@ -310,12 +320,15 @@ async def timeline(
     exclude_tag: str | None = None,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    swarm: str | None = None,
 ) -> dict:
     f = recall.RecordFilter(agent=agent, place=place, peer=peer, tag=tag, exclude_tag=exclude_tag,
                             outcome=outcome, since=since, until=until, q=q, limit=limit, offset=offset)
     async with transaction(request) as session:
         # `type` is handled here (not by build_query) so it can accept `sensed`.
         stmt = recall.build_query(session, f, recall.Scope()).where(_timeline_type_clause(session, type))
+        if swarm:
+            stmt = stmt.where(await _in_swarm_clause(session, swarm))
         stmt = stmt.order_by(Record.ts.desc(), Record.id.desc()).limit(limit).offset(offset)
         rows = list(await session.scalars(stmt))
         payloads = await recall.fetch_payloads(session, rows)
@@ -421,7 +434,7 @@ async def delete_location(subject_type: str, name: str, request: Request, admin:
 
 @router.get("/admin/volume")
 async def volume(
-    request: Request, days: int = Query(14, ge=1, le=90), admin: AdminAuth = ADMIN,
+    request: Request, days: int = Query(14, ge=1, le=90), admin: AdminAuth = ADMIN, swarm: str | None = None,
 ) -> dict:
     """Records and payload bytes per day, member and type over the last `days` days.
 
@@ -443,7 +456,7 @@ async def volume(
                 func.coalesce(func.sum(RecordPayload.size), 0).label("payload_bytes"),
             )
             .outerjoin(RecordPayload, RecordPayload.record_id == Record.id)
-            .where(Record.ts >= since)
+            .where(Record.ts >= since, *([await _in_swarm_clause(session, swarm)] if swarm else []))
             .group_by(day, Record.agent, Record.type)
             .order_by(day.desc(), Record.agent, Record.type)
         )
@@ -454,7 +467,41 @@ async def volume(
                 {"day": r.day, "agent": r.agent, "type": r.type, "records": r.records, "payload_bytes": r.payload_bytes}
                 for r in rows
             ],
+            "swarms": await _swarm_message_share(session, day, since),
         }
+
+
+async def _swarm_message_share(session, day, since) -> list[dict]:
+    """Per swarm (#302): swarm messages vs all records, per day, and who is summarised now (#301)."""
+    from sqlalchemy import case
+
+    from server.models import RecordProvenance, Swarm, SwarmMember
+    from server.services.lrs import SWARM_MESSAGE_TAG, _last_summary_state
+
+    is_msg = and_(Record.type == "communication", recall._json_list_contains(session, Record.tags, SWARM_MESSAGE_TAG))
+    rows = (await session.execute(
+        select(day.label("day"), Swarm.name, func.count(Record.id).label("records"),
+               func.sum(case((is_msg, 1), else_=0)).label("messages"))
+        .join(RecordProvenance, RecordProvenance.record_id == Record.id)
+        .join(Swarm, Swarm.id == RecordProvenance.swarm_id)
+        .where(Record.ts >= since).group_by(day, Swarm.name))).all()
+    out: dict[str, dict] = {}
+    for d, name, n, msgs in rows:
+        s = out.setdefault(name, {"swarm": name, "records": 0, "messages": 0, "days_over_half": [],
+                                  "summarised": []})
+        s["records"] += n
+        s["messages"] += int(msgs or 0)
+        if n and (msgs or 0) / n > 0.5:
+            s["days_over_half"].append(d)
+    for s in out.values():
+        s["share"] = round(s["messages"] / s["records"], 3) if s["records"] else 0.0
+        s["days_over_half"].sort()
+        members = await session.scalars(
+            select(Member.name).join(SwarmMember, SwarmMember.member_id == Member.id).join(
+                Swarm, Swarm.id == SwarmMember.swarm_id)
+            .where(Swarm.name == s["swarm"], SwarmMember.left_at.is_(None)).order_by(Member.name))
+        s["summarised"] = [m for m in members if await _last_summary_state(session, m) == "lrs_summary_on"]
+    return sorted(out.values(), key=lambda s: s["swarm"])
 
 
 @router.get("/admin/activity")

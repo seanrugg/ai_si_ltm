@@ -296,3 +296,63 @@ def read_to_statement(read: dict, dataset: dict, *, base: str, xapi_version: str
         "timestamp": read["ts"],
         "version": xapi_version,
     }
+
+
+SUMMARY_TYPE = AI + "/activity-type/message-summary"
+
+
+def message_summary_statement(
+    agent: str, records: list[dict], *, window_start: str, window_end: str, base: str,
+    xapi_version: str = "2.0.0", agent_kind: str = "", swarm: str | None = None,
+) -> dict:
+    """One statement for a member's swarm messages in one window (#301).
+
+    Deterministic aggregation only: a count, the distinct peers and the first and
+    last record refs. No text is summarised. ``records`` are wire dicts (agent,
+    seq, hash, ts, peers), oldest first. The id derives from the first and last
+    hashes, so a re-send of the same window keeps its id.
+    """
+    if xapi_version not in VALID_XAPI_VERSIONS:
+        raise ValueError(f"unsupported xAPI version: {xapi_version!r}")
+    if not records:
+        raise ValueError("a message summary needs at least one record")
+    base = base.rstrip("/")
+    first, last = records[0], records[-1]
+    peers = sorted({p for r in records for p in (r.get("peers") or [])})
+    statement = {
+        "id": str(uuid.uuid5(NAMESPACE, f"summary:{first['hash']}:{last['hash']}")),
+        "actor": _account_agent(base, agent),
+        "verb": {"id": VERBS["communication"][0], "display": {"en": VERBS["communication"][1]}},
+        "object": {
+            "objectType": "Activity",
+            "id": f"{base}/records/{agent}/{first['seq']}-{last['seq']}",
+            "definition": {"type": SUMMARY_TYPE,
+                           "name": {"en": f"{len(records)} swarm messages, {window_start} to {window_end}"}},
+        },
+        "timestamp": last["ts"],
+        "version": xapi_version,
+        "result": {"extensions": {
+            EXT + "message-summary/count": len(records),
+            EXT + "message-summary/peers": peers,
+            EXT + "message-summary/first": f"{agent}:{first['seq']}",
+            EXT + "message-summary/last": f"{agent}:{last['seq']}",
+            EXT + "message-summary/window-start": window_start,
+            EXT + "message-summary/window-end": window_end,
+        }},
+        "context": {
+            "contextActivities": {"category": [
+                {"objectType": "Activity", "id": PROFILE_VERSION,
+                 "definition": {"type": "http://adlnet.gov/expapi/activities/profile"}},
+                {"objectType": "Activity", "id": GLOSSARY + "social-learning", "definition": {"type": SKOS_CONCEPT}},
+            ]},
+            "extensions": {
+                EXT + "holocron/record-type": "communication",
+                EXT + "holocron/mapping-version": MAPPING_VERSION,
+                EXT + "agent-kind": _agent_kind(agent_kind),
+            },
+        },
+    }
+    if swarm:
+        statement["context"]["contextActivities"]["grouping"] = [
+            _activity(base, f"/swarms/{swarm}", AI + "/activity-type/swarm", swarm)]
+    return statement

@@ -10,7 +10,7 @@ import { mergeTombstones, tombstoneRange } from "../lib/tombstones.js";
 
 const OUTCOMES = ["success", "partial", "reflex_stop", "stuck", "abandoned", "failed"];
 const PAGE = 50;
-const FILTERS = ["agent", "type", "outcome", "place", "q", "since"];
+const FILTERS = ["agent", "type", "outcome", "place", "q", "since", "swarm"];
 // Text fields apply after typing stops; selects and the Types picker apply at once.
 const TEXT_APPLY_DELAY_MS = 400;
 
@@ -41,7 +41,9 @@ export default function Timeline() {
   // two records inside the date range is inside the range too, so it is a
   // deletion. Type, outcome, place and summary filters do turn it off, since
   // their gaps are filtered-out records, not deletions.
-  const showTombstones = Boolean(filters.agent) && !filters.type && !filters.outcome && !filters.place && !filters.q;
+  // Tombstones have no swarm (#330), so a swarm filter turns them off too.
+  const showTombstones = Boolean(filters.agent) && !filters.type && !filters.outcome && !filters.place && !filters.q
+    && !filters.swarm;
   const [tombstones, setTombstones] = useState([]);
   const lowestSeq = useRef(null);
 
@@ -132,6 +134,7 @@ export default function Timeline() {
     const types = [...parseTypes(filters.type)];
     active.push({ key: "type", label: `Type: ${types.length ? types.map((t) => LABELS[t]).join(", ") : "none"}` });
   }
+  if (filters.swarm) active.push({ key: "swarm", label: `Swarm: ${filters.swarm}` });
   if (filters.agent) active.push({ key: "agent", label: `Member: ${filters.agent}` });
   if (filters.outcome) active.push({ key: "outcome", label: `Outcome: ${filters.outcome.replace("_", " ")}` });
   if (filters.place) active.push({ key: "place", label: `Place: ${filters.place}` });
@@ -196,6 +199,9 @@ export default function Timeline() {
         </div>
       )}
 
+      {filters.swarm && (
+        <p className="mb-2 text-xs text-paper-muted">Deleted records aren&apos;t shown when filtering by swarm.</p>
+      )}
       {!loading && !error && (
         <p className="mb-2 text-sm text-paper-muted" role="status">{countText}</p>
       )}
