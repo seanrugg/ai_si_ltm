@@ -50,7 +50,7 @@ def test_load_config_defaults():
         mqtt_username=None,
         mqtt_password=None,
         swarm="echo-base",
-        heartbeat_seconds=60.0,
+        heartbeat_seconds=43200.0,
     )
 
 

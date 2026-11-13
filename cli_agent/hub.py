@@ -153,7 +153,7 @@ class Hub:
                 logging.warning("Hub: network report for %s failed: %s", agent, exc)
         return sent
 
-    def heartbeat(self, link, started_at: float, now: float) -> dict:
+    def heartbeat(self, link, started_at: float, now: float, ping: bool = False) -> dict:
         """Sign the hub's own heartbeat into the outbox (#281); the next tick relays it.
 
         ``link`` is a MemberLink for the hub's own key with a no-op publish: the
@@ -165,8 +165,10 @@ class Hub:
             payload = {"uptime_s": round(now - started_at, 1), "role": "hub", "members_seen": members_seen}
             if dropped:
                 payload["dropped_messages"] = dropped
-            return link.append("perception", summary="heartbeat", tags=["telemetry", "internal"],
-                               payload=payload)
+            if ping:
+                payload["ping"] = True  # answering an admin's ping (#356)
+            return link.append("perception", summary="heartbeat (ping)" if ping else "heartbeat",
+                               tags=["telemetry", "internal"], payload=payload)
 
     def tick(self, batch_size: int = 100) -> dict | None:
         self.report_network()
