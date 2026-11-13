@@ -1,4 +1,5 @@
 import { useState } from "react";
+import GuidedSetup from "../components/GuidedSetup.jsx";
 import HelpTip from "../components/HelpTip.jsx";
 import LocationForm from "../components/LocationForm.jsx";
 import { FINGERPRINT_CHECK, HUB_INTENT, SWARM_MOVE, SWARM_ROLE, MEMORY_WIPE, WIPE_VS_DELETE } from "../lib/help.js";
@@ -88,7 +89,7 @@ function PermissionEditor({ initial, initialScope, onSave, saveLabel, onCancel, 
   );
 }
 
-function PendingCard({ m, selected, onToggle, onDone }) {
+function PendingCard({ m, selected, onToggle, onDone, onApproved }) {
   const [mode, setMode] = useState(null); // null | "approve" | "reject"
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -99,6 +100,7 @@ function PendingCard({ m, selected, onToggle, onDone }) {
     setError(null);
     try {
       await api(`/admin/members/${m.id}/${path}`, { method: "POST", body });
+      if (path === "approve" && m.intended?.swarm) onApproved?.(m);  // continue into setup (#313)
       onDone();
     } catch (err) {
       setError(err);
@@ -459,7 +461,8 @@ export function filterMembers(active, swarmOf, show) {
 
 export default function Members() {
   const { data, error, loading, reload } = useApi("/admin/members");
-  const { data: swarmsData } = useApi("/admin/swarms");
+  const { data: swarmsData, reload: reloadSwarms } = useApi("/admin/swarms");
+  const [setups, setSetups] = useState([]); // members approved with an intended swarm (#313)
   const locations = useApi("/admin/locations");
   const declaredOf = (name) => (locations.data?.members || []).find((l) => l.name === name)?.all
     ?.find((e) => e.source === "declared" && !e.inherited_from) ?? null;
@@ -585,6 +588,12 @@ export default function Members() {
               </ul>
             </div>
           )}
+          {setups.map(({ member: sm, joinedEarly }) => (
+            <GuidedSetup key={sm.id} member={sm} swarms={swarmsData} allMembers={active.concat(
+              active.some((a) => a.name === sm.name) ? [] : [{ ...sm, status: "active" }])}
+                         joinedEarly={joinedEarly} onReload={() => { reload(); reloadSwarms(); }}
+                         onFinish={() => setSetups((prev) => prev.filter((x) => x.member.id !== sm.id))} />
+          ))}
           {pending.length > 0 && (
             <section className="mb-8" aria-labelledby="pending-h">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -610,7 +619,10 @@ export default function Members() {
               </div>
               <ul className="grid gap-3 xl:grid-cols-2">
                 {pending.map((m) => <PendingCard key={m.id} m={m} selected={selected.has(m.id)}
-                  onToggle={toggleSelection} onDone={reload} />)}
+                  onToggle={toggleSelection} onDone={reload}
+                  onApproved={(am) => setSetups((prev) => [...prev, {
+                    member: am, joinedEarly: (swarmsData || []).some((s) => s.name === am.intended.swarm
+                      && (s.members || []).some((x) => x.name === am.name)) }])} />)}
               </ul>
               {bulkMode && (
                 <div className="mt-4 rounded-md border border-ink-line bg-ink p-4" role="group"
