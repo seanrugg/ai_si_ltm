@@ -52,6 +52,16 @@ export function membersFromParam(param) {
   return String(param || "").split(",").map((n) => n.trim()).filter(Boolean).slice(0, MAX_MEMBERS);
 }
 
+// A selected author chip keeps its name readable: a tinted fill, never a solid
+// fill in the same colour as the text (the name vanished in the Holo theme).
+export function authorChipClass(selected) {
+  return `rounded border px-2 py-1 text-xs ${
+    selected
+      ? "bg-led/20 border-led text-led font-semibold"
+      : "border-ink-line text-paper-muted hover:bg-led/10"
+  }`;
+}
+
 export default function Conversation() {
   const [params] = useSearchParams();
   const linked = membersFromParam(params.get("members"));
@@ -209,11 +219,8 @@ export default function Conversation() {
                   key={name}
                   type="button"
                   onClick={() => toggleFilter(name)}
-                  className={`rounded border px-2 py-1 text-xs ${
-                    memberFilters.has(name)
-                      ? "bg-led border-led text-led"
-                      : "border-ink-line text-paper-muted hover:bg-led/10"
-                  }`}
+                  aria-pressed={memberFilters.has(name)}
+                  className={authorChipClass(memberFilters.has(name))}
                 >
                   {name}
                 </button>
