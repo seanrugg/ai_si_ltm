@@ -67,6 +67,10 @@ async def declare(session: AsyncSession, member: Member, body: dict) -> dict:
     old = member.cognition_declared if isinstance(member.cognition_declared, dict) else None
     changed = old is None or old.get("location") != decl["location"] or old.get("models") != decl["models"]
     member.cognition_declared = {**decl, "reported_at": datetime.now(timezone.utc).isoformat()}
+    # The models also go into the spec sheet (#332); cognition keeps owning the location.
+    from server.services import specs
+
+    await specs.report_models(session, member, decl["models"], decl["location"])
     if changed:
         session.add(AuditLog(
             actor=member.name, action="cognition_change", member_id=member.id,

@@ -157,6 +157,41 @@ async def set_cognition(member_id: str, request: Request, body: dict, admin: Adm
         return enrollment.member_to_dict(m)
 
 
+# Spec sheet (#332): hardware, models and software, with admin overrides.
+async def _member_by_id(session, member_id: str) -> Member:
+    m = await session.get(Member, _uuid(member_id))
+    if m is None:
+        raise ServiceError(404, "not_found", "no such member")
+    return m
+
+
+@router.get("/admin/members/{member_id}/specs")
+async def get_specs(member_id: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    from server.services import specs
+
+    async with transaction(request) as session:
+        return {"specs": specs.resolve(await _member_by_id(session, member_id))}
+
+
+@router.patch("/admin/members/{member_id}/specs")
+async def patch_specs(member_id: str, request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    """Set override fields, or clear them with null. Never edits what the device reported."""
+    from server.services import specs
+
+    async with transaction(request) as session:
+        m = await _member_by_id(session, member_id)
+        return {"specs": await specs.admin_patch(session, m, body, admin=f"admin:{admin.username}")}
+
+
+@router.get("/admin/members/{member_id}/specs/history")
+async def specs_history(member_id: str, request: Request, admin: AdminAuth = ADMIN,
+                        limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0)) -> dict:
+    from server.services import specs
+
+    async with transaction(request) as session:
+        return await specs.history(session, await _member_by_id(session, member_id), limit=limit, offset=offset)
+
+
 @router.post("/admin/members/{member_id}/cognition/observe")
 async def observe_cognition(member_id: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
     """Measure where a robot's decisions are made, now (#199). Other kinds: 422."""
@@ -356,6 +391,49 @@ async def profile_history(request: Request, admin: AdminAuth = ADMIN, member: st
     async with transaction(request) as session:
         subject = await profile_service.resolve_subject(session, member, swarm)
         return await profile_service.history(session, subject)
+
+
+# Directives (#303): signed instructions to one swarm or all swarms.
+@router.post("/admin/directives", status_code=201)
+async def issue_directive(request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    """``{"scope": {"swarm": <name|id>} | {"all": true}, "text", "payload"?, "expires_in_days"?}``."""
+    from server.services import directives
+
+    async with transaction(request) as session:
+        return await directives.issue(session, request.app.state.config, body, issued_by=f"admin:{admin.username}")
+
+
+@router.get("/admin/directives")
+async def list_directives(request: Request, admin: AdminAuth = ADMIN) -> dict:
+    from server.services import directives
+
+    async with transaction(request) as session:
+        return {"directives": await directives.list_all(session)}
+
+
+@router.post("/admin/directives/{directive_id}/cancel")
+async def cancel_directive(directive_id: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    from server.services import directives
+
+    async with transaction(request) as session:
+        return await directives.cancel(session, request.app.state.config, directive_id, actor=f"admin:{admin.username}")
+
+
+# Admin ping (#356): ask a member for a heartbeat.
+@router.post("/admin/members/{name}/ping")
+async def ping_member(name: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    from server.services import ping
+
+    async with transaction(request) as session:
+        return await ping.request(session, name, admin=f"admin:{admin.username}")
+
+
+@router.get("/admin/members/{name}/ping")
+async def ping_status(name: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    from server.services import ping
+
+    async with transaction(request) as session:
+        return await ping.status(session, name)
 
 
 @router.get("/admin/locations")
@@ -623,6 +701,22 @@ async def record_delete(agent: str, seq: int, request: Request, admin: AdminAuth
 async def list_swarms(request: Request, admin: AdminAuth = ADMIN) -> list[dict]:
     async with transaction(request) as session:
         return await swarms.describe(session)
+
+
+@router.post("/admin/swarms/{name}/leader")
+async def appoint_swarm_leader(name: str, request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    """``{"statement", "sig"}`` signed with the swarm's root key (#308)."""
+    async with transaction(request) as session:
+        swarm = await swarms.get_swarm(session, name)
+        await swarms.appoint_leader(session, swarm, body, actor=f"admin:{admin.username}")
+        return {"swarm": swarm.name, "leader": await swarms.leader_of(session, swarm)}
+
+
+@router.delete("/admin/swarms/{name}/leader")
+async def remove_swarm_leader(name: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    async with transaction(request) as session:
+        swarm = await swarms.get_swarm(session, name)
+        return {"swarm": swarm.name, "removed": await swarms.remove_leader(session, swarm, actor=f"admin:{admin.username}")}
 
 
 @router.post("/admin/swarms")

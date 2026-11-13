@@ -1,5 +1,6 @@
 // A member's or a swarm's profile: identity, tabs, legend (issue #192).
 import { useEffect, useRef, useState } from "react";
+import PingButton from "../components/PingButton.jsx";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
@@ -187,6 +188,7 @@ export default function Profile({ subject }) {
             <Fact label="Last seen">
               <span title={localTime(member.last_seen_at)}>{member.last_seen_at ? relativeTime(member.last_seen_at) : "never"}</span>
             </Fact>
+            {member.status === "active" && <Fact label="Ping"><PingButton name={name} /></Fact>}
           </div>
         )}
       </section>

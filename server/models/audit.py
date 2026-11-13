@@ -11,6 +11,10 @@ from server.models.base import Base, BigIntPK, JSONType, UTCDateTime, utcnow
 
 AUDIT_ACTIONS = (
     "recall",
+    "directive_issue",
+    "directive_cancel",
+    "swarm_appoint_leader",
+    "swarm_remove_leader",
     "admin_login",
     "admin_login_failed",
     "enroll_request",

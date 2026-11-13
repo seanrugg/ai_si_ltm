@@ -249,6 +249,27 @@ class LTMSClient:
         """
         return self._call("POST", "/api/records", json={"records": records})
 
+    def report_specs(self, specs: dict) -> dict | None:
+        """Report this device's spec sheet (#332): hardware, models, software, notes.
+
+        An identical re-report changes nothing on the server. Never raises; returns
+        the resolved spec sheet, or None.
+        """
+        try:
+            return self._call("PUT", "/api/members/me/specs", json=specs)["specs"]
+        except Exception as exc:  # noqa: BLE001 - reporting is best effort
+            log.warning("report_specs failed: %s", exc)
+            return None
+
+    def pings(self) -> list[str]:
+        """Pending admin pings (#356): this member's name if it was pinged, plus (for a hub)
+        pinged members of its swarm. Fetching marks them delivered. Never raises."""
+        try:
+            return list(self._call("GET", "/api/members/me/pings").get("pings") or [])
+        except Exception as exc:  # noqa: BLE001 - a missed ping is retried by the admin
+            log.warning("pings failed: %s", exc)
+            return []
+
     def swarm(self) -> dict | None:
         """This member's swarm (#292): ``{"id", "topic_id", "name", "role"}``, or None.
 

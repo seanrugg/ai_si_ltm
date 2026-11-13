@@ -50,6 +50,29 @@ CREATE TABLE declared_locations (
 	CONSTRAINT ck_declared_locations_subject_type CHECK (subject_type IN ('member', 'swarm'))
 );
 
+CREATE TABLE directives (
+	id UUID NOT NULL, 
+	scope_swarm_id VARCHAR(64), 
+	text TEXT NOT NULL, 
+	payload JSONB, 
+	issued_by VARCHAR(128) NOT NULL, 
+	issued_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	expires_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	status VARCHAR(16) NOT NULL, 
+	statement TEXT NOT NULL, 
+	signature VARCHAR(128) NOT NULL, 
+	signer VARCHAR(16) NOT NULL, 
+	cancelled_at TIMESTAMP WITH TIME ZONE, 
+	cancel_statement TEXT, 
+	cancel_signature VARCHAR(128), 
+	inherited BOOLEAN NOT NULL, 
+	confirmed_by VARCHAR(128), 
+	PRIMARY KEY (id), 
+	CONSTRAINT ck_directives_status CHECK (status IN ('open', 'cancelled'))
+);
+
+CREATE INDEX idx_directives_issued_at ON directives (issued_at);
+
 CREATE TABLE lrs_endpoints (
 	id UUID NOT NULL, 
 	name VARCHAR(64) NOT NULL, 
@@ -112,6 +135,12 @@ CREATE TABLE members (
 	cognition_observed JSONB, 
 	intended JSONB, 
 	proxied_by VARCHAR(128), 
+	ping_requested_at TIMESTAMP WITH TIME ZONE, 
+	ping_requested_by VARCHAR(128), 
+	ping_delivered_at TIMESTAMP WITH TIME ZONE, 
+	specs_declared JSONB, 
+	specs_admin JSONB, 
+	specs_reported_at TIMESTAMP WITH TIME ZONE, 
 	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
 	PRIMARY KEY (id), 
 	CONSTRAINT ck_members_kind CHECK (kind IN ('robot', 'agent', 'assistant', 'relay')), 
@@ -127,26 +156,6 @@ CREATE TABLE runtime_settings (
 	updated_at TIMESTAMP WITH TIME ZONE NOT NULL, 
 	updated_by VARCHAR(64), 
 	PRIMARY KEY (key)
-);
-
-CREATE TABLE swarms (
-	id VARCHAR(64) NOT NULL, 
-	name VARCHAR(64) NOT NULL, 
-	description TEXT, 
-	public_key BYTEA NOT NULL, 
-	status VARCHAR(16) NOT NULL, 
-	is_home BOOLEAN NOT NULL, 
-	enrollment_mode VARCHAR(16) DEFAULT 'approval' NOT NULL, 
-	open_permissions JSONB DEFAULT '["contribute"]' NOT NULL, 
-	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
-	revoked_at TIMESTAMP WITH TIME ZONE, 
-	removed_at TIMESTAMP WITH TIME ZONE, 
-	former_name VARCHAR(64), 
-	PRIMARY KEY (id), 
-	CONSTRAINT ck_swarms_status CHECK (status IN ('active', 'revoked', 'removed')), 
-	CONSTRAINT ck_swarms_enrollment_mode CHECK (enrollment_mode IN ('approval', 'invite', 'open')), 
-	UNIQUE (name), 
-	UNIQUE (public_key)
 );
 
 CREATE TABLE admin_sessions (
@@ -207,30 +216,6 @@ CREATE TABLE datasets (
 	UNIQUE (name), 
 	FOREIGN KEY(integration_id) REFERENCES catalog_integrations (id)
 );
-
-CREATE TABLE enrollment_swarm_requests (
-	member_id UUID NOT NULL, 
-	swarm_id VARCHAR(64) NOT NULL, 
-	requested_at TIMESTAMP WITH TIME ZONE NOT NULL, 
-	PRIMARY KEY (member_id), 
-	FOREIGN KEY(member_id) REFERENCES members (id), 
-	FOREIGN KEY(swarm_id) REFERENCES swarms (id)
-);
-
-CREATE TABLE invites (
-	id UUID NOT NULL, 
-	swarm_id VARCHAR(64) NOT NULL, 
-	code_hash VARCHAR(64) NOT NULL, 
-	uses_left INTEGER NOT NULL, 
-	expires_at TIMESTAMP WITH TIME ZONE, 
-	role VARCHAR(16) DEFAULT 'member' NOT NULL, 
-	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
-	PRIMARY KEY (id), 
-	FOREIGN KEY(swarm_id) REFERENCES swarms (id), 
-	UNIQUE (code_hash)
-);
-
-CREATE INDEX idx_invites_swarm ON invites (swarm_id);
 
 CREATE TABLE member_addresses (
 	id BIGSERIAL NOT NULL, 
@@ -324,25 +309,28 @@ CREATE TRIGGER trg_records_no_mutation BEFORE UPDATE OR DELETE ON records FOR EA
 
 CREATE TRIGGER trg_records_no_truncate BEFORE TRUNCATE ON records FOR EACH STATEMENT EXECUTE FUNCTION records_no_mutation();
 
-CREATE TABLE swarm_members (
-	id BIGSERIAL NOT NULL, 
-	swarm_id VARCHAR(64) NOT NULL, 
-	member_id UUID NOT NULL, 
-	role VARCHAR(16) NOT NULL, 
-	joined_at TIMESTAMP WITH TIME ZONE NOT NULL, 
-	left_at TIMESTAMP WITH TIME ZONE, 
-	appointment JSONB, 
+CREATE TABLE swarms (
+	id VARCHAR(64) NOT NULL, 
+	name VARCHAR(64) NOT NULL, 
+	description TEXT, 
+	public_key BYTEA NOT NULL, 
+	status VARCHAR(16) NOT NULL, 
+	is_home BOOLEAN NOT NULL, 
+	enrollment_mode VARCHAR(16) DEFAULT 'approval' NOT NULL, 
+	open_permissions JSONB DEFAULT '["contribute"]' NOT NULL, 
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	revoked_at TIMESTAMP WITH TIME ZONE, 
+	leader_member_id UUID, 
+	leader_appointment JSONB, 
+	removed_at TIMESTAMP WITH TIME ZONE, 
+	former_name VARCHAR(64), 
 	PRIMARY KEY (id), 
-	CONSTRAINT ck_swarm_members_role CHECK (role IN ('hub', 'member', 'observer')), 
-	FOREIGN KEY(swarm_id) REFERENCES swarms (id), 
-	FOREIGN KEY(member_id) REFERENCES members (id)
+	CONSTRAINT ck_swarms_status CHECK (status IN ('active', 'revoked', 'removed')), 
+	CONSTRAINT ck_swarms_enrollment_mode CHECK (enrollment_mode IN ('approval', 'invite', 'open')), 
+	UNIQUE (name), 
+	UNIQUE (public_key), 
+	FOREIGN KEY(leader_member_id) REFERENCES members (id)
 );
-
-CREATE INDEX idx_swarm_members_swarm ON swarm_members (swarm_id);
-
-CREATE UNIQUE INDEX uq_swarm_members_hub ON swarm_members (swarm_id) WHERE role = 'hub' AND left_at IS NULL;
-
-CREATE UNIQUE INDEX uq_swarm_members_open ON swarm_members (member_id) WHERE left_at IS NULL;
 
 CREATE TABLE tokens (
 	id UUID NOT NULL, 
@@ -398,6 +386,30 @@ CREATE TABLE dataset_versions (
 	FOREIGN KEY(dataset_id) REFERENCES datasets (id)
 );
 
+CREATE TABLE enrollment_swarm_requests (
+	member_id UUID NOT NULL, 
+	swarm_id VARCHAR(64) NOT NULL, 
+	requested_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	PRIMARY KEY (member_id), 
+	FOREIGN KEY(member_id) REFERENCES members (id), 
+	FOREIGN KEY(swarm_id) REFERENCES swarms (id)
+);
+
+CREATE TABLE invites (
+	id UUID NOT NULL, 
+	swarm_id VARCHAR(64) NOT NULL, 
+	code_hash VARCHAR(64) NOT NULL, 
+	uses_left INTEGER NOT NULL, 
+	expires_at TIMESTAMP WITH TIME ZONE, 
+	role VARCHAR(16) DEFAULT 'member' NOT NULL, 
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(swarm_id) REFERENCES swarms (id), 
+	UNIQUE (code_hash)
+);
+
+CREATE INDEX idx_invites_swarm ON invites (swarm_id);
+
 CREATE TABLE record_payloads (
 	record_id BIGINT NOT NULL, 
 	payload_raw BYTEA NOT NULL, 
@@ -421,6 +433,26 @@ CREATE TABLE record_provenance (
 CREATE INDEX idx_record_provenance_relay ON record_provenance (relay_member_id);
 
 CREATE INDEX idx_record_provenance_swarm ON record_provenance (swarm_id);
+
+CREATE TABLE swarm_members (
+	id BIGSERIAL NOT NULL, 
+	swarm_id VARCHAR(64) NOT NULL, 
+	member_id UUID NOT NULL, 
+	role VARCHAR(16) NOT NULL, 
+	joined_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	left_at TIMESTAMP WITH TIME ZONE, 
+	appointment JSONB, 
+	PRIMARY KEY (id), 
+	CONSTRAINT ck_swarm_members_role CHECK (role IN ('hub', 'member', 'observer')), 
+	FOREIGN KEY(swarm_id) REFERENCES swarms (id), 
+	FOREIGN KEY(member_id) REFERENCES members (id)
+);
+
+CREATE INDEX idx_swarm_members_swarm ON swarm_members (swarm_id);
+
+CREATE UNIQUE INDEX uq_swarm_members_hub ON swarm_members (swarm_id) WHERE role = 'hub' AND left_at IS NULL;
+
+CREATE UNIQUE INDEX uq_swarm_members_open ON swarm_members (member_id) WHERE left_at IS NULL;
 
 CREATE TABLE dataset_items (
 	id BIGSERIAL NOT NULL, 

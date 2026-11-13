@@ -65,6 +65,10 @@ class Swarm(Base):
         JSONType, nullable=False, default=lambda: ["contribute"], server_default='["contribute"]')
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utcnow)
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # Swarm leader (#308): directs the swarm; appointed with the root key like the hub.
+    leader_member_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("members.id"))
+    # {"statement", "sig", "granted": what the appointment added to the leader's recall}
+    leader_appointment: Mapped[dict | None] = mapped_column(JSONType)
     # Removal (#232): a removed swarm keeps its row and ID for history, but its
     # name is moved aside (``<name>.removed.<id prefix>``) so the name can be
     # reused; ``former_name`` keeps what it was called.

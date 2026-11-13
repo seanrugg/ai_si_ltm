@@ -64,12 +64,26 @@ async def chain_head(request: Request, agent: str | None = None,
         return head
 
 
+@router.get("/fleet-key")
+async def get_fleet_key(request: Request) -> dict:
+    """The fleet's public key (#303), to verify directives. Public: it's a public key."""
+    from server.services import fleet_key
+
+    return {"public_key": fleet_key.public_hex(request.app.state.config)}
+
+
 @router.get("/swarm")
 async def my_swarm(request: Request, auth: MemberAuth = Depends(current_member)) -> dict:
     """The caller's swarm (#292): permanent ID, MQTT topic ID, current name and role; null for a free agent."""
     async with transaction(request) as session:
         member = await session.get(Member, auth.member_id)
-        return {"swarm": await swarm_identity.swarm_of(session, member)}
+        swarm = await swarm_identity.swarm_of(session, member)
+        if swarm is not None:
+            from server.models import Swarm as SwarmRow
+
+            # The leader (#308): name and public key, so members can verify its directives.
+            swarm["leader"] = await swarms.leader_of(session, await session.get(SwarmRow, swarm["id"]))
+        return {"swarm": swarm}
 
 
 @router.put("/members/me/cognition")
@@ -78,6 +92,16 @@ async def put_cognition(request: Request, body: dict, auth: MemberAuth = Depends
     async with transaction(request) as session:
         member = await session.get(Member, auth.member_id)
         return {"cognition": await cognition.declare(session, member, body)}
+
+
+@router.put("/members/me/specs")
+async def put_specs(request: Request, body: dict, auth: MemberAuth = Depends(current_member)) -> dict:
+    """The device reports its spec sheet (#332): hardware, models, software, notes."""
+    from server.services import specs
+
+    async with transaction(request) as session:
+        member = await session.get(Member, auth.member_id)
+        return {"specs": await specs.report(session, member, body)}
 
 
 @router.put("/members/me/network")
@@ -103,6 +127,16 @@ async def report_read(request: Request, body: dict, auth: MemberAuth = Depends(c
 
     async with transaction(request) as session:
         return await integrations.report_read(session, member_id=auth.member_id, body=body)
+
+
+@router.get("/members/me/pings")
+async def get_pings(request: Request, auth: MemberAuth = Depends(current_member)) -> dict:
+    """Pending admin pings (#356): this member's own, plus its swarm members' for a hub.
+    Fetching marks them delivered. Answer with a heartbeat (``"ping": true``)."""
+    from server.services import ping
+
+    async with transaction(request) as session:
+        return {"pings": await ping.take_for(session, auth.member_id)}
 
 
 @router.put("/relay/network/{agent}")

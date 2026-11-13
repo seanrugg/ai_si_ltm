@@ -64,4 +64,12 @@ class Member(Base):
     # Proxied members (#311): set when this member's key is held by a sidecar on a
     # bridge host rather than by the device itself, e.g. "sidecar on <host>".
     proxied_by: Mapped[str | None] = mapped_column(String(128))
+    # Admin ping (#356): a request for a heartbeat, picked up by the member or its hub.
+    ping_requested_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    ping_requested_by: Mapped[str | None] = mapped_column(String(128))
+    ping_delivered_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # Spec sheet (#332): what the device reports, and an admin's per-field overrides.
+    specs_declared: Mapped[dict | None] = mapped_column(JSONType)
+    specs_admin: Mapped[dict | None] = mapped_column(JSONType)
+    specs_reported_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utcnow)
