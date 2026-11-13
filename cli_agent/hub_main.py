@@ -37,6 +37,7 @@ class HubConfig:
     max_msgs_per_second: int = 10      # HUB_MAX_MSGS_PER_SECOND (swarm messages per member, #300)
     heartbeat_seconds: float = 43200.0  # HUB_HEARTBEAT_SECONDS (default 43200, twice daily; must be > 0, #356)
     ping_poll_seconds: float = 30.0   # PING_POLL_SECONDS: check LTMS for admin pings (#356)
+    downlink_seconds: float = 30.0    # DOWNLINK_SECONDS: pull directives and messages for the bus (#305)
     state_path: str = "hub-head.json"  # HUB_STATE_PATH (default: hub-head.json beside the outbox)
     swarm_topic_id: str | None = None  # SWARM_TOPIC_ID (preferred; else looked up from LTMS, #293)
     legacy_name: str | None = None     # SWARM_LEGACY_NAME (migration: also serve <name>/+/...)
@@ -134,6 +135,7 @@ def load_config(env: Mapping[str, str]) -> HubConfig:
         tick_seconds=tick_seconds,
         heartbeat_seconds=heartbeat_seconds,
         ping_poll_seconds=ping_poll_seconds,
+        downlink_seconds=float(env.get("DOWNLINK_SECONDS", "30") or 30),
         state_path=state_path,
         max_msgs_per_second=max_msgs,
         swarm_topic_id=swarm_topic_id,
@@ -269,6 +271,10 @@ def main() -> None:
     started_at = time.monotonic()
     beat = HeartbeatTimer(cfg.heartbeat_seconds, started_at)
     next_ping_poll = started_at
+    from cli_agent.hub_downlink import Downlink
+    downlink = Downlink(ltms_client, hub, os.path.join(os.path.dirname(os.path.abspath(cfg.state_path)), "hub-downlink.json"))
+    next_downlink = started_at
+
     health = make_health_monitor(cfg, started_at)
     if health is not None:
         logging.info("Hub: machine health every %ss (state file %s)", int(cfg.health_seconds), cfg.health_state_path)
@@ -291,6 +297,14 @@ def main() -> None:
     try:
         while running:
             now = time.monotonic()
+            if now >= next_downlink:
+                next_downlink = now + cfg.downlink_seconds
+                try:
+                    n = downlink.poll()
+                    if n:
+                        logging.info("Hub: published %d downlink item(s)", n)
+                except Exception as exc:  # noqa: BLE001 - try again next time; the cursor is unchanged
+                    logging.warning("Hub: downlink failed: %s", exc)
             if now >= next_ping_poll:
                 next_ping_poll = now + cfg.ping_poll_seconds
                 for agent in deliver_pings(hub, own, ltms_client, started_at, now):

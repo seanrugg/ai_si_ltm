@@ -38,6 +38,17 @@ def say_topic(agent: str, swarm: str) -> str:
     return f"{swarm}/{agent}/{_SAY_SUFFIX}"
 
 
+def fleet_topic(swarm: str, directive_id: str | None = None) -> str:
+    """hub -> members: directives (#305). Each open directive is retained on its own
+    ``<topic_id>/fleet/<id>`` (an empty retained message clears it); cancels go on
+    ``<topic_id>/fleet`` itself, not retained."""
+    return f"{swarm}/fleet/{directive_id}" if directive_id else f"{swarm}/fleet"
+
+
+def fleet_subscription(swarm: str) -> list[str]:
+    return [f"{swarm}/fleet", f"{swarm}/fleet/+"]
+
+
 def ping_topic(agent: str, swarm: str) -> str:
     """hub -> member: an admin asked for a heartbeat (#356). Empty payload, not retained."""
     return f"{swarm}/{agent}/ping"
