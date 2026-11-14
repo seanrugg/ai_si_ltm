@@ -420,9 +420,8 @@ export default function Charter() {
   const cur = data?.current;
   return (
     <>
-      <PageHeader title="Fleet charter">
-        <HelpTip id="charter-about" label="About the charter">{CHARTER}</HelpTip>
-      </PageHeader>
+      <PageHeader title="Fleet charter"
+                  help={<HelpTip id="charter-about" label="About the charter">{CHARTER}</HelpTip>} />
       {cur ? (
         <section className="mb-6 rounded-md border border-ink-line p-4" aria-labelledby="charter-current-h">
           <h2 id="charter-current-h" className="text-lg font-bold">Current charter: version {cur.version}</h2>

@@ -35,6 +35,13 @@ describe("Charter page", () => {
     expect(screen.getAllByText(/<script>alert\(1\)<\/script>/).length).toBeGreaterThan(0);
   });
 
+  it("puts the help button inside the page heading, beside the title (#377)", () => {
+    render(React.createElement(Charter));
+    const heading = screen.getByRole("heading", { level: 1 });
+    expect(heading.textContent.startsWith("Fleet charter")).toBe(true);
+    expect(within(heading).getByRole("button", { name: "About the charter" })).toBeDefined();
+  });
+
   it("puts members who haven't read it first, overdue first", () => {
     expect(sortReadStatus(VIEW.members).map((m) => m.name)).toEqual(["jetson-hub", "vector", "z3-r0"]);
     render(React.createElement(ReadStatus, { members: VIEW.members }));

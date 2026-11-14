@@ -79,10 +79,13 @@ export function EmptyState({ title, children }) {
   );
 }
 
-export function PageHeader({ title, children }) {
+// `help` (issue #377) renders inline right after the title, inside the <h1>,
+// so a HelpTip sits beside what it explains. Page actions stay on the right
+// as `children`.
+export function PageHeader({ title, help, children }) {
   return (
     <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
-      <h1 className="text-xl font-bold">{title}</h1>
+      <h1 className="text-xl font-bold">{title}{help && <> {help}</>}</h1>
       {children && <div className="flex flex-wrap items-center gap-2">{children}</div>}
     </header>
   );
