@@ -210,8 +210,13 @@ class ServerConfig(BaseSettings):
     charter_grace_days: int = 14
 
     # Optional offline city database for network location estimates (#191).
-    # Unset (the default) means no network estimates. Env: LTMS_GEOIP_DB.
+    # Normally an admin turns estimates on in Settings, and LTMS keeps the file
+    # under <data_dir>/geoip/ (#388). When this is set it wins and the
+    # dashboard's controls are off. Env: LTMS_GEOIP_DB.
     geoip_db_path: str | None = Field(default=None, validation_alias=AliasChoices("geoip_db_path", "LTMS_GEOIP_DB"))
+    # In download mode, fetch a new DB-IP City Lite file this often (days);
+    # 0 = never (#388). Env: LTMS_GEOIP_REFRESH_DAYS.
+    geoip_refresh_days: int = 30
 
     # Pending enrollment requests older than this many days are expired by the
     # hourly scheduler job. Env: LTMS_PENDING_ENROLLMENT_TTL_DAYS.
