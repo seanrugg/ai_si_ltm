@@ -23,13 +23,14 @@ dependencies = [
     "cryptography>=42",  # issue #59: encrypted LRS credentials
     "alembic>=1.13",  # issue #97: database migrations
     "python-multipart>=0.0.9",  # issue #237: dataset uploads (multipart form data)
+    "maxminddb>=2.5",  # issue #388: offline city database for network location estimates
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "aiosqlite>=0.20"]
 hub = ["paho-mqtt>=2,<3"]  # Jetson hub entrypoint: cli_agent.hub_main
 mcp = ["mcp>=2,<3"]  # ltms_mcp uses MCPServer, added in mcp 2.0
-geo = ["maxminddb>=2.5"]  # optional offline network location estimates (#191)
+geo = []  # kept so `pip install "ltms[geo]"` still works; maxminddb is a base dependency since #388
 # Dataset documents (#244): pdf, docx, pptx, xlsx text extraction (epub needs none).
 docs = ["pypdf>=4", "python-docx>=1.1", "python-pptx>=0.6.23", "openpyxl>=3.1"]
 # Dataset media metadata (#247): bags, arrays, images, audio. Video needs ffprobe on PATH;

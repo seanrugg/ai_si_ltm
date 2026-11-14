@@ -6,7 +6,7 @@ import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from server.services import cognition, dataset_uploads, enrollment, lrs, network, reference_sources, retention
+from server.services import cognition, dataset_uploads, enrollment, geoip_source, lrs, network, reference_sources, retention
 
 log = logging.getLogger("ltms.tasks")
 
@@ -40,6 +40,10 @@ def start_scheduler(app) -> AsyncIOScheduler:
         # Built-in reference sources an admin has imported (#351): new publications become pending versions.
         sched.add_job(run, "interval", hours=cfg.reference_refresh_hours,
                       args=("reference_refresh", reference_sources.refresh_all, cfg))
+    if cfg.geoip_refresh_days > 0:
+        # The city database (#388): in download mode, a new DB-IP file once it is due
+        # (checked daily; the job itself knows when the next fetch is due).
+        sched.add_job(run, "cron", hour=7, minute=40, args=("geoip_refresh", geoip_source.refresh, cfg))
     if cfg.enable_scheduler:
         # Where each robot's decisions are made (#199): nightly, after the purge.
         sched.add_job(run, "cron", hour=7, minute=30, args=("observe_cognition", cognition.observe_all))

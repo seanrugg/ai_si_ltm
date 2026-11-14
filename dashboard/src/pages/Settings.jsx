@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
+import GeoCredit from "../components/GeoCredit.jsx";
+import HelpTip from "../components/HelpTip.jsx";
 import LocationForm from "../components/LocationForm.jsx";
 import { ErrorNote, Loading, PageHeader } from "../components/ui.jsx";
 
@@ -62,22 +64,140 @@ export function groupSettings(settings) {
   return out.filter((g) => g.keys.length);
 }
 
-/** Whether LTMS can estimate locations from addresses (#346). */
-export function GeoStatus({ geo }) {
-  if (!geo) return null;
+export const GEO_HELP = (manualUrl) => (
+  <>
+    Estimates come from a city database file kept on this server: LTMS never sends members&apos; addresses
+    to an online service. Turning estimates on downloads DB-IP&apos;s free City Lite file from db-ip.com,
+    which only learns that this server fetched the file; LTMS fetches a new one every month. On a closed
+    network, download the MMDB file by hand from {manualUrl} and upload it here. Estimates are city-level
+    at best, and private and local addresses are never placed.
+  </>
+);
+
+function mb(bytes) {
+  return bytes ? `${(bytes / (1024 * 1024)).toFixed(0)} MB` : null;
+}
+
+function when(iso) {
+  return iso ? new Date(iso).toLocaleString() : "never";
+}
+
+/** The one-line state of location estimates (#346, #388). */
+export function geoLine(geo, src) {
+  if (src?.env) return `On: set by the server's environment (LTMS_GEOIP_DB = ${src.env_path}).`;
+  if (src?.on) {
+    const bits = [src.provider ? `${src.provider} city database` : "city database",
+      src.build_date ? `built ${src.build_date}` : null, mb(src.size)].filter(Boolean);
+    return `On: ${bits.join(", ")}.`;
+  }
+  if (geo?.enabled) return `On: city database at ${geo.path}.`;
+  return `Off: ${geo?.reason || "no city database"}.`;
+}
+
+/** Location estimates: status, and (#388) the controls to turn them on, upload a file, or turn them off. */
+export function GeoStatus({ geo, src, onChanged }) {
+  const [busy, setBusy] = useState(null);
+  const [error, setError] = useState(null);
+  const [file, setFile] = useState(null);
+  const [provider, setProvider] = useState("DB-IP");
+  const [licence, setLicence] = useState("CC BY 4.0");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  if (!geo && !src) return null;
+
+  async function act(name, fn) {
+    setBusy(name);
+    setError(null);
+    try {
+      await fn();
+      onChanged?.();
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+  const download = () => act("download", () => api("/admin/geoip/download", { method: "POST" }));
+  const upload = (e) => {
+    e.preventDefault();
+    if (!file) { setError("Choose a .mmdb or .mmdb.gz file."); return; }
+    const body = new FormData();
+    body.append("file", file);
+    body.append("provider", provider);
+    if (licence) body.append("licence", licence);
+    act("upload", () => api("/admin/geoip/upload", { method: "POST", body }));
+  };
+  const off = (del) => act("off", async () => {
+    await api("/admin/geoip/off", { method: "POST", body: { delete: del } });
+    setConfirmDelete(false);
+  });
+  const controls = src && !src.env;
+  const manual = src?.manual_url || "https://db-ip.com/db/download/ip-to-city-lite";
+
   return (
     <section className="panel mb-6 p-4" aria-labelledby="geo-h">
-      <h2 id="geo-h" className="font-bold">Location estimates</h2>
-      {geo.enabled ? (
-        <p className="text-sm" role="status">On: city database at <code className="hash">{geo.path}</code>.</p>
-      ) : (
-        <p className="text-sm" role="status">Off: {geo.reason}.</p>
+      <h2 id="geo-h" className="font-bold">
+        Location estimates <HelpTip id="geo-about" label="About location estimates">{GEO_HELP(manual)}</HelpTip>
+      </h2>
+      <p className="text-sm" role="status">{geoLine(geo, src)}</p>
+      {src && !src.env && (
+        <dl className="mt-1 grid max-w-prose grid-cols-[auto_minmax(0,1fr)] gap-x-4 text-xs text-paper-muted">
+          {src.source && (<><dt>Source</dt><dd className="truncate" title={src.source}>{src.source}</dd></>)}
+          {src.licence && (<><dt>Licence</dt><dd>{src.licence}</dd></>)}
+          <dt>Last check</dt><dd>{when(src.last_check)}</dd>
+          {src.mode === "download" && src.next_check && (<><dt>Next check</dt><dd>{when(src.next_check)}</dd></>)}
+        </dl>
       )}
-      <p className="mt-1 max-w-prose text-xs text-paper-muted">
-        LTMS can place a member from the public address it connects from, using an offline city database
-        (<code className="hash">pip install &quot;ltms[geo]&quot;</code> and <code className="hash">LTMS_GEOIP_DB</code>
-        pointing at a <code className="hash">.mmdb</code> file; see docs/locations.md). Nothing is looked up online.
-        Members on a local network are placed through their hub, or by their swarm&apos;s declared home.
+      {src?.error && <p className="mt-1 text-xs text-bad">Last attempt failed: {src.error}</p>}
+      <GeoCredit geo={src} className="mt-1" />
+      {controls && (
+        <div className="mt-3 space-y-3">
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn btn-primary" disabled={!!busy} onClick={download}>
+              {busy === "download" ? "Downloading…" : src.mode === "download" ? "Download the latest now"
+                : "Turn on network estimates (download DB-IP City Lite)"}
+            </button>
+            {src.on && !confirmDelete && (
+              <>
+                <button type="button" className="btn" disabled={!!busy} onClick={() => off(false)}>Turn off</button>
+                <button type="button" className="btn btn-danger" disabled={!!busy}
+                        onClick={() => setConfirmDelete(true)}>Turn off and delete the file</button>
+              </>
+            )}
+            {!src.on && src.file_kept && !confirmDelete && (
+              <button type="button" className="btn btn-danger" disabled={!!busy}
+                      onClick={() => setConfirmDelete(true)}>Delete the kept file</button>
+            )}
+            {confirmDelete && (
+              <span className="flex flex-wrap items-center gap-2 text-sm" role="group" aria-label="Confirm deletion">
+                Delete the city database file? Estimates stop until you download or upload one again.
+                <button type="button" className="btn btn-danger" disabled={!!busy} onClick={() => off(true)}>Delete</button>
+                <button type="button" className="btn" onClick={() => setConfirmDelete(false)}>Cancel</button>
+              </span>
+            )}
+          </div>
+          <form className="flex flex-wrap items-end gap-2 text-sm" onSubmit={upload} aria-label="Upload a city database">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-paper-muted">Upload a .mmdb or .mmdb.gz file</span>
+              <input type="file" accept=".mmdb,.gz,application/gzip" className="field"
+                     onChange={(e) => setFile(e.target.files?.[0] || null)} />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-paper-muted">Provider</span>
+              <input className="field w-32" value={provider} onChange={(e) => setProvider(e.target.value)} required />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-paper-muted">Licence</span>
+              <input className="field w-36" value={licence} onChange={(e) => setLicence(e.target.value)} />
+            </label>
+            <button type="submit" className="btn" disabled={!!busy}>{busy === "upload" ? "Uploading…" : "Upload"}</button>
+          </form>
+        </div>
+      )}
+      {error && <p className="mt-2 text-sm text-bad" role="alert">{error}</p>}
+      <p className="mt-2 max-w-prose text-xs text-paper-muted">
+        LTMS can place a member from the public address it connects from, using a city database kept on this
+        server. Nothing is looked up online. Members on a local network are placed through their hub, or by
+        their swarm&apos;s declared home.
       </p>
     </section>
   );
@@ -184,6 +304,7 @@ export function AdminSessions() {
 export default function Settings() {
   const { data, error, loading, reload } = useApi("/admin/settings");
   const locations = useApi("/admin/locations");
+  const geoip = useApi("/admin/geoip");
   return (
     <>
       <PageHeader title="Settings" />
@@ -199,7 +320,8 @@ export default function Settings() {
                       title="Server" current={locations.data?.server ?? null} onDone={locations.reload} />
       </section>
       <AdminSessions />
-      <GeoStatus geo={locations.data?.geo} />
+      <GeoStatus geo={locations.data?.geo} src={geoip.data}
+                 onChanged={() => { geoip.reload(); locations.reload(); }} />
       {loading && <Loading />}
       <ErrorNote error={error} onRetry={reload} />
       {data && (

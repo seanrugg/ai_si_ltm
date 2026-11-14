@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../../api/client.js";
 import { useApi } from "../../api/useApi.js";
+import GeoCredit from "../../components/GeoCredit.jsx";
 import { ErrorNote, Loading } from "../../components/ui.jsx";
 import { HOME_ZOOM } from "../../lib/globe.js";
 import { ratesFrom, sitesOf, unplacedOf } from "../../lib/sites.js";
@@ -105,6 +106,9 @@ export default function Network({ subject, name, members, swarms }) {
       <DataCard title={card.name} onClose={() => setCard(null)}>
         <MemberFacts member={memberRow(card.name)} net={netRows.find((r) => r.name === card.name)}
                      loc={locRows.find((r) => r.name === card.name)} rates={site ? rates[site.key] : null} />
+        {locRows.find((r) => r.name === card.name)?.best?.source === "network" && (
+          <GeoCredit geo={locs.data?.geo} className="mt-2" />
+        )}
       </DataCard>
     );
   }
@@ -124,6 +128,7 @@ export default function Network({ subject, name, members, swarms }) {
         )}
         {cardView}
       </div>
+      <GeoCredit geo={locs.data?.geo} className="mt-1 text-right" />
       {!server && (
         <p className="mt-2 text-xs text-paper-muted">
           Declare the server&apos;s location (a member location named <code>ltms-server</code>) to draw data flowing to it.

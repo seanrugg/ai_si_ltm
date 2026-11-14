@@ -4,9 +4,9 @@
   (sample ``v`` = ``{"lat", "lon"}``, optional ``accuracy_m``). High precision.
 - ``declared``: set by an admin on the member, or inherited from its swarm.
 - ``network``: the member's newest public "seen" address (#189), looked up in
-  an optional **offline** city database (``LTMS_GEOIP_DB``, needs the ``geo``
-  extra). City at best. Private, loopback and link-local addresses are never
-  looked up, and nothing is ever looked up online.
+  an optional **offline** city database (turned on in Settings, #388, or
+  ``LTMS_GEOIP_DB``). City at best. Private, loopback and link-local addresses
+  are never looked up, and nothing is ever looked up online.
 
 ``best`` is the first of gps, declared (member, then swarm), network.
 Admin only; locations are never sent to an LRS.
@@ -145,21 +145,31 @@ def lookup_city(db_path: str, ip: str) -> dict | None:
 
 
 def geo_status(cfg) -> dict:
-    """Whether network estimates can work, and if not, why (#346)."""
+    """Whether network estimates can work, and if not, why (#346, #388).
+
+    ``provider`` and ``attribution`` let the dashboard credit DB-IP wherever
+    estimates are shown, when DB-IP's file is the one in use.
+    """
     import os
 
-    path = getattr(cfg, "geoip_db_path", None)
+    from server.services import geoip_source
+
+    src = geoip_source.status(cfg)
+    extra = {"provider": src["provider"], "attribution": src["attribution"], "credit_url": src["credit_url"],
+             "source": "environment" if src["env"] else "settings"}
+    path = geoip_source.active_path(cfg)
     if not path:
-        return {"enabled": False, "path": None,
-                "reason": "LTMS_GEOIP_DB isn't set: no city database, so no network estimates"}
+        return {"enabled": False, "path": None, **extra,
+                "reason": "no city database: turn on network estimates in Settings → Location estimates "
+                           "(or set LTMS_GEOIP_DB)"}
     try:
         import maxminddb  # noqa: F401
     except ImportError:
-        return {"enabled": False, "path": path,
-                "reason": 'the geo extra isn\'t installed (pip install "ltms[geo]")'}
+        return {"enabled": False, "path": path, **extra,
+                "reason": "the maxminddb package isn't installed on the server"}
     if not os.path.isfile(path):
-        return {"enabled": False, "path": path, "reason": f"no file at {path}"}
-    return {"enabled": True, "path": path, "reason": None}
+        return {"enabled": False, "path": path, **extra, "reason": f"no file at {path}"}
+    return {"enabled": True, "path": path, **extra, "reason": None}
 
 
 def _public(ip: str) -> bool:
@@ -266,7 +276,9 @@ async def describe(session: AsyncSession, cfg, *, swarm: str | None = None, memb
     swarm_of = dict((await session.execute(
         select(SwarmMember.member_id, Swarm.name).join(Swarm, Swarm.id == SwarmMember.swarm_id)
         .where(SwarmMember.left_at.is_(None)))).all())
-    db_path = getattr(cfg, "geoip_db_path", None)
+    from server.services import geoip_source
+
+    db_path = geoip_source.active_path(cfg)
     geo = geo_status(cfg)
 
     out = []

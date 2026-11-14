@@ -69,16 +69,40 @@ PUT /api/admin/locations/member/ltms-server   {"label": "<server room>", "lat": 
 
 ### Network estimate (optional)
 
-LTMS estimates a city only when **both** are true:
+LTMS estimates a city from a member's public address using a **city database
+file kept on the LTMS server** (MaxMind DB format, `.mmdb`). Nothing is ever
+looked up online: member addresses never leave the server.
 
-1. the `geo` extra is installed: `pip install "ltms[geo]"` (adds `maxminddb`);
-2. `LTMS_GEOIP_DB` points at a city database file in MaxMind DB format
-   (`.mmdb`) on the LTMS host, for example `/opt/ltms/geo/city.mmdb`.
+**Turn it on in the dashboard (#388):** Settings → Location estimates.
 
-Download a free city database that **you are licensed to use** (several
-providers publish free city-level databases in this format under their own
-licence terms), copy it to the LTMS host, set `LTMS_GEOIP_DB`, and restart.
-Without it there is simply no `network` entry, and no error.
+- **Turn on network estimates (download DB-IP City Lite).** LTMS downloads the
+  current monthly [DB-IP IP to City Lite](https://db-ip.com/db/download/ip-to-city-lite)
+  file (CC BY 4.0, no account or key) from `download.db-ip.com` only, over
+  https, with size and time limits. It decompresses it with a cap, checks that
+  it opens as a city database, and swaps it into `<data_dir>/geoip/city.mmdb`.
+  DB-IP only learns that this server fetched the file.
+- **Monthly refresh.** In download mode a scheduled job fetches a new file every
+  `LTMS_GEOIP_REFRESH_DAYS` (default 30; `0` turns it off). A file that fails
+  the checks is never installed: the previous one stays, and the panel shows
+  the error.
+- **Upload** an `.mmdb` or `.mmdb.gz` for closed networks or another
+  provider's file: download it by hand, then upload it and say who provides it
+  and under what licence. Uploaded files aren't refreshed.
+- **Turn off** stops estimates. The file is kept unless you delete it (the
+  panel asks first).
+
+Every change is in the audit log (`geoip_update`, `geoip_off`).
+
+**Attribution:** while DB-IP's file is in use, "IP geolocation by DB-IP" (a link
+to https://db-ip.com) is shown in the Location estimates panel, on the Network
+view and on member cards that show a network estimate, as its licence asks.
+
+**Environment override:** `LTMS_GEOIP_DB` still works. When it is set, it wins,
+and the dashboard shows "set by the server's environment" with its controls
+off. `maxminddb` is a base dependency; `pip install "ltms[geo]"` still works
+and adds nothing.
+
+Without a database there is simply no `network` entry, and no error.
 
 Private, loopback and link-local addresses are never looked up. A member
 behind a hub on a LAN usually has no public address, so it gets no network

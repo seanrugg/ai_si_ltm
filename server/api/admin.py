@@ -525,6 +525,48 @@ async def delete_location(subject_type: str, name: str, request: Request, admin:
         return {"deleted": deleted}
 
 
+# Network location estimates (#388): the city database, managed from Settings.
+@router.get("/admin/geoip")
+async def geoip_status(request: Request, admin: AdminAuth = ADMIN) -> dict:
+    from server.services import geoip_source
+
+    return geoip_source.status(request.app.state.config)
+
+
+@router.post("/admin/geoip/download")
+async def geoip_download(request: Request, admin: AdminAuth = ADMIN) -> dict:
+    """Turn estimates on with DB-IP's current City Lite file; LTMS fetches it from DB-IP itself."""
+    from server.services import geoip_source
+
+    async with transaction(request) as session:
+        return await geoip_source.download(
+            session, request.app.state.config, admin=f"admin:{admin.username}",
+            transport=getattr(request.app.state, "url_snapshot_transport", None),
+            resolve=getattr(request.app.state, "url_snapshot_resolve", None))
+
+
+@router.post("/admin/geoip/upload")
+async def geoip_upload(request: Request, file: UploadFile = File(...), provider: str = Form(...),
+                       licence: str | None = Form(None), admin: AdminAuth = ADMIN) -> dict:
+    """Install an uploaded .mmdb or .mmdb.gz, for closed networks or another provider's file."""
+    from server.services import geoip_source
+
+    async with transaction(request) as session:
+        return await geoip_source.upload(session, request.app.state.config, file.file, file.filename or "upload",
+                                         provider=provider, licence=licence, admin=f"admin:{admin.username}")
+
+
+@router.post("/admin/geoip/off")
+async def geoip_off(request: Request, body: dict | None = None, admin: AdminAuth = ADMIN) -> dict:
+    """Stop estimates. ``{"delete": true}`` also deletes the file."""
+    from server.services import geoip_source
+
+    delete = bool((body or {}).get("delete"))
+    async with transaction(request) as session:
+        return await geoip_source.turn_off(session, request.app.state.config, delete=delete,
+                                           admin=f"admin:{admin.username}")
+
+
 @router.get("/admin/volume")
 async def volume(
     request: Request, days: int = Query(14, ge=1, le=90), admin: AdminAuth = ADMIN, swarm: str | None = None,
