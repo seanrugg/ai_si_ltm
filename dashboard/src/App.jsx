@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { createHashRouter, Navigate, Outlet, RouterProvider, useNavigate } from "react-router-dom";
-import { api, setUnauthorizedHandler } from "./api/client.js";
+import { createHashRouter, Navigate, Outlet, RouterProvider, useLocation } from "react-router-dom";
+import { api } from "./api/client.js";
+import SessionBoundary from "./components/SessionGuard.jsx";
 import Shell from "./components/Shell.jsx";
 import { Loading } from "./components/ui.jsx";
 import Conversation from "./pages/Conversation.jsx";
@@ -52,19 +53,17 @@ function AdminProvider({ children }) {
 
 function RequireAdmin() {
   const { username, setUsername } = useAdmin();
-  const navigate = useNavigate();
-  useEffect(() => {
-    setUnauthorizedHandler(() => {
-      setUsername(null);
-      navigate("/login", { replace: true });
-    });
-  }, [navigate, setUsername]);
+  const location = useLocation();
   if (username === undefined) return <Loading what="Checking your session" />;
-  if (username === null) return <Navigate to="/login" replace />;
+  if (username === null) return <Navigate to="/login" replace state={{ from: location }} />;
+  // A session that ends while the admin is here (#378) shows a sign-in dialog
+  // over the page instead of leaving it, so the route and unsaved input survive.
   return (
-    <Shell>
-      <Outlet />
-    </Shell>
+    <SessionBoundary username={username} onSignedIn={setUsername}>
+      <Shell>
+        <Outlet />
+      </Shell>
+    </SessionBoundary>
   );
 }
 

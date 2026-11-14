@@ -199,3 +199,90 @@ def validate_retention(payload_rules: list, audit_days: int | None) -> dict[str,
         raise ServiceError(422, "bad_retention",
                            f"audit_days must be null (keep forever) or at least {MIN_AUDIT_DAYS}")
     return {"payload_rules": rules, "audit_days": audit_days}
+
+
+# ---- admin sessions (issue #378) ---------------------------------------------
+
+ADMIN_SESSIONS_KEY = "admin_sessions"
+
+IDLE_MINUTES_MIN = 15
+IDLE_MINUTES_MAX = 8 * 60
+MAX_HOURS_MIN = 1
+MAX_HOURS_MAX = 24
+WARN_MINUTES_MIN = 1
+WARN_MINUTES_MAX = 10
+
+
+def admin_session_limits(cfg: ServerConfig) -> dict[str, int]:
+    """Allowed ranges. ``LTMS_ADMIN_IDLE_MAX_MINUTES`` can lower the idle ceiling
+    (a site's session-lock policy); it never raises it past 8 h."""
+    idle_max = max(IDLE_MINUTES_MIN, min(IDLE_MINUTES_MAX, int(cfg.admin_idle_max_minutes)))
+    return {
+        "idle_minutes_min": IDLE_MINUTES_MIN, "idle_minutes_max": idle_max,
+        "max_hours_min": MAX_HOURS_MIN, "max_hours_max": MAX_HOURS_MAX,
+        "warn_minutes_min": WARN_MINUTES_MIN, "warn_minutes_max": WARN_MINUTES_MAX,
+    }
+
+
+def _clamp(value: int, lo: int, hi: int) -> int:
+    return max(lo, min(hi, int(value)))
+
+
+def _env_admin_sessions(cfg: ServerConfig) -> dict[str, int]:
+    lim = admin_session_limits(cfg)
+    return {
+        "idle_minutes": _clamp(cfg.admin_idle_minutes, lim["idle_minutes_min"], lim["idle_minutes_max"]),
+        "max_hours": _clamp(cfg.admin_session_max_hours, lim["max_hours_min"], lim["max_hours_max"]),
+        "warn_minutes": _clamp(cfg.admin_warn_minutes, lim["warn_minutes_min"], lim["warn_minutes_max"]),
+    }
+
+
+async def resolve_admin_sessions(session: AsyncSession, cfg: ServerConfig) -> dict[str, Any]:
+    """The effective admin session timeouts, read on every check (no cache), so a
+    change applies to existing sessions at their next request.
+
+    The dashboard row wins over the environment, but the idle timeout is always
+    held to the environment ceiling (``LTMS_ADMIN_IDLE_MAX_MINUTES``), even if
+    the ceiling was lowered after the row was saved.
+    """
+    env = _env_admin_sessions(cfg)
+    lim = admin_session_limits(cfg)
+    row = await get_setting(session, ADMIN_SESSIONS_KEY)
+    if row is None:
+        return {**env, "source": "environment"}
+    value = dict(row.value or {})
+    idle = _clamp(value.get("idle_minutes", env["idle_minutes"]), lim["idle_minutes_min"], lim["idle_minutes_max"])
+    max_hours = _clamp(value.get("max_hours", env["max_hours"]), lim["max_hours_min"], lim["max_hours_max"])
+    warn = _clamp(value.get("warn_minutes", env["warn_minutes"]), lim["warn_minutes_min"], lim["warn_minutes_max"])
+    return {"idle_minutes": idle, "max_hours": max_hours, "warn_minutes": warn, "source": "dashboard"}
+
+
+def validate_admin_sessions(cfg: ServerConfig, idle_minutes, max_hours, warn_minutes) -> dict[str, int]:
+    """Check an admin session change; ServiceError 422 ``bad_admin_sessions`` if invalid."""
+    from server.services.errors import ServiceError
+
+    lim = admin_session_limits(cfg)
+
+    def whole(name, v):
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ServiceError(422, "bad_admin_sessions", f"{name} must be a whole number")
+        return v
+
+    idle = whole("idle_minutes", idle_minutes)
+    max_hours = whole("max_hours", max_hours)
+    warn = whole("warn_minutes", warn_minutes)
+    if not lim["idle_minutes_min"] <= idle <= lim["idle_minutes_max"]:
+        raise ServiceError(422, "bad_admin_sessions",
+                           f"sign out after inactivity must be {lim['idle_minutes_min']}-{lim['idle_minutes_max']} minutes")
+    if not lim["max_hours_min"] <= max_hours <= lim["max_hours_max"]:
+        raise ServiceError(422, "bad_admin_sessions",
+                           f"maximum session length must be {lim['max_hours_min']}-{lim['max_hours_max']} hours")
+    if max_hours * 60 < idle:
+        raise ServiceError(422, "bad_admin_sessions",
+                           "maximum session length must be at least the inactivity timeout")
+    if not lim["warn_minutes_min"] <= warn <= lim["warn_minutes_max"]:
+        raise ServiceError(422, "bad_admin_sessions",
+                           f"warning must be {lim['warn_minutes_min']}-{lim['warn_minutes_max']} minutes before sign-out")
+    if warn >= idle:
+        raise ServiceError(422, "bad_admin_sessions", "the warning must come before the inactivity timeout")
+    return {"idle_minutes": idle, "max_hours": max_hours, "warn_minutes": warn}

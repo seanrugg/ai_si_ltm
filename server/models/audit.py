@@ -56,6 +56,7 @@ AUDIT_ACTIONS = (
     "integration_delete",
     "dataset_snapshot",
     "charter_publish",
+    "settings_change",
 )
 
 

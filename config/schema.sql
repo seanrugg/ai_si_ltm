@@ -165,6 +165,7 @@ CREATE TABLE admin_sessions (
 	issued_at TIMESTAMP WITH TIME ZONE NOT NULL, 
 	expires_at TIMESTAMP WITH TIME ZONE NOT NULL, 
 	revoked_at TIMESTAMP WITH TIME ZONE, 
+	last_active_at TIMESTAMP WITH TIME ZONE, 
 	PRIMARY KEY (session_hash), 
 	FOREIGN KEY(admin_id) REFERENCES admin_users (id)
 );

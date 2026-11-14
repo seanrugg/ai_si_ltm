@@ -101,31 +101,78 @@ async def ensure_admin(session: AsyncSession, username: str, password: str) -> N
         session.add(AdminUser(username=username, password_hash=hash_password(password)))
 
 
+# Hard ceiling on any admin session (issue #378): the most the dashboard can set
+# as the maximum session length. The stored expires_at and the cookie max_age
+# use it, so raising the maximum in Settings applies to sessions already open;
+# the effective maximum is enforced from issued_at on every check.
+ADMIN_SESSION_CEILING = timedelta(hours=24)
+# last_active_at is written at most this often per session, not on every request.
+ACTIVITY_WRITE_INTERVAL = timedelta(minutes=1)
+
+
 async def admin_login(
-    session: AsyncSession, *, username: str, password: str, ttl: int, remote_ip: str | None
+    session: AsyncSession, *, username: str, password: str, remote_ip: str | None
 ) -> tuple[str, datetime]:
     admin = await session.scalar(select(AdminUser).where(AdminUser.username == username))
     if not verify_password(password, admin.password_hash if admin else None):
         session.add(AuditLog(actor=f"admin:{username}", action="admin_login_failed", detail={"ip": remote_ip}))
         raise ServiceError(401, "auth_failed", "invalid username or password")
     raw = new_token()
-    expires = _now() + timedelta(seconds=ttl)
-    session.add(AdminSession(session_hash=hash_token(raw), admin_id=admin.id, remote_ip=remote_ip, expires_at=expires))
-    admin.last_login_at = _now()
+    now = _now()
+    expires = now + ADMIN_SESSION_CEILING
+    session.add(AdminSession(session_hash=hash_token(raw), admin_id=admin.id, remote_ip=remote_ip,
+                             issued_at=now, last_active_at=now, expires_at=expires))
+    admin.last_login_at = now
     session.add(AuditLog(actor=f"admin:{username}", action="admin_login", detail={"ip": remote_ip}))
     return raw, expires
 
 
-async def admin_from_session(session: AsyncSession, raw: str | None) -> AdminUser:
+def session_timing(row: AdminSession, timeouts: dict, now: datetime | None = None) -> dict:
+    """Seconds left before the idle timeout and the maximum length end ``row``."""
+    now = now or _now()
+    last = row.last_active_at or row.issued_at
+    idle_left = (last + timedelta(minutes=timeouts["idle_minutes"]) - now).total_seconds()
+    max_left = (row.issued_at + timedelta(hours=timeouts["max_hours"]) - now).total_seconds()
+    return {
+        "idle_remaining_seconds": max(0, int(idle_left)),
+        "max_remaining_seconds": max(0, int(max_left)),
+        "idle_minutes": timeouts["idle_minutes"],
+        "max_hours": timeouts["max_hours"],
+        "warn_minutes": timeouts["warn_minutes"],
+    }
+
+
+async def admin_from_session(
+    session: AsyncSession, raw: str | None, *, timeouts: dict | None = None, activity: bool = False,
+) -> tuple[AdminUser, dict | None]:
+    """Return the admin for a session cookie, and its timing, or raise 401.
+
+    ``timeouts`` (``resolve_admin_sessions``) applies the idle timeout and the
+    maximum length; without it only the stored hard ceiling is checked.
+    ``activity`` marks an admin-initiated request: it moves ``last_active_at``
+    forward, written at most once a minute. Background polling passes False,
+    so an unattended dashboard still times out.
+    """
     if not raw:
         raise ServiceError(401, "not_logged_in", "admin login required")
     row = await session.get(AdminSession, hash_token(raw))
-    if row is None or row.revoked_at is not None or row.expires_at < _now():
+    now = _now()
+    if row is None or row.revoked_at is not None or row.expires_at < now:
         raise ServiceError(401, "not_logged_in", "admin session expired")
+    timing = None
+    if timeouts is not None:
+        last = row.last_active_at or row.issued_at
+        if now - row.issued_at > timedelta(hours=timeouts["max_hours"]):
+            raise ServiceError(401, "not_logged_in", "admin session expired (maximum length)")
+        if now - last > timedelta(minutes=timeouts["idle_minutes"]):
+            raise ServiceError(401, "not_logged_in", "admin session expired (inactivity)")
+        if activity and now - last >= ACTIVITY_WRITE_INTERVAL:
+            row.last_active_at = now
+        timing = session_timing(row, timeouts, now)
     admin = await session.get(AdminUser, row.admin_id)
     if admin is None:
         raise ServiceError(401, "not_logged_in", "admin account missing")
-    return admin
+    return admin, timing
 
 
 async def admin_logout(session: AsyncSession, raw: str | None) -> None:

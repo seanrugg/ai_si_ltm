@@ -59,3 +59,6 @@ class AdminSession(Base):
     issued_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # Last admin activity (issue #378). The idle timeout counts from here; NULL
+    # (sessions from before migration 0025) counts from issued_at.
+    last_active_at: Mapped[datetime | None] = mapped_column(UTCDateTime)

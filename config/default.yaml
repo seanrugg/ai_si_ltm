@@ -11,7 +11,8 @@ db_user: ltms
 # Auth
 admin_username: admin
 token_ttl_seconds: 300          # member bearer token lifetime
-admin_session_ttl_seconds: 1800 # admin cookie lifetime (30 min)
+admin_idle_minutes: 60          # admin sign-out after inactivity (dashboard can override)
+admin_session_max_hours: 12     # admin session maximum length (dashboard can override)
 challenge_ttl_seconds: 60       # /api/auth/challenge nonce lifetime
 future_skew_seconds: 300        # reject record ts further than this in the future
 cookie_secure: true             # set false only for local http development

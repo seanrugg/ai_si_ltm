@@ -1,10 +1,12 @@
+import { useState } from "react";
+import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import LocationForm from "../components/LocationForm.jsx";
 import { ErrorNote, Loading, PageHeader } from "../components/ui.jsx";
 
 const GROUPS = [
   { title: "Database", match: (k) => k.startsWith("db_") },
-  { title: "Sign-in", match: (k) => k === "admin_username" || k.includes("ttl") || k === "cookie_secure" || k === "future_skew_seconds" },
+  { title: "Sign-in", match: (k) => k.startsWith("admin_") || k.includes("ttl") || k === "cookie_secure" || k === "future_skew_seconds" },
   { title: "Limits", match: (k) => k.includes("_rate") || k.startsWith("max_") },
   { title: "Data retention", match: (k) => k.startsWith("retention_") },
 ];
@@ -12,7 +14,9 @@ const GROUPS = [
 const LABELS = {
   db_host: "Host", db_port: "Port", db_name: "Database", db_user: "User",
   admin_username: "Admin username", token_ttl_seconds: "Member token lifetime",
-  admin_session_ttl_seconds: "Admin session lifetime", challenge_ttl_seconds: "Login challenge lifetime",
+  admin_idle_minutes: "Admin sign-out after inactivity (default)", admin_session_max_hours: "Admin session maximum (default)",
+  admin_warn_minutes: "Admin warning before sign-out (default)", admin_idle_max_minutes: "Admin inactivity ceiling",
+  challenge_ttl_seconds: "Login challenge lifetime",
   cookie_secure: "Cookie requires HTTPS", future_skew_seconds: "Allowed clock skew (future)",
   ingest_rate: "Writes per member", recall_rate: "Reads per member", enroll_rate_per_ip: "Enrollment requests per IP",
   max_batch: "Records per batch", max_recall: "Records per read", max_pending_enrollments: "Pending enrollments",
@@ -38,6 +42,8 @@ export function formatValue(key, value) {
   if (value === "" || value === null || value === undefined) return "Not set";
   if (typeof value === "number") {
     if (key.endsWith("_seconds")) return duration(value);
+    if (key.endsWith("_minutes")) return duration(value * 60);
+    if (key.endsWith("_hours")) return duration(value * 3600);
     if (key.endsWith("_days")) return `${value} days`;
     if (key === "enroll_rate_per_ip") return `${value} per hour`;
     if (key.endsWith("_rate")) return `${value} per second`;
@@ -77,6 +83,104 @@ export function GeoStatus({ geo }) {
   );
 }
 
+/** Check the admin session form; returns an error message or null (#378). */
+export function validateSessionForm(form, limits) {
+  const idle = Number(form.idle_minutes);
+  const max = Number(form.max_hours);
+  const warn = Number(form.warn_minutes);
+  if (![idle, max, warn].every(Number.isInteger)) return "Use whole numbers.";
+  if (idle < limits.idle_minutes_min || idle > limits.idle_minutes_max)
+    return `Sign out after inactivity must be ${limits.idle_minutes_min}–${limits.idle_minutes_max} minutes.`;
+  if (max < limits.max_hours_min || max > limits.max_hours_max)
+    return `Maximum session length must be ${limits.max_hours_min}–${limits.max_hours_max} hours.`;
+  if (max * 60 < idle) return "Maximum session length must be at least the inactivity timeout.";
+  if (warn < limits.warn_minutes_min || warn > limits.warn_minutes_max)
+    return `Warn ${limits.warn_minutes_min}–${limits.warn_minutes_max} minutes before sign-out.`;
+  if (warn >= idle) return "The warning must come before the inactivity timeout.";
+  return null;
+}
+
+function SessionForm({ current, onSaved }) {
+  const [form, setForm] = useState({
+    idle_minutes: String(current.idle_minutes), max_hours: String(current.max_hours),
+    warn_minutes: String(current.warn_minutes),
+  });
+  const [error, setError] = useState(null);
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const lim = current.limits;
+
+  async function submit(e) {
+    e.preventDefault();
+    setSaved(false);
+    const problem = validateSessionForm(form, lim);
+    if (problem) { setError(problem); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      await api("/admin/sessions/settings", { method: "PUT", body: {
+        idle_minutes: Number(form.idle_minutes), max_hours: Number(form.max_hours), warn_minutes: Number(form.warn_minutes),
+      } });
+      setSaved(true);
+      onSaved?.();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const field = (key, label, min, max, unit) => (
+    <label className="block text-sm">
+      {label}
+      <span className="mt-1 flex items-center gap-2">
+        <input className="field w-24" type="number" inputMode="numeric" min={min} max={max} step="1" required
+               value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
+        <span className="text-paper-muted">{unit} ({min}–{max})</span>
+      </span>
+    </label>
+  );
+
+  return (
+    <form onSubmit={submit} aria-label="Admin sessions" className="grid gap-3 sm:grid-cols-3">
+      {field("idle_minutes", "Sign out after inactivity", lim.idle_minutes_min, lim.idle_minutes_max, "min")}
+      {field("max_hours", "Maximum session length", lim.max_hours_min, lim.max_hours_max, "h")}
+      {field("warn_minutes", "Warn before sign-out", lim.warn_minutes_min, lim.warn_minutes_max, "min")}
+      <div className="flex items-center gap-3 sm:col-span-3">
+        <button className="btn btn-primary" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+        {saved && <span role="status" className="text-sm">Saved. Open sessions use it from their next request.</span>}
+        {error && <span role="alert" className="text-sm text-bad">{error}</span>}
+      </div>
+    </form>
+  );
+}
+
+/** Settings → Admin sessions: idle timeout, maximum length, warning (#378). */
+export function AdminSessions() {
+  const { data, error, reload } = useApi("/admin/sessions/settings");
+  return (
+    <section className="panel mb-6 p-4" aria-labelledby="admin-sessions-h">
+      <h2 id="admin-sessions-h" className="font-bold">Admin sessions</h2>
+      <p className="mb-3 max-w-prose text-sm text-paper-muted">
+        Admins are signed out after a period without activity (clicks, typing, scrolling, pages they open),
+        and always after the maximum length. Background refreshes don&apos;t count as activity.
+      </p>
+      <ErrorNote error={error} onRetry={reload} />
+      {data && <SessionForm key={JSON.stringify([data.idle_minutes, data.max_hours, data.warn_minutes])}
+                            current={data} onSaved={reload} />}
+      {data && (
+        <p className="mt-3 max-w-prose text-xs text-paper-muted">
+          A longer inactivity timeout keeps an unattended, signed-in browser usable for longer. Check it against
+          your site&apos;s security policy (on government networks, STIG/ATO session-lock controls may set a lower
+          limit). The server can cap it with <code className="hash">LTMS_ADMIN_IDLE_MAX_MINUTES</code>
+          {data.limits.idle_minutes_max < 480 && <> (capped here at {data.limits.idle_minutes_max} min)</>}.
+          {" "}Current values come from {data.source === "dashboard" ? "this page" : "the server environment"}.
+        </p>
+      )}
+    </section>
+  );
+}
+
 export default function Settings() {
   const { data, error, loading, reload } = useApi("/admin/settings");
   const locations = useApi("/admin/locations");
@@ -94,6 +198,7 @@ export default function Settings() {
         <LocationForm key={JSON.stringify(locations.data?.server ?? null)} subjectType="member" name="ltms-server"
                       title="Server" current={locations.data?.server ?? null} onDone={locations.reload} />
       </section>
+      <AdminSessions />
       <GeoStatus geo={locations.data?.geo} />
       {loading && <Loading />}
       <ErrorNote error={error} onRetry={reload} />

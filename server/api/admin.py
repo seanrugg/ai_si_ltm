@@ -13,7 +13,7 @@ from sqlalchemy import and_, false, func, Integer, literal, or_, select
 
 from ltms_contract import RECORD_TYPES
 
-from server.api.deps import ADMIN_COOKIE, AdminAuth, client_ip, current_admin, transaction
+from server.api.deps import ADMIN_COOKIE, AdminAuth, client_ip, current_admin, set_session_headers, transaction
 from server.api.schemas import RetentionUpdate  # noqa: I001  (own line: keeps parallel PRs mergeable)
 from server.api.schemas import (AdminLogin, ApproveRequest, BulkMembersRequest,
                                 EnrollmentPolicyUpdate, InviteCreate, McpSettingsUpdate,
@@ -56,14 +56,21 @@ async def admin_login(body: AdminLogin, request: Request, response: Response) ->
     cfg = request.app.state.config
     async with transaction(request) as session:
         raw, expires = await auth_service.admin_login(
-            session, username=body.username, password=body.password,
-            ttl=cfg.admin_session_ttl_seconds, remote_ip=client_ip(request),
+            session, username=body.username, password=body.password, remote_ip=client_ip(request),
         )
+        timeouts = await runtime_settings.resolve_admin_sessions(session, cfg)
+    # The cookie outlives any maximum session length the dashboard can set, so the
+    # browser never drops it first; the server enforces idle and maximum (#378).
     response.set_cookie(
-        ADMIN_COOKIE, raw, max_age=cfg.admin_session_ttl_seconds, httponly=True,
+        ADMIN_COOKIE, raw, max_age=int(auth_service.ADMIN_SESSION_CEILING.total_seconds()), httponly=True,
         secure=cfg.cookie_secure, samesite="strict", path="/api",
     )
-    return {"username": body.username, "expires_at": expires.isoformat()}
+    timing = {"idle_remaining_seconds": timeouts["idle_minutes"] * 60,
+              "max_remaining_seconds": timeouts["max_hours"] * 3600,
+              "idle_minutes": timeouts["idle_minutes"], "max_hours": timeouts["max_hours"],
+              "warn_minutes": timeouts["warn_minutes"]}
+    set_session_headers(response, timing)
+    return {"username": body.username, "expires_at": expires.isoformat(), "session": timing}
 
 
 @router.post("/auth/admin/logout")
@@ -74,9 +81,69 @@ async def admin_logout(request: Request, response: Response) -> dict:
     return {"ok": True}
 
 
+@router.post("/auth/admin/activity")
+async def admin_activity(request: Request, admin: AdminAuth = ADMIN) -> dict:
+    """Heartbeat for admin activity that makes no other request: reading,
+    scrolling, typing (issue #378). Counts as activity whatever the headers
+    say. The dashboard sends it at most once a minute, and the server writes
+    ``last_active_at`` at most once a minute per session."""
+    raw = request.cookies.get(ADMIN_COOKIE)
+    cfg = request.app.state.config
+    async with transaction(request) as session:
+        timeouts = await runtime_settings.resolve_admin_sessions(session, cfg)
+        _, timing = await auth_service.admin_from_session(session, raw, timeouts=timeouts, activity=True)
+    return {"ok": True, "session": timing}
+
+
 @router.get("/admin/me")
 async def me(admin: AdminAuth = ADMIN) -> dict:
+    # The session's remaining time is in the X-LTMS-Session-* response headers.
     return {"username": admin.username}
+
+
+# --------------------------------------------------------------------------- #
+# Admin session settings (issue #378)
+# --------------------------------------------------------------------------- #
+def _admin_sessions_out(effective: dict, row, cfg) -> dict:
+    return {
+        "idle_minutes": effective["idle_minutes"],
+        "max_hours": effective["max_hours"],
+        "warn_minutes": effective["warn_minutes"],
+        "source": effective["source"],
+        "limits": runtime_settings.admin_session_limits(cfg),
+        "updated_at": row.updated_at.isoformat() if row and row.updated_at else None,
+        "updated_by": row.updated_by if row else None,
+    }
+
+
+@router.get("/admin/sessions/settings")
+async def admin_sessions_get(request: Request, admin: AdminAuth = ADMIN) -> dict:
+    cfg = request.app.state.config
+    async with transaction(request) as session:
+        effective = await runtime_settings.resolve_admin_sessions(session, cfg)
+        row = await runtime_settings.get_setting(session, runtime_settings.ADMIN_SESSIONS_KEY)
+    return _admin_sessions_out(effective, row, cfg)
+
+
+@router.put("/admin/sessions/settings")
+async def admin_sessions_put(request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    """Change the admin idle timeout, maximum session length and warning time.
+    Applies to sessions already open at their next request. Audited as
+    ``settings_change`` with the old and new values."""
+    cfg = request.app.state.config
+    new = runtime_settings.validate_admin_sessions(
+        cfg, body.get("idle_minutes"), body.get("max_hours"), body.get("warn_minutes"))
+    actor = f"admin:{admin.username}"
+    async with transaction(request) as session:
+        current = await runtime_settings.resolve_admin_sessions(session, cfg)
+        row = await runtime_settings.set_setting(session, runtime_settings.ADMIN_SESSIONS_KEY, new, updated_by=actor)
+        session.add(AuditLog(actor=actor, action="settings_change", detail={
+            "setting": runtime_settings.ADMIN_SESSIONS_KEY,
+            "old": {k: current[k] for k in ("idle_minutes", "max_hours", "warn_minutes", "source")},
+            "new": {**new, "source": "dashboard"},
+        }))
+        effective = await runtime_settings.resolve_admin_sessions(session, cfg)
+    return _admin_sessions_out(effective, row, cfg)
 
 
 # --------------------------------------------------------------------------- #
