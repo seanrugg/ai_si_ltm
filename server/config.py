@@ -75,7 +75,16 @@ class ServerConfig(BaseSettings):
     admin_username: str = "admin"
     admin_password: str = ""
     token_ttl_seconds: int = 300
-    admin_session_ttl_seconds: int = 1800
+    # Admin sessions (issue #378): a session ends after this many minutes
+    # without admin activity, or this many hours after sign-in, whichever comes
+    # first. These are defaults; Settings -> Admin sessions overrides them.
+    # Env: LTMS_ADMIN_IDLE_MINUTES, LTMS_ADMIN_SESSION_MAX_HOURS, LTMS_ADMIN_WARN_MINUTES.
+    admin_idle_minutes: int = 60
+    admin_session_max_hours: int = 12
+    admin_warn_minutes: int = 2
+    # Site ceiling on the idle timeout, e.g. a STIG/ATO session-lock limit. The
+    # dashboard cannot set a longer idle timeout. Env: LTMS_ADMIN_IDLE_MAX_MINUTES.
+    admin_idle_max_minutes: int = 480
     challenge_ttl_seconds: int = 60
     future_skew_seconds: int = 300
     cookie_secure: bool = True

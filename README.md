@@ -10,6 +10,7 @@ it to their previous one; the server verifies, stores, and serves it back for re
 * **Sensing (sensed and perceived records):** `docs/sensing.md`
 * **Deploying to Plesk:** `PLESK_DEPLOYMENT_PLAN.md`
 * **Deployments and platforms:** `docs/platforms.md` and the `examples/echo-base` reference deployment
+* **Admin sessions (idle timeout, settings):** `docs/admin-sessions.md`
 * **Rules for coding agents:** `AGENTS.md`
 
 ## Quick start (local)

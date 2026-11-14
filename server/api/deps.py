@@ -4,16 +4,24 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
-from fastapi import Depends, Header, Request
+from fastapi import Depends, Header, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models import AdminUser
-from server.services import auth as auth_service
+from server.services import auth as auth_service, runtime_settings
 from server.services.errors import ServiceError
 from server.services.ingest import IngestRejected
 
 ADMIN_COOKIE = "ltms_admin"
 ADMIN_CSRF_HEADER = "x-ltms-admin"
+# Sent by the dashboard on requests the admin started (navigation, submit,
+# filter), not on background polling. Only these extend the idle timeout (#378).
+ADMIN_ACTIVITY_HEADER = "x-ltms-activity"
+# Response headers carrying the session's remaining time, in seconds, so the
+# dashboard can warn before sign-out without trusting its own clock.
+SESSION_IDLE_HEADER = "X-LTMS-Session-Idle-Remaining"
+SESSION_MAX_HEADER = "X-LTMS-Session-Max-Remaining"
+SESSION_WARN_HEADER = "X-LTMS-Session-Warn"
 
 
 @asynccontextmanager
@@ -78,11 +86,22 @@ class AdminAuth:
     username: str
 
 
-async def current_admin(request: Request) -> AdminAuth:
+def set_session_headers(response: Response, timing: dict | None) -> None:
+    if timing is None:
+        return
+    response.headers[SESSION_IDLE_HEADER] = str(timing["idle_remaining_seconds"])
+    response.headers[SESSION_MAX_HEADER] = str(timing["max_remaining_seconds"])
+    response.headers[SESSION_WARN_HEADER] = str(timing["warn_minutes"] * 60)
+
+
+async def current_admin(request: Request, response: Response) -> AdminAuth:
     raw = request.cookies.get(ADMIN_COOKIE)
+    activity = request.headers.get(ADMIN_ACTIVITY_HEADER, "").lower() == "user"
     async with transaction(request) as session:
-        admin: AdminUser = await auth_service.admin_from_session(session, raw)
+        timeouts = await runtime_settings.resolve_admin_sessions(session, request.app.state.config)
+        admin, timing = await auth_service.admin_from_session(session, raw, timeouts=timeouts, activity=activity)
         result = AdminAuth(admin.id, admin.username)
+    set_session_headers(response, timing)
     # CSRF guard: state-changing admin calls must carry a custom header, which a
     # cross-site form or image request cannot set. (The cookie is also SameSite=Strict.)
     if request.method not in ("GET", "HEAD", "OPTIONS") and request.headers.get(ADMIN_CSRF_HEADER) != "1":

@@ -1,16 +1,20 @@
 import { useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAdmin } from "../App.jsx";
 import { api } from "../api/client.js";
 
 export default function Login() {
   const { username, setUsername } = useAdmin();
   const navigate = useNavigate();
+  const location = useLocation();
+  // Back to the page that sent us here, if any (#378).
+  const from = location.state?.from;
+  const back = from && from.pathname !== "/login" ? `${from.pathname}${from.search || ""}` : "/";
   const [form, setForm] = useState({ username: "", password: "" });
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  if (username) return <Navigate to="/" replace />;
+  if (username) return <Navigate to={back} replace />;
 
   async function submit(e) {
     e.preventDefault();
@@ -19,7 +23,7 @@ export default function Login() {
     try {
       const res = await api("/auth/admin/login", { method: "POST", body: form });
       setUsername(res.username);
-      navigate("/", { replace: true });
+      navigate(back, { replace: true });
     } catch (err) {
       setError(err.status === 401 ? "That username and password don't match." : err.message);
     } finally {
