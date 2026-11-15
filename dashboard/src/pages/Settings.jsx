@@ -315,7 +315,7 @@ export default function Settings() {
       </p>
       <section className="panel mb-6 p-4" aria-labelledby="server-location-h">
         <h2 id="server-location-h" className="font-bold">Server location</h2>
-        <p className="text-sm text-paper-muted">Where this LTMS server is. The Network tab&apos;s globe draws data flowing here.</p>
+        <p className="text-sm text-paper-muted">Where this LTMS server is. The Geography tab&apos;s globe puts the LTMS pyramid here.</p>
         <LocationForm key={JSON.stringify(locations.data?.server ?? null)} subjectType="member" name="ltms-server"
                       title="Server" current={locations.data?.server ?? null} onDone={locations.reload} />
       </section>

@@ -31,7 +31,8 @@ LTMS a private address, which can't be located. So:
   Declaring the swarm's home replaces this.
 - **Unplaced.** A member with no position gets an `unplaced` sentence saying
   why (only a LAN address seen, estimates off, never connected directly). The
-  Network tab lists these under "Not on the globe".
+  Geography tab gathers these in its "Unplaced" ring and table, with any
+  address taken out of the reason.
 
 ### The address behind a network estimate (#399)
 

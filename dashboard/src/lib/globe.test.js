@@ -28,20 +28,15 @@ describe("orthographic projection", () => {
 });
 
 describe("double-click zoom", () => {
-  it("centres on the inverted point and doubles the zoom", () => {
+  it("centres on the inverted point and doubles the zoom, within the clamps", () => {
     const view = { lon: 0, lat: 0, zoom: 1 };
     const p = project(20, 10, view, R, C, C);
     const out = zoomAt(p.x, p.y, view, R, C, C);
-    expect(out.home).toBe(false);
     expect(out.view.lon).toBeCloseTo(20, 6);
     expect(out.view.lat).toBeCloseTo(10, 6);
     expect(out.view.zoom).toBe(2);
-    expect(zoomAt(p.x, p.y, { ...view, zoom: 6 }, R, C, C).view.zoom).toBe(8); // capped
-  });
-  it("near home at zoom 6+ asks for the Home view", () => {
-    const home = { lon: -77, lat: 38 };
-    const view = { lon: -77, lat: 38, zoom: 6 };
-    expect(zoomAt(C, C, view, R * 6, C, C, home)).toEqual({ view, home: true });
-    expect(distanceDeg(home, { lon: -77, lat: 44 })).toBeCloseTo(6, 6);
+    expect(zoomAt(p.x, p.y, { ...view, zoom: 20 }, R, C, C).view.zoom).toBe(30); // capped (#405: 30×)
+    expect(zoomAt(C + R + 5, C, view, R, C, C)).toBeNull(); // off the disc
+    expect(distanceDeg({ lon: -77, lat: 38 }, { lon: -77, lat: 44 })).toBeCloseTo(6, 6);
   });
 });

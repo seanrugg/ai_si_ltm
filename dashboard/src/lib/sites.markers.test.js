@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import React from "react";
-import Globe, { FLOW_STYLE } from "../pages/profile/Globe.jsx";
+import { cleanup } from "@testing-library/react";
+import { globeTouchables, buildGeography } from "./geography.js";
 import { markerLabel, markerPath, siteRole, sourceStyle } from "./sites.js";
 
 afterEach(() => cleanup());
@@ -25,17 +24,14 @@ describe("Holo globe markers (#347)", () => {
       .toBe("jetson-hub, hub, location declared");
   });
 
-  it("makes every marker focusable and named, and turns motion off on request", () => {
-    let picked = null;
-    render(React.createElement(Globe, {
-      view: { lon: 0, lat: 0, zoom: 1 }, setView: () => {}, rates: {}, home: null, server: null, onHome: () => {},
-      sites: [{ key: "a", label: "jetson-hub", lon: 0, lat: 0, source: "declared", members: ["jetson-hub"] }],
-      roleOf: () => "hub", onSelectSite: (s) => { picked = s; },
-    }));
-    const marker = screen.getByRole("button", { name: "jetson-hub, hub, location declared" });
-    expect(marker.getAttribute("tabindex")).toBe("0");
-    fireEvent.keyDown(marker, { key: "Enter" });
-    expect(picked.key).toBe("a");
-    expect(FLOW_STYLE).toMatch(/prefers-reduced-motion: reduce\) \{ \.ltms-flow, \.ltms-pulse, \.ltms-sweep \{ animation: none/);
+  it("names every light on the globe with its place source (#405: the touch list replaces SVG markers)", () => {
+    const g = buildGeography({
+      locations: { members: [{ name: "hub-a", best: { source: "network", label: "Town", lat: 0, lon: 0, accuracy_km: 30 } }] },
+      swarms: [{ name: "lab", members: [{ name: "hub-a", role: "hub" }] }],
+      members: [{ name: "hub-a", kind: "relay" }],
+    });
+    const items = globeTouchables(g, null);
+    expect(items.map((t) => t.label)).toEqual(["LTMS", "lab · Town (estimated)"]);
+    expect(items[1].narration).toMatch(/hub hub-a\. Estimated place: Town, within about 30 km/);
   });
 });
