@@ -71,6 +71,17 @@ export function useGeographyData(scope, range) {
   return { ...state, reload };
 }
 
+/** The member a touchable stands for: satellites, unplaced members, stars and planets (not moons). */
+export function memberOfBody(id) {
+  const m = /^(?:sat|unplaced|star|planet):(.+)$/.exec(String(id ?? ""));
+  return m ? m[1] : null;
+}
+
+/** What touching a member selects: its name, its light (or null) and whether it's a satellite. */
+export function memberSelection(geo, name) {
+  return { kind: "member", name, light: lightOf(geo, name), satellite: geo.satellites.some((x) => x.name === name) };
+}
+
 /** The server's place, when declared: {lon, lat, label}. */
 export function serverPlace(locations) {
   const s = locations?.server;
@@ -118,8 +129,13 @@ export function GeographyTables({ geo, server, events, t, locations, network, me
  *   startInside start zoomed into the focus member's (or the only swarm's) light (`?tab=places`)
  *   extraTables more tables for the twin (the profile's Records by place, Location sources)
  *   defaultCalm passed to VizFrame
+ *   onSelect    optional: called with what was touched, for a data card (#382):
+ *               {kind: "light", light} | {kind: "member", name, light, satellite} (a satellite,
+ *               an unplaced member, or a star or planet inside a system). Never carries an address.
  */
-export function GeographyView({ data, members, swarms, clock, focusName = null, startInside = false, extraTables, defaultCalm }) {
+export function GeographyView({
+  data, members, swarms, clock, focusName = null, startInside = false, extraTables, defaultCalm, onSelect,
+}) {
   const events = useMemo(() => Object.entries(data.episodes || {})
     .flatMap(([m, ep]) => eventsOf(m, ep)).sort((a, b) => a.t - b.t), [data.episodes]);
   const counts = useMemo(() => countsUpTo(events), [events]);
@@ -206,10 +222,15 @@ export function GeographyView({ data, members, swarms, clock, focusName = null, 
       ...touchList(insideScene, {
         skipLtms: true,
         bpm: (p) => (p.heartbeat?.interval_s ? heartbeatBpm(p.heartbeat.interval_s) : null),
-      }).map((t) => ({ ...t, note: t.degree }))]
+      }).map((t) => {
+        const name = memberOfBody(t.id);
+        return { ...t, note: t.degree, ...(name && onSelect ? { onTouch: () => onSelect(memberSelection(geo, name)) } : {}) };
+      })]
     : globeTouchables(geo, server).map((t) => {
       const light = geo.lights.find((l) => l.id === t.id);
-      return light ? { ...t, onTouch: () => into(light) } : t;
+      if (light) return { ...t, onTouch: () => { into(light); onSelect?.({ kind: "light", light }); } };
+      const name = memberOfBody(t.id);
+      return name && onSelect ? { ...t, onTouch: () => onSelect(memberSelection(geo, name)) } : t;
     });
   const touchables = [...controls.filter((c) => !c.disabled), ...lights];
 
