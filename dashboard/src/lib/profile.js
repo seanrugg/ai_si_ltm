@@ -16,12 +16,14 @@ export const TABS = [
   { key: "places", label: "Places & movement" },
   { key: "topology", label: "Topology", aliases: ["interactions"] }, // #404: was Interactions
   { key: "network", label: "Network" },
-  { key: "activity", label: "Activity" },
+  { key: "chronology", label: "Chronology", aliases: ["activity"] },
   { key: "senses", label: "Senses" },
   { key: "history", label: "History" },
   { key: "manage", label: "Manage", swarmOnly: true },
 ];
 export const DEFAULT_TAB = "overview";
+
+// Old tab keys that still open their renamed tab (#403: Activity is now Chronology).
 
 export function rangeOf(param) {
   return RANGES.find((r) => r.key === param) ?? RANGES.find((r) => r.key === DEFAULT_RANGE);
