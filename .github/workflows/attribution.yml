@@ -1,10 +1,13 @@
 name: Attribution
 
-# Every PR must say which harness, model and machine did the work (AGENTS.md rule 9),
-# so squash commits on main record it. Re-runs when the description is edited.
+# Every agent PR must say which harness, model and machine did the work
+# (AGENTS.md rule 9), so squash commits on main record it. Human PRs pass with
+# `Agent-Harness: none`, or with no block when no commit has an agent trailer and
+# the PR has no `agent-task` label. Logic and tests: .github/scripts/check_attribution.py,
+# server/tests/test_ci_scripts.py (issue #389). Re-runs when the description or labels change.
 on:
   pull_request:
-    types: [opened, edited, synchronize, reopened]
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled]
 
 permissions:
   contents: read
@@ -13,21 +16,15 @@ jobs:
   attribution:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Check the attribution block
         env:
           BODY: ${{ github.event.pull_request.body }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          python3 - <<'PY'
-          import os, re, sys
-          body = os.environ.get("BODY") or ""
-          missing = []
-          for key in ("Agent-Harness", "Agent-Model", "Agent-Host"):
-              values = [v.strip() for v in re.findall(rf"^{key}:[ \t]*(.*)$", body, re.MULTILINE)]
-              if not any(v and not v.startswith("<") for v in values):
-                  missing.append(key)
-          if missing:
-              print("Missing or placeholder: " + ", ".join(missing))
-              print("Add the attribution block from AGENTS.md rule 9 to the PR description.")
-              sys.exit(1)
-          print("Attribution OK")
-          PY
+          git log --format='%B%x00' "$BASE..$HEAD" > /tmp/commits
+          COMMITS_FILE=/tmp/commits python3 .github/scripts/check_attribution.py
