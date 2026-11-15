@@ -20,6 +20,23 @@
     --font-sans: "Atkinson Hyperlegible";
     --font-mono: "JetBrains Mono";
     --font-display: "Atkinson Hyperlegible";
+    /* Holo Light (#400, docs/holo-light.md). Meaning colors and the brightness
+       ladder never change with the theme; they mirror lib/visual.js. */
+    --cat-self: #6aa8ff;
+    --ltms-core: #9fdcff;
+    --mind: #b06bff;
+    --relay: #5d7a99;
+    --void: #000;
+    --light-asleep: 0.18;
+    --light-trail: 0.35;
+    --light-breathing: 0.6;
+    --light-breathing-min: 0.45;
+    --light-breathing-max: 0.75;
+    --light-breathing-period: 3.2s;
+    --light-lit: 0.85;
+    --light-live: 1;
+    --radius-lg: 14px;
+    --font-narrate: "Cormorant Garamond";
   }
   /* Holo (#198): deep navy, a faint grid, cyan accents, condensed headings. */
   [data-theme="holo"] {
@@ -67,4 +84,36 @@
                   placeholder:text-paper-faint focus:border-led focus:outline-none; }
   .panel { @apply rounded-lg border border-ink-line bg-ink-raised; }
   .hash { @apply font-mono text-xs text-paper-muted; }
+
+  /* Holo Light visualization frame (#400): a radius-lg panel around a void stage. */
+  .viz-frame { @apply border border-ink-line bg-ink-raised; border-radius: var(--radius-lg); overflow: hidden; }
+  .viz-header { @apply flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-ink-line px-3 py-2; }
+  .viz-title { font-family: "Bebas Neue", var(--font-display), system-ui, sans-serif; font-weight: 400;
+               font-size: 1.5rem; line-height: 1; letter-spacing: 2.5px; text-transform: uppercase; }
+  .viz-group { @apply inline-flex items-center gap-1; }
+  .viz-btn { @apply inline-flex items-center justify-center gap-1 rounded-md border border-ink-line px-2.5 text-xs text-paper
+                    hover:bg-ink-hover disabled:opacity-50 disabled:cursor-not-allowed; min-height: 32px; min-width: 32px; }
+  .viz-btn[aria-pressed="true"] { @apply border-led text-led; }
+  .viz-stage { background: var(--void); position: relative; min-height: 240px; }
+  .viz-narrate { font-family: var(--font-narrate), Georgia, serif; font-style: italic; font-weight: 500;
+                 font-size: 20px; line-height: 1.4; min-height: 1.4em; @apply px-3 pt-2 text-paper; }
+  .viz-timebar { position: relative; height: 32px; cursor: pointer; touch-action: none; @apply mx-3; }
+  .viz-timebar-track { position: absolute; left: 0; right: 0; top: 14px; height: 4px; border-radius: 2px; @apply bg-led-dim; }
+  .viz-timebar-hand { position: absolute; top: 4px; width: 3px; height: 24px; margin-left: -1px; border-radius: 2px; @apply bg-led; }
+  .viz-touch { @apply flex flex-wrap gap-1 px-3 py-2; }
+  .viz-legend { @apply flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-ink-line px-3 py-2 text-xs text-paper-muted; }
+
+  /* The Holo table, a view's table twin: ink-raised, ink-line hairlines, no zebra, never white. */
+  .holo-table-wrap { @apply rounded-lg border border-ink-line bg-ink-raised; overflow-x: auto; }
+  .holo-table { @apply w-full text-sm text-paper; border-collapse: collapse; }
+  .holo-table caption { font-family: "Bebas Neue", var(--font-display), system-ui, sans-serif; font-size: 1.5rem;
+                        letter-spacing: 2.5px; text-align: left; @apply px-3 pt-2 text-paper; }
+  .holo-table th { @apply px-3 py-2 text-left font-normal text-paper-muted; font-size: 11px; letter-spacing: 1.6px;
+                   text-transform: uppercase; }
+  .holo-table td { @apply border-t border-ink-line px-3 py-1.5; }
+  .holo-table .num { @apply font-mono; text-align: right; font-variant-numeric: tabular-nums; }
+  .holo-table tbody tr:hover { @apply bg-ink-hover; }
+  .holo-table tbody tr:focus-within { @apply outline outline-2 -outline-offset-2 outline-led; }
+  .holo-live-dot { display: inline-block; width: 6px; height: 6px; border-radius: 9999px; margin-right: 6px;
+                   vertical-align: middle; @apply bg-led; opacity: var(--light-live); }
 }
