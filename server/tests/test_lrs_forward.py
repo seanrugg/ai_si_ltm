@@ -464,3 +464,26 @@ def test_causes_are_looked_up_once_per_batch(admin, mesh, http, app, db_exec):
         event.remove(engine, "before_cursor_execute", count)
     assert len(lookups) == 1
     assert [_statement_ref(s) for s in sent] == [str(uuid.uuid5(NAMESPACE, c["hash"])) for c in causes]
+
+
+def test_network_estimate_address_never_reaches_the_lrs(admin, mesh, http, app, monkeypatch):
+    """#399: the address behind a network estimate is admin-only, never in a statement."""
+    from server.services import location
+
+    for mod in ("server.api.public", "server.api.member"):
+        monkeypatch.setattr(f"{mod}.client_ip", lambda request: "8.8.8.8")
+    monkeypatch.setattr(location, "lookup_city", lambda path, addr: {
+        "label": "Example City, Example Country", "lat": 1.0, "lon": 2.0, "accuracy_km": 20})
+    app.state.config.geoip_db_path = "/nonexistent/city.mmdb"
+    _endpoint(admin, "lrs-one", scope={"types": ["event", "thought"]})
+    z3 = mesh.member("z3-r0")
+    z3.append("event", summary="from outside", payload={"n": 1})
+    z3.append("thought", summary="another", place="bay 2")
+    z3.flush()
+    loc = admin.get("/api/admin/locations", params={"member": "z3-r0"}).json()["members"][0]
+    assert loc["best"]["ip"] == "8.8.8.8"  # the estimate exists and carries the address
+
+    bodies = []
+    assert _forward(app, http, lambda req: bodies.append(req.content.decode()) or httpx.Response(200)) \
+        == {"forwarded": 2}
+    assert bodies and all("8.8.8.8" not in b for b in bodies)
