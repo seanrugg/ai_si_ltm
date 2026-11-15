@@ -17,10 +17,11 @@
 //                most once per 2 s; the newest pending text wins. Self-reports
 //                ({self: true}) are skipped. `key` makes a repeat of the same
 //                text count as new.
-//   touchables   [{id, label, narration?, onTouch?}]. The touchable lights at
-//                the current level, rendered as real buttons (Enter = click).
-//                Touching narrates `narration ?? label`, then calls the item's
-//                onTouch(item), or the frame's onTouch(item) if it has none.
+//   touchables   [{id, label, narration?, note?, onTouch?}]. The touchable lights
+//                at the current level, rendered as real buttons (Enter = click).
+//                Touching narrates `narration ?? label`, plays the light's note
+//                (lib/sound.js note(note ?? id), when sound is on), then calls
+//                the item's onTouch(item), or the frame's onTouch(item).
 //   onTouch      (item) => void. Default touch handler for touchables.
 //   onEscape     () => void. Escape anywhere in the frame: go up one level.
 //   legend       {categories?: ["sense", ...], selfReport?: bool, extra?: node},
@@ -30,6 +31,9 @@
 //                prefers-reduced-motion, or the per-user setting
 //                "Start visualizations in Calm view" (lib/light.js getCalmStart).
 //   onCalmChange (calm) => void.   onSoundChange (on) => void.
+//   soundEngine  the lib/sound.js engine the Sound toggle drives (default: the
+//                shared `sound`). Sound is held off in Calm view and with
+//                reduced motion, and the toggle is disabled with the reason.
 //
 // `frame`, as given to children and renderTable:
 //   {t, mode, playing, speed, start, end,   from the clock (epoch ms)
@@ -41,6 +45,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CATEGORIES, CAT_SELF, category as categoryByKey } from "../lib/visual.js";
 import { getCalmStart, prefersReducedMotion } from "../lib/light.js";
 import { MINUTE, SPEEDS, createReplayClock, useReplay, useReplayDriver } from "../lib/replay.js";
+import { sound as sharedSound, useSound } from "../lib/sound.js";
 import { CategoryLine } from "./visual.jsx";
 
 export const NARRATION_INTERVAL_MS = 2000;
@@ -218,7 +223,7 @@ export function HoloTable({ caption, columns, rows, rowKey = (r, i) => r.id ?? i
 
 export default function VizFrame({
   title, clock: clockProp, children, renderTable, narration, touchables = [], onTouch, onEscape,
-  legend, defaultCalm, onCalmChange, onSoundChange,
+  legend, defaultCalm, onCalmChange, onSoundChange, soundEngine = sharedSound,
 }) {
   const [ownClock] = useState(() => (clockProp ? null : createReplayClock()));
   const clock = clockProp ?? ownClock;
@@ -227,8 +232,11 @@ export default function VizFrame({
 
   const [reducedMotion] = useState(() => prefersReducedMotion());
   const [calm, setCalm] = useState(() => defaultCalm ?? (reducedMotion || getCalmStart()));
-  const [soundOn, setSoundOn] = useState(false); // off by default
-  const sound = soundOn && !calm;
+  const soundOn = useSound(soundEngine).on; // off by default; remembered per browser
+  const soundHeld = calm ? "Sound is off in Calm view"
+    : reducedMotion ? "Sound is off because your system asks for reduced motion" : null;
+  useEffect(() => (soundHeld ? soundEngine.hold(soundHeld) : undefined), [soundEngine, soundHeld]);
+  const sound = soundOn && !soundHeld;
   const animate = !calm && !reducedMotion;
 
   const [shown, narrate] = useThrottledNarration();
@@ -242,11 +250,12 @@ export default function VizFrame({
     onCalmChange?.(on);
   };
   const chooseSound = (on) => {
-    setSoundOn(on);
+    soundEngine.setEnabled(on); // this click is the gesture that starts audio
     onSoundChange?.(on);
   };
   const touch = (item) => {
     narrate(item.narration ?? item.label);
+    soundEngine.note(item.note ?? item.id);
     if (item.onTouch) item.onTouch(item);
     else onTouch?.(item);
   };
@@ -284,8 +293,8 @@ export default function VizFrame({
             <Toggle key={s} pressed={state.speed === s} onClick={() => clock.setSpeed(s)}>{`${s}×`}</Toggle>
           ))}
         </div>
-        <Toggle pressed={sound} onClick={() => chooseSound(!soundOn)} disabled={calm}
-                title={calm ? "Sound is off in Calm view" : undefined}>
+        <Toggle pressed={sound} onClick={() => chooseSound(!soundOn)} disabled={Boolean(soundHeld)}
+                title={soundHeld ?? undefined}>
           Sound
         </Toggle>
         <div className="viz-group" role="group" aria-label="Show">
