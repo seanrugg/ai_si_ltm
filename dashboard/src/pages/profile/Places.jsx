@@ -1,8 +1,11 @@
-// Profile Places & movement tab (issue #193).
+// Profile Places & movement tab (issue #193); Choreography, for members with a body (#407).
 import { useEffect, useState } from "react";
 import { api } from "../../api/client.js";
+import HelpTip from "../../components/HelpTip.jsx";
 import { MemberMark } from "../../components/visual.jsx";
-import { actionPoses, makeScaler, percent, poseSamples } from "../../lib/profile.js";
+import { localTime } from "../../lib/format.js";
+import { CHOREOGRAPHY } from "../../lib/help.js";
+import { actionPoses, hasBody, makeScaler, niceLength, percent, poseFrames } from "../../lib/profile.js";
 import { CATEGORIES, NEUTRAL, category } from "../../lib/visual.js";
 import { memberWithRole } from "../Profile.jsx";
 
@@ -94,77 +97,153 @@ function diamond(x, y, r = 5) {
   return `M${x} ${y - r}L${x + r} ${y}L${x} ${y + r}L${x - r} ${y}Z`;
 }
 
-export function Movement({ poses, actions, members, swarms }) {
+function Track({ track, color, gid }) {
+  const n = track.pts.length;
+  if (n === 1) return null;
+  return (
+    <g filter={`url(#${gid})`}>
+      {track.pts.slice(1).map((p, i) => {
+        const a = track.pts[i];
+        // Fades from older (dim) to newer (bright).
+        const opacity = 0.2 + 0.8 * ((i + 1) / (n - 1));
+        return <line key={i} x1={a.x} y1={a.y} x2={p.x} y2={p.y} stroke={color} strokeWidth="2.5"
+                     strokeLinecap="round" strokeOpacity={opacity} />;
+      })}
+    </g>
+  );
+}
+
+function FramePanel({ track, actions, index, members, swarms }) {
+  const sense = category("sense");
+  const act = category("act");
+  const scale = makeScaler([...track.samples, ...actions], W, H);
+  const { minX, maxX, minY, maxY } = scale.bounds;
+  const k = scale.map({ x: minX + 1, y: minY }).x - scale.map({ x: minX, y: minY }).x; // px per unit
+  const unit = track.unit || "units";
+  const spanX = maxX - minX;
+  const spanY = maxY - minY;
+  const bar = niceLength(Math.max(spanX, spanY, 1) / 4);
+  const barPx = Math.min(W / 2, bar * k);
+  const pts = track.samples.map(scale.map);
+  const first = pts[0];
+  const last = pts[pts.length - 1];
+  const gid = `glow-${index}`;
+  const m = memberWithRole((members || []).find((x) => x.name === track.agent) || { name: track.agent }, swarms);
+  const fmt = (v) => (Math.abs(v) >= 100 ? Math.round(v) : Number(v.toFixed(1)));
+  return (
+    <li className="mb-4">
+      <h3 className="mb-1 text-sm font-bold">
+        {track.agent} · frame <code>{track.frame}</code>
+        <span className="ml-2 font-normal text-paper-muted">
+          {localTime(track.start)} to {localTime(track.end)} · {track.samples.length} samples ·
+          {` spans ${fmt(spanX)} × ${fmt(spanY)} ${unit}`}
+        </span>
+      </h3>
+      {track.newFrame && (
+        <p className="mb-1 text-sm text-paper-muted">
+          New frame: {track.agent}&apos;s pose origin changed (for example, it was picked up), so this track starts
+          fresh and isn&apos;t joined to the one before.
+        </p>
+      )}
+      <div className="relative">
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full rounded-md border border-ink-line" role="img"
+             aria-label={`${track.agent} in frame ${track.frame}: ${track.samples.length} pose samples, spanning ${fmt(spanX)} by ${fmt(spanY)} ${unit}. Use View as table for the values.`}>
+          <defs>
+            <filter id={gid} x="-10%" y="-10%" width="120%" height="120%">
+              <feGaussianBlur stdDeviation="2.5" result="blur" />
+              <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+            </filter>
+          </defs>
+          <text x={W / 2} y={H - 6} fontSize="11" textAnchor="middle" fill="#93A0B8">{`x (${unit})`}</text>
+          <text x={12} y={H / 2} fontSize="11" textAnchor="middle" fill="#93A0B8"
+                transform={`rotate(-90 12 ${H / 2})`}>{`y (${unit})`}</text>
+          <Track track={{ pts }} color={sense.color} gid={gid} />
+          <circle cx={first.x} cy={first.y} r="6" fill="none" stroke={sense.color} strokeWidth="2">
+            <title>{`Start: ${localTime(track.start)}`}</title>
+          </circle>
+          <text x={first.x + 9} y={first.y - 8} fontSize="11" fill="#93A0B8">start</text>
+          <circle cx={last.x} cy={last.y} r="6" fill={sense.color}>
+            <title>{`End: ${localTime(track.end)}`}</title>
+          </circle>
+          <text x={last.x + 9} y={last.y - 8} fontSize="11" fill="#93A0B8">end</text>
+          {actions.map((a, i) => {
+            const p = scale.map(a);
+            return (
+              <path key={i} d={diamond(p.x, p.y)} fill={act.color}>
+                <title>{`${a.agent}: ${a.summary || "action"}${a.outcome ? ` (${a.outcome})` : ""}`}</title>
+              </path>
+            );
+          })}
+          <g aria-hidden="true">
+            <line x1={W - 24 - barPx} y1={24} x2={W - 24} y2={24} stroke="#93A0B8" strokeWidth="2" />
+            <line x1={W - 24 - barPx} y1={19} x2={W - 24 - barPx} y2={29} stroke="#93A0B8" strokeWidth="2" />
+            <line x1={W - 24} y1={19} x2={W - 24} y2={29} stroke="#93A0B8" strokeWidth="2" />
+            <text x={W - 24 - barPx / 2} y={42} fontSize="11" textAnchor="middle" fill="#93A0B8">{`${bar} ${unit}`}</text>
+          </g>
+        </svg>
+        <span className="absolute -translate-x-1/2 -translate-y-1/2"
+              style={{ left: `${(last.x / W) * 100}%`, top: `${(last.y / H) * 100}%` }}
+              title={`${track.agent}: newest position in this frame`}>
+          <MemberMark member={m} size={22} />
+        </span>
+      </div>
+    </li>
+  );
+}
+
+/** Actions drawn in a frame's panel: same frame, or (without one) the same member during the track. */
+function actionsIn(track, actions) {
+  return actions.filter((a) => (a.frame ? a.frame === track.frame && a.agent === track.agent
+    : a.agent === track.agent && a.ts >= track.start && a.ts <= track.end));
+}
+
+export function Choreography({ tracks, actions, members, swarms }) {
   const [asTable, setAsTable] = useState(false);
-  if (!poses.length) {
+  const heading = (
+    <h2 id="choreo-h" className="text-lg font-bold">
+      Choreography <HelpTip id="choreo-about" label="About Choreography">{CHOREOGRAPHY}</HelpTip>
+    </h2>
+  );
+  if (!tracks.length) {
     return (
-      <section aria-labelledby="move-h">
-        <h2 id="move-h" className="mb-2 text-lg font-bold">Movement</h2>
+      <section aria-labelledby="choreo-h">
+        <div className="mb-2">{heading}</div>
         <p className="text-sm text-paper-muted">
-          No pose data yet. Members send movement as sensed records with <code>{`"kind": "pose"`}</code>, a{" "}
-          <code>frame</code> and <code>x</code>, <code>y</code> samples; see <code>docs/sensing.md</code>.
+          No pose data yet. Members with a body send movement as sensed records with <code>{`"kind": "pose"`}</code>,
+          a <code>frame</code> and <code>x</code>, <code>y</code> samples; see <code>docs/sensing.md</code>.
         </p>
       </section>
     );
   }
-  const sense = category("sense");
-  const act = category("act");
-  const frame = poses[0].frame;
-  const scale = makeScaler([...poses, ...actions], W, H);
-  const byAgent = {};
-  for (const p of poses) (byAgent[p.agent] ||= []).push(p);
   return (
-    <section aria-labelledby="move-h">
+    <section aria-labelledby="choreo-h">
       <div className="mb-2 flex items-center justify-between">
-        <h2 id="move-h" className="text-lg font-bold">Movement</h2>
+        {heading}
         <button type="button" className="btn" aria-pressed={asTable} onClick={() => setAsTable((v) => !v)}>
           {asTable ? "View as chart" : "View as table"}
         </button>
       </div>
       {asTable ? (
         <table className="w-full text-sm">
-          <caption className="sr-only">Plotted pose samples</caption>
+          <caption className="sr-only">Pose samples, newest frame first</caption>
           <thead><tr><th className="text-left">Time</th><th className="text-left">Member</th>
-            <th className="text-right">x</th><th className="text-right">y</th><th className="text-left">Frame</th></tr></thead>
+            <th className="text-right">x</th><th className="text-right">y</th><th className="text-left">Unit</th>
+            <th className="text-left">Frame</th></tr></thead>
           <tbody>
-            {poses.map((p, i) => (
-              <tr key={`${p.agent}-${i}`}><td>{p.ts}</td><td>{p.agent}</td>
-                <td className="text-right">{p.x}</td><td className="text-right">{p.y}</td><td>{p.frame}</td></tr>
-            ))}
+            {tracks.flatMap((t) => t.samples.map((p, i) => (
+              <tr key={`${t.key}-${i}`}><td>{p.ts}</td><td>{t.agent}</td>
+                <td className="text-right">{p.x}</td><td className="text-right">{p.y}</td><td>{t.unit || ""}</td>
+                <td>{t.frame}</td></tr>
+            )))}
           </tbody>
         </table>
       ) : (
-        <div className="relative">
-          <svg viewBox={`0 0 ${W} ${H}`} className="w-full rounded-md border border-ink-line" role="img"
-               aria-label={`Movement in frame ${frame}: ${poses.length} pose samples. Use View as table for the values.`}>
-            <text x={W / 2} y={H - 6} fontSize="11" textAnchor="middle" fill="#93A0B8">{`${frame} x`}</text>
-            <text x={12} y={H / 2} fontSize="11" textAnchor="middle" fill="#93A0B8"
-                  transform={`rotate(-90 12 ${H / 2})`}>{`${frame} y`}</text>
-            {Object.entries(byAgent).map(([agent, pts]) => (
-              <polyline key={agent} fill="none" stroke={sense.color} strokeWidth="2" strokeDasharray={sense.dash}
-                        strokeLinecap="round" points={pts.map((p) => { const s = scale.map(p); return `${s.x},${s.y}`; }).join(" ")} />
-            ))}
-            {actions.map((a, i) => {
-              const s = scale.map(a);
-              return (
-                <path key={i} d={diamond(s.x, s.y)} fill={act.color}>
-                  <title>{`${a.agent}: ${a.summary || "action"}${a.outcome ? ` (${a.outcome})` : ""}`}</title>
-                </path>
-              );
-            })}
-          </svg>
-          {Object.entries(byAgent).map(([agent, pts]) => {
-            const s = scale.map(pts[pts.length - 1]);
-            const m = memberWithRole((members || []).find((x) => x.name === agent) || { name: agent }, swarms);
-            return (
-              <span key={agent} className="absolute -translate-x-1/2 -translate-y-1/2"
-                    style={{ left: `${(s.x / W) * 100}%`, top: `${(s.y / H) * 100}%` }}
-                    title={`${agent}: newest position`}>
-                <MemberMark member={m} size={22} />
-              </span>
-            );
-          })}
-        </div>
+        <ol aria-label="Frames, newest first">
+          {tracks.map((t, i) => (
+            <FramePanel key={t.key} track={t} index={i} actions={actionsIn(t, actions)} members={members}
+                        swarms={swarms} />
+          ))}
+        </ol>
       )}
     </section>
   );
@@ -172,12 +251,14 @@ export function Movement({ poses, actions, members, swarms }) {
 
 export default function Places({ subject, name, summary, members, swarms }) {
   const [entries, setEntries] = useState(null);
-  const [poses, setPoses] = useState([]);
+  const [tracks, setTracks] = useState([]);
   const [actions, setActions] = useState([]);
   const agents = subject === "member"
     ? [name]
     : ((swarms || []).find((s) => s.name === name)?.members || []).map((m) => m.name);
-  const agentKey = agents.join(",");
+  // Choreography is only for bodies (#407): AI agents and hubs never show it.
+  const bodies = agents.filter((a) => hasBody(memberWithRole((members || []).find((m) => m.name === a), swarms)));
+  const agentKey = bodies.join(",");
 
   useEffect(() => {
     let live = true;
@@ -200,7 +281,7 @@ export default function Places({ subject, name, summary, members, swarms }) {
       return { sensed: sensed.records || [], acts: acts.records || [] };
     })).then((all) => {
       if (!live) return;
-      setPoses(poseSamples(all.flatMap((a) => a.sensed)));
+      setTracks(poseFrames(all.flatMap((a) => a.sensed)));
       setActions(actionPoses(all.flatMap((a) => a.acts)));
     });
     return () => { live = false; };
@@ -210,7 +291,7 @@ export default function Places({ subject, name, summary, members, swarms }) {
     <>
       <PlaceList places={summary.places} />
       {subject === "member" && <Sources entries={entries} />}
-      <Movement poses={poses} actions={actions} members={members} swarms={swarms} />
+      {bodies.length > 0 && <Choreography tracks={tracks} actions={actions} members={members} swarms={swarms} />}
     </>
   );
 }

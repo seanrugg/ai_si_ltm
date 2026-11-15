@@ -267,7 +267,7 @@ export default function Access() {
 
   return (
     <>
-      <PageHeader title="MCP read access" />
+      <PageHeader title="MCP access" />
 
       {/* ---- MCP mode and open scope ---- */}
       <section className="mb-8 rounded-md border border-ink-line bg-ink p-4" aria-labelledby="access-mode-h">
