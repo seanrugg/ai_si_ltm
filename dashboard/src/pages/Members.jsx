@@ -303,7 +303,7 @@ export function CognitionControl({ m, onDone }) {
   );
 }
 
-function MemberRow({ m, swarm, swarms, location, inherited, onDone }) {
+function MemberRow({ m, swarm, swarms, location, inherited, estimate, geo, unplaced, onDone }) {
   const [mode, setMode] = useState(null); // null | "edit" | "revoke" | "wipe"
   const [reason, setReason] = useState("");
   const [confirmWipe, setConfirmWipe] = useState("");
@@ -387,8 +387,9 @@ function MemberRow({ m, swarm, swarms, location, inherited, onDone }) {
         <CognitionControl key={`${m.cognition?.source ?? ""}:${m.cognition?.value ?? ""}`} m={m} onDone={onDone} />
       )}
       {m.status === "active" && mode === null && (
-        <LocationForm key={JSON.stringify(location)} subjectType="member" name={m.name} current={location}
-                      inherited={inherited} onDone={onDone} />
+        <LocationForm key={JSON.stringify([location, estimate])} subjectType="member" name={m.name} current={location}
+                      inherited={inherited} estimate={estimate} suggestion={estimate} geo={geo} unplaced={unplaced}
+                      onDone={onDone} />
       )}
       {mode === "edit" && (
         <PermissionEditor initial={m.permissions} initialScope={m.scope} saveLabel="Save permissions" busy={busy}
@@ -464,10 +465,11 @@ export default function Members() {
   const { data: swarmsData, reload: reloadSwarms } = useApi("/admin/swarms");
   const [setups, setSetups] = useState([]); // members approved with an intended swarm (#313)
   const locations = useApi("/admin/locations");
-  const declaredOf = (name) => (locations.data?.members || []).find((l) => l.name === name)?.all
-    ?.find((e) => e.source === "declared" && !e.inherited_from) ?? null;
-  const inheritedOf = (name) => (locations.data?.members || []).find((l) => l.name === name)?.all
-    ?.find((e) => e.source === "declared" && e.inherited_from) ?? null;
+  const locOf = (name) => (locations.data?.members || []).find((l) => l.name === name);
+  const declaredOf = (name) => locOf(name)?.all?.find((e) => e.source === "declared" && !e.inherited_from) ?? null;
+  const inheritedOf = (name) => locOf(name)?.all?.find((e) => e.source === "declared" && e.inherited_from) ?? null;
+  // A gps fix or network estimate (#399): shown when nothing is declared, and pre-fills Edit.
+  const estimateOf = (name) => locOf(name)?.all?.find((e) => e.source === "gps" || e.source === "network") ?? null;
   const [showPast, setShowPast] = useState(false);
   const [params, setParams] = useSearchParams();
   const [selected, setSelected] = useState(new Set());
@@ -686,7 +688,8 @@ export default function Members() {
             </select>
             {list.length ? (
               <ul className="panel mt-3">{list.map((m) => <MemberRow key={m.id} m={m} swarm={swarmOf.get(m.name)} swarms={swarmsData}
-                                                      location={declaredOf(m.name)} inherited={inheritedOf(m.name)} onDone={() => { reload(); locations.reload(); }} />)}</ul>
+                                                      location={declaredOf(m.name)} inherited={inheritedOf(m.name)} estimate={estimateOf(m.name)}
+                                                      geo={locations.data?.geo} unplaced={locOf(m.name)?.unplaced} onDone={() => { reload(); locations.reload(); }} />)}</ul>
             ) : (
               <EmptyState title={emptyTitle}>{emptyBody}</EmptyState>
             )}

@@ -9,7 +9,10 @@
   are never looked up, and nothing is ever looked up online.
 
 ``best`` is the first of gps, declared (member, then swarm), network.
-Admin only; locations are never sent to an LRS.
+A network entry carries ``ip`` and ``ip_seen_at``: the "seen" address it was
+looked up from (the hub's, with ``via_hub``, when relayed). It is computed
+live, so an address removed by the address-retention prune is no longer shown.
+Admin only; locations and their addresses are never sent to an LRS or exported.
 
 Members that only reach LTMS through a hub (#346) take the network estimate
 of the hub that relayed their newest record. A member with nothing else
@@ -226,7 +229,10 @@ async def _network_estimate(session, db_path: str, member: Member, via: str | No
     hit = lookup_city(db_path, seen.ip)
     if not hit:
         return None
-    extra = {"via_hub": via} if via else {}
+    # The address that was looked up, so an admin can check it (#399). Relayed: the hub's address.
+    extra = {"ip": seen.ip, "ip_seen_at": seen.last_seen.isoformat() if seen.last_seen else None}
+    if via:
+        extra["via_hub"] = via
     return _entry("network", hit.get("label"), None, hit.get("lat"), hit.get("lon"),
                   hit.get("accuracy_km") or DEFAULT_ACCURACY_KM, **extra)
 
