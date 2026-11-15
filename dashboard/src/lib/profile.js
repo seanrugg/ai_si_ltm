@@ -14,7 +14,7 @@ export const TABS = [
   { key: "specs", label: "Specs", memberOnly: true },
   { key: "members", label: "Members", swarmOnly: true },
   { key: "places", label: "Places & movement" },
-  { key: "interactions", label: "Interactions" },
+  { key: "topology", label: "Topology", aliases: ["interactions"] }, // #404: was Interactions
   { key: "network", label: "Network" },
   { key: "activity", label: "Activity" },
   { key: "senses", label: "Senses" },
@@ -32,8 +32,9 @@ export function tabsFor(subject) {
   return TABS.filter((t) => (!t.swarmOnly || subject === "swarm") && (!t.memberOnly || subject === "member"));
 }
 
+/** The tab for a `?tab=` value; old keys (`aliases`) keep working. */
 export function tabOf(param, subject) {
-  return tabsFor(subject).find((t) => t.key === param)?.key ?? DEFAULT_TAB;
+  return tabsFor(subject).find((t) => t.key === param || t.aliases?.includes(param))?.key ?? DEFAULT_TAB;
 }
 
 /** The tab after `current` in `direction` (+1 right, -1 left), wrapping; Home/End jump. */
