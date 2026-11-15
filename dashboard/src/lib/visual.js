@@ -27,7 +27,37 @@ export const CATEGORIES = [
 ];
 
 export const NEUTRAL = "#e2eaf5"; // places, admin events, wipes: anything that is neither a role nor a category
-export const RELAY = "#5d7a99"; // relay paths
+export const RELAY = "#5d7a99"; // relay paths, and orbits (Holo Light)
+
+// Holo Light (#400, docs/holo-light.md). Meaning colors: like the ones above,
+// they never change with the theme.
+export const CAT_SELF = "#6aa8ff"; // self-reports (heartbeat, health), drawn as the member's heartbeat
+export const LTMS_CORE = "#9fdcff"; // the LTMS pyramid
+export const MIND = "#b06bff"; // a model thinking
+export const VOID = "#000"; // the visualization stage, only inside a VizFrame
+
+/** The Holo Light colors by token name (mirrored as CSS variables in src/index.css). */
+export const LIGHT_COLORS = {
+  "cat-self": CAT_SELF,
+  "ltms-core": LTMS_CORE,
+  mind: MIND,
+  relay: RELAY,
+  void: VOID,
+};
+
+/**
+ * The brightness ladder (opacities). Brightness is meaning:
+ * asleep = not available or future; trail = history; breathing = present and
+ * waiting (a slow min..max cycle over periodMs, resting at `rest`); lit = past,
+ * found, steady; live = happening now.
+ */
+export const LIGHT = {
+  asleep: 0.18,
+  trail: 0.35,
+  breathing: { min: 0.45, max: 0.75, rest: 0.6, periodMs: 3200 },
+  lit: 0.85,
+  live: 1.0,
+};
 
 const CATEGORY_BY_TYPE = Object.fromEntries(CATEGORIES.flatMap((c) => c.types.map((t) => [t, c.key])));
 
