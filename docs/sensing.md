@@ -67,6 +67,20 @@ An IMU (one value per axis, as a list):
  "samples": [{"t": 0.0, "v": [0.1, -0.4, 9.8]}, {"t": 0.01, "v": [0.2, -0.3, 9.7]}]}
 ```
 
+A robot's pose from its own odometry (the robot sidecar's Vector adapter).
+`frame` names the odometry frame; Vector's restarts when he's picked up or
+delocalized, so the pose origin id is part of the frame, and each origin is a
+new frame that is never joined to the last. Tags `telemetry`, `pose` (never
+`internal`: pose is sensing, not health):
+
+```json
+{"kind": "pose", "frame": "vector-odom:3", "unit": "mm",
+ "samples": [{"t": 0.0, "x": 112.4, "y": -30.1, "z": 0.0, "theta": 1.57},
+             {"t": 1.0, "x": 140.9, "y": -28.7, "z": 0.0, "theta": 1.49}]}
+```
+
+The profile's **Choreography** section draws these, one panel per frame.
+
 **Send features extracted from images or audio, not the media.** Raw media
 (image bytes, audio) is not telemetry; send what the member extracted from it
 (`image-features`, `sound-level`), with the media kept on the device.

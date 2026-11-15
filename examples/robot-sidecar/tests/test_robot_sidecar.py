@@ -122,3 +122,78 @@ def test_vector_events_map_one_to_one():
     assert [i.values for i in got if i.kind == "body"] == [{"head_angle_rad": 0.2}, {"head_angle_rad": 0.3}]
     t = StateTracker()
     assert t.changes({"a": True}) == [] and t.changes({"a": True}) == [] and t.changes({"a": False}) == [("a", False)]
+
+
+# -- pose (#407) -----------------------------------------------------------------
+
+def _pose(x, y, theta=0.0, frame="vector-odom:1", **more):
+    return {"pose_x_mm": x, "pose_y_mm": y, "pose_z_mm": 0.0, "pose_angle_rad": theta, "pose_frame": frame, **more}
+
+
+def test_a_window_with_moves_is_one_pose_record_plus_a_body_record_without_pose():
+    sc = Sidecar([], body_seconds=30, now=0)
+    link = FakeLink()
+    t0 = 1_794_000_000.0
+    for i, (x, y) in enumerate([(0, 0), (2, 0), (20, 0), (20.5, 0), (40, 10)]):
+        sc.emit(Item("body", values=_pose(x, y, head_angle_rad=0.1)), at=t0 + i)
+    sc.poll(link, 30)
+    pose, body = link.records
+    assert pose["type"] == "perception" and pose["tags"] == ["telemetry", "pose"]
+    assert "internal" not in pose["tags"]
+    assert pose["ts"].startswith("2026-") and pose["ts"].endswith("Z")
+    p = pose["payload"]
+    assert p["kind"] == "pose" and p["frame"] == "vector-odom:1" and p["unit"] == "mm"
+    # 2 mm and 0.5 mm moves are below the 5 mm threshold; the last sample is always kept.
+    assert [(s["t"], s["x"], s["y"]) for s in p["samples"]] == [(0, 0, 0), (2, 20, 0), (4, 40, 10)]
+    assert all("theta" in s for s in p["samples"])
+    assert body["tags"] == ["internal", "telemetry", "body"]
+    assert set(body["payload"]["values"]) == {"head_angle_rad"}  # no pose fields
+
+
+def test_no_pose_record_when_nothing_moved():
+    sc = Sidecar([], body_seconds=30, now=0)
+    link = FakeLink()
+    for i in range(5):
+        sc.emit(Item("body", values=_pose(100, 50, 0.3, head_angle_rad=0.1)), at=1000.0 + i)
+    sc.poll(link, 30)
+    assert [r["tags"] for r in link.records] == [["internal", "telemetry", "body"]]
+    # Still still in the next window, compared with where the last window ended.
+    sc.emit(Item("body", values=_pose(101, 50, 0.3)), at=1031.0)
+    sc.poll(link, 60)
+    assert len(link.records) == 1
+
+
+def test_a_turn_alone_is_movement():
+    sc = Sidecar([], body_seconds=30, now=0)
+    link = FakeLink()
+    sc.emit(Item("body", values=_pose(0, 0, 0.0)), at=0.0)
+    sc.emit(Item("body", values=_pose(0, 0, 0.1)), at=1.0)  # about 5.7 degrees
+    sc.poll(link, 30)
+    (pose,) = link.records
+    assert [s["theta"] for s in pose["payload"]["samples"]] == [0.0, 0.1]
+
+
+def test_an_origin_change_starts_a_new_frame():
+    sc = Sidecar([], body_seconds=30, now=0)
+    link = FakeLink()
+    sc.emit(Item("body", values=_pose(0, 0, frame="vector-odom:1")), at=0.0)
+    sc.emit(Item("body", values=_pose(50, 0, frame="vector-odom:1")), at=1.0)
+    sc.emit(Item("body", values=_pose(0, 0, frame="vector-odom:2")), at=2.0)  # picked up and put down
+    sc.emit(Item("body", values=_pose(0, 80, frame="vector-odom:2")), at=3.0)
+    sc.poll(link, 30)
+    frames = [(r["payload"]["frame"], [(s["x"], s["y"]) for s in r["payload"]["samples"]]) for r in link.records]
+    assert frames == [("vector-odom:1", [(0, 0), (50, 0)]), ("vector-odom:2", [(0, 0), (0, 80)])]
+    assert all(r["tags"] == ["telemetry", "pose"] for r in link.records)
+
+
+def test_vector_pose_frame_comes_from_the_origin_id():
+    from types import SimpleNamespace as NS
+
+    from adapters.vector_sdk import body_values
+
+    rot = NS(angle_z=NS(radians=0.5))
+    robot = NS(pose=NS(position=NS(x=1.0, y=2.0, z=3.0), rotation=rot, origin_id=7), head_angle_rad=0.2)
+    v = body_values(robot)
+    assert v["pose_frame"] == "vector-odom:7" and v["pose_x_mm"] == 1.0 and v["pose_angle_rad"] == 0.5
+    robot.pose = NS(position=NS(x=1.0, y=2.0, z=3.0), rotation=rot)  # an SDK without origin_id
+    assert body_values(robot)["pose_frame"] == "vector-odom"
