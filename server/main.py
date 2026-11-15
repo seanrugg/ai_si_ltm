@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import secrets
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
 
@@ -60,6 +61,7 @@ def create_app(config: ServerConfig | None = None, *, create_tables: bool = True
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        app.state.started_at = datetime.now(timezone.utc)  # System status (#383)
         engine = make_engine(cfg.resolved_database_url)
         app.state.engine = engine
         app.state.sessionmaker = make_sessionmaker(engine)
@@ -86,6 +88,7 @@ def create_app(config: ServerConfig | None = None, *, create_tables: bool = True
         if cfg.enable_scheduler:
             from server.tasks import start_scheduler
             scheduler = start_scheduler(app)
+        app.state.scheduler = scheduler  # System status (#383): next run times
         try:
             async with mcp_server.session_manager.run():
                 yield

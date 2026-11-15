@@ -14,6 +14,7 @@ import Lessons from "./pages/Lessons.jsx";
 import Volume from "./pages/Volume.jsx";
 import Swarms from "./pages/Swarms.jsx";
 import Datasets from "./pages/Datasets.jsx";
+import System from "./pages/System.jsx";
 import Charter from "./pages/Charter.jsx";
 import Retention from "./pages/Retention.jsx";
 import Login from "./pages/Login.jsx";
@@ -93,6 +94,7 @@ export const PAGE_ROUTES = [
   { path: "/volume", element: <Volume /> },
   { path: "/swarms", element: <Swarms /> },
   { path: "/datasets", element: <Datasets /> },
+  { path: "/system", element: <System /> },
   { path: "/charter", element: <Charter /> },
   { path: "/members/:name/profile", element: <Profile key="member" subject="member" /> },
   { path: "/swarms/:name/profile", element: <Profile key="swarm" subject="swarm" /> },

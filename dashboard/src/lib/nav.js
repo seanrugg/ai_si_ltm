@@ -43,6 +43,7 @@ export const GROUPS = [
       { to: "/access", label: "MCP access" },
       { to: "/lrs", label: "LRS endpoints", badge: "lrs_failing" },
       { to: "/datasets", label: "Datasets" },
+      { to: "/system", label: "System status" },
     ],
   },
 ];

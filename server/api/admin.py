@@ -1248,6 +1248,16 @@ async def recall_log(
         ]}
 
 
+# System status (#383): version, migrations, background jobs, fleet key and integrations.
+# Read-only; no environment, secrets, paths (beyond free space) or private key material.
+@router.get("/admin/system")
+async def system_status(request: Request, admin: AdminAuth = ADMIN) -> dict:
+    from server.services import system_status as system_status_service
+
+    async with transaction(request) as session:
+        return await system_status_service.status(session, request.app.state, request.app.state.config)
+
+
 @router.get("/admin/settings")
 async def settings(request: Request, admin: AdminAuth = ADMIN) -> dict:
     """Effective configuration, without secrets. Editing comes in P4."""
