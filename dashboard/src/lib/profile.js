@@ -16,12 +16,15 @@ export const TABS = [
   { key: "places", label: "Places & movement" },
   { key: "interactions", label: "Interactions" },
   { key: "network", label: "Network" },
-  { key: "activity", label: "Activity" },
+  { key: "chronology", label: "Chronology" },
   { key: "senses", label: "Senses" },
   { key: "history", label: "History" },
   { key: "manage", label: "Manage", swarmOnly: true },
 ];
 export const DEFAULT_TAB = "overview";
+
+// Old tab keys that still open their renamed tab (#403: Activity is now Chronology).
+export const TAB_ALIASES = { activity: "chronology" };
 
 export function rangeOf(param) {
   return RANGES.find((r) => r.key === param) ?? RANGES.find((r) => r.key === DEFAULT_RANGE);
@@ -33,7 +36,8 @@ export function tabsFor(subject) {
 }
 
 export function tabOf(param, subject) {
-  return tabsFor(subject).find((t) => t.key === param)?.key ?? DEFAULT_TAB;
+  const key = TAB_ALIASES[param] ?? param;
+  return tabsFor(subject).find((t) => t.key === key)?.key ?? DEFAULT_TAB;
 }
 
 /** The tab after `current` in `direction` (+1 right, -1 left), wrapping; Home/End jump. */
