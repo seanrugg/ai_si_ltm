@@ -20,10 +20,18 @@ Records (one per event):
 | a ``RobotStatus`` flag turning on or off: picked up, being held, cliff detected, on charger, charging, falling, button pressed | ``event`` "<flag> on/off", tags body,state-change |
 | touch starting or stopping (``touch.last_sensor_reading.is_being_touched``) | ``event`` "touch on/off", tags body,touch |
 
+Pose (#407): ``robot.pose`` x/y/z (mm) and ``rotation.angle_z`` (rad), with the
+frame ``vector-odom:<origin_id>``. The sidecar signs it as a sensed
+``telemetry,pose`` record (``kind: pose``), not as body state. ``origin_id`` is
+read from ``robot.pose`` (``anki_vector.util.Pose.origin_id``) with ``getattr``:
+Vector's odometry origin changes when he's picked up or delocalized, so each
+origin is its own frame. If the SDK doesn't give it, the frame is plain
+``vector-odom`` (assumed, not invented: origin changes then go unseen).
+
 Body state (folded by the sidecar into one ``internal,telemetry,body`` record
-per window): pose x/y/z (mm) and angle (rad), head angle (rad), lift height
-(mm), wheel speeds (mm/s), accelerometer and gyro (x/y/z), raw touch value,
-and, every ``VECTOR_BATTERY_SECONDS`` (default 30), battery volts and level.
+per window): head angle (rad), lift height (mm), wheel speeds (mm/s),
+accelerometer and gyro (x/y/z), raw touch value, and, every
+``VECTOR_BATTERY_SECONDS`` (default 30), battery volts and level.
 
 Not available from the SDK, so not recorded: Vector's stimulation level.
 
@@ -62,12 +70,23 @@ class StateTracker:
         return out
 
 
-def body_values(robot) -> dict[str, float]:
-    """Numeric body state from an ``anki_vector.Robot`` (attributes only; no calls to the robot)."""
+def pose_frame(pose) -> str:
+    """``vector-odom:<origin_id>``; plain ``vector-odom`` if the SDK's pose has no origin id."""
+    origin = getattr(pose, "origin_id", None)
+    return f"vector-odom:{origin}" if origin is not None else "vector-odom"
+
+
+def body_values(robot) -> dict:
+    """Body state from an ``anki_vector.Robot`` (attributes only; no calls to the robot).
+
+    Numbers, plus ``pose_frame`` (a string) when the pose was read.
+    """
     v = {}
     try:
-        p = robot.pose.position
-        v.update(pose_x_mm=p.x, pose_y_mm=p.y, pose_z_mm=p.z, pose_angle_rad=robot.pose.rotation.angle_z.radians)
+        pose = robot.pose
+        p = pose.position
+        v.update(pose_x_mm=p.x, pose_y_mm=p.y, pose_z_mm=p.z, pose_angle_rad=pose.rotation.angle_z.radians,
+                 pose_frame=pose_frame(pose))
     except AttributeError:
         pass
     for name in ("head_angle_rad", "lift_height_mm", "left_wheel_speed_mmps", "right_wheel_speed_mmps"):
