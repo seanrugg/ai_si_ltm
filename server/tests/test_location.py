@@ -159,3 +159,75 @@ def test_unplaced_reasons_and_geo_status(mesh, admin, app, ip):
     app.state.config.geoip_db_path = "/nonexistent/city.mmdb"
     geo = admin.get("/api/admin/locations").json()["geo"]
     assert geo["enabled"] is False and geo["reason"]  # extra missing or file missing: either way, said plainly
+
+
+# --------------------------------------------------------------------------- #
+# The address behind a network estimate (#399)
+# --------------------------------------------------------------------------- #
+def test_network_entry_carries_the_address_it_was_looked_up_from(mesh, admin, app, monkeypatch, ip):
+    _city(monkeypatch, app)
+    ip["ip"] = "8.8.8.8"
+    z3 = mesh.member("z3-r0")
+    z3.append("event", summary="from outside")
+    z3.flush()
+    (net,) = _loc(admin, "z3-r0")["all"]
+    assert net["source"] == "network" and net["ip"] == "8.8.8.8" and net["ip_seen_at"]
+    assert "via_hub" not in net
+
+    # Declared and GPS entries carry no address.
+    admin.put("/api/admin/locations/member/z3-r0", json={"label": "Lab"})
+    _gps(z3, 1.25, 2.5)
+    entries = {e["source"]: e for e in _loc(admin, "z3-r0")["all"]}
+    assert set(entries) == {"gps", "declared", "network"}
+    assert "ip" not in entries["gps"] and "ip" not in entries["declared"]
+    assert entries["network"]["ip"] == "8.8.8.8"
+
+
+def test_relayed_estimate_carries_the_hubs_address(mesh, admin, app, db_exec, monkeypatch, ip):
+    _city(monkeypatch, app)
+    home = Home(mesh, db_exec)
+    z3 = mesh.member("z3-r0")
+    z3.login()                 # only ever seen from the LAN
+    home.add(z3)
+    ip["ip"] = "9.9.9.9"
+    hub = mesh.member("hub-1", kind="relay")
+    home.appoint(hub)
+    hub.relay(sign(z3, 1))
+    best = _loc(admin, "z3-r0")["best"]
+    assert (best["source"], best["via_hub"], best["ip"]) == ("network", "hub-1", "9.9.9.9")
+    assert best["ip_seen_at"]
+
+
+def test_pruned_address_is_no_longer_shown(mesh, admin, app, db_exec, monkeypatch, ip):
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import update
+
+    from server.models import MemberAddress
+    from server.services import network
+
+    _city(monkeypatch, app)
+    ip["ip"] = "8.8.8.8"
+    z3 = mesh.member("z3-r0")
+    z3.append("event", summary="from outside")
+    z3.flush()
+    assert _loc(admin, "z3-r0")["best"]["ip"] == "8.8.8.8"
+    db_exec(update(MemberAddress).values(last_seen=datetime.now(timezone.utc) - timedelta(days=400)))
+    assert db_exec(lambda s: network.prune(s, 180)) >= 1
+    r = admin.get("/api/admin/locations", params={"member": "z3-r0"})
+    assert "8.8.8.8" not in r.text
+
+
+def test_the_address_is_never_in_exports(mesh, admin, app, monkeypatch, ip):
+    """The LRS side of this is in test_lrs_forward.py (it needs an LRS endpoint)."""
+    _city(monkeypatch, app)
+    ip["ip"] = "8.8.8.8"
+    z3 = mesh.member("z3-r0")
+    z3.append("event", summary="from outside", payload={"n": 1})
+    z3.append("thought", summary="another", place="bay 2")
+    z3.flush()
+    assert _loc(admin, "z3-r0")["best"]["ip"] == "8.8.8.8"  # the estimate exists and carries it
+    for fmt in ("jsonl", "csv"):
+        r = admin.get("/api/admin/export", params={"format": fmt})
+        assert r.status_code == 200, r.text
+        assert "8.8.8.8" not in r.text

@@ -28,6 +28,7 @@ from server.services import records as records_service
 from server.services import cognition, memory_wipe
 from server.services import location as location_service
 from server.services import network as network_service
+from server.services import episodes as episodes_service
 from server.services import profile as profile_service
 from server.services import datasets as datasets_service
 from server.services import charter, dataset_uploads, integrations, reference_sources, url_snapshot
@@ -99,6 +100,27 @@ async def admin_activity(request: Request, admin: AdminAuth = ADMIN) -> dict:
 async def me(admin: AdminAuth = ADMIN) -> dict:
     # The session's remaining time is in the X-LTMS-Session-* response headers.
     return {"username": admin.username}
+
+
+@router.get("/admin/nav-status")
+async def nav_status(request: Request, directives_seen: str | None = None, admin: AdminAuth = ADMIN) -> dict:
+    """Badge counts and Get started progress for the dashboard nav (#379):
+    ``{as_of, members_pending, charter_overdue, directive_declines, lrs_failing, setup}``.
+    ``directives_seen`` (ISO time) limits declines to those sent after it. The
+    dashboard polls this in the background without ``X-LTMS-Activity``, so it
+    doesn't extend the idle timeout (#378)."""
+    from server.services import nav_status as nav_service
+
+    since = None
+    if directives_seen:
+        try:
+            since = datetime.fromisoformat(directives_seen.replace("Z", "+00:00"))
+        except ValueError:
+            raise ServiceError(422, "bad_time", "directives_seen must be an ISO 8601 time") from None
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=timezone.utc)
+    async with transaction(request) as session:
+        return await nav_service.status(session, request.app.state.config, directives_seen=since)
 
 
 # --------------------------------------------------------------------------- #
@@ -449,6 +471,17 @@ async def profile_reading(request: Request, admin: AdminAuth = ADMIN, member: st
     async with transaction(request) as session:
         subject = await profile_service.resolve_subject(session, member, swarm)
         return await profile_service.reading(session, subject, hours)
+
+
+@router.get("/admin/profile/episodes")
+async def profile_episodes(request: Request, admin: AdminAuth = ADMIN, member: str | None = None,
+                           swarm: str | None = None, since: str | None = None,
+                           until: str | None = None) -> dict:
+    """Lanes, pulses, series and heartbeat derived from records at read time (#401)."""
+    start, end = episodes_service.parse_range(since, until)
+    async with transaction(request) as session:
+        subject = await profile_service.resolve_subject(session, member, swarm)
+        return await episodes_service.episodes(session, subject, start, end)
 
 
 @router.get("/admin/profile/history")

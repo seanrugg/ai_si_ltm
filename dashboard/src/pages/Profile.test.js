@@ -18,7 +18,7 @@ const summary = {
   peers: [{ name: "vector", ...zero, comm: 3, learn: 1 }],
 };
 
-function mockApi() {
+function mockApi(best = { source: "declared", label: "Lab" }) {
   vi.mocked(api).mockReset();
   vi.mocked(api).mockImplementation(async (path) => {
     if (path === "/admin/profile/summary") return summary;
@@ -27,7 +27,7 @@ function mockApi() {
     if (path === "/admin/members") return { members: [
       { id: "1", name: "z3-r0", kind: "robot", status: "active", memory_generation: 2, last_seen_at: null }] };
     if (path === "/admin/swarms") return [{ name: "echo-base", members: [{ name: "z3-r0", role: "member" }] }];
-    if (path === "/admin/locations") return { members: [{ name: "z3-r0", best: { source: "declared", label: "Lab" } }] };
+    if (path === "/admin/locations") return { members: [{ name: "z3-r0", best }] };
     throw new Error(`unexpected ${path}`);
   });
 }
@@ -81,6 +81,23 @@ describe("Profile page", () => {
     expect(screen.getByRole("group", { name: "Legend" })).toBeDefined();
     expect(screen.getByRole("link", { name: "Swarm" }).getAttribute("href")).toContain("/swarms/echo-base/profile");
     expect(screen.getByText(/memory wipe · gen 2/)).toBeDefined();
+  });
+
+  it("shows the address behind a network estimate as a second line (#399)", async () => {
+    mockApi({ source: "network", label: "Example City", ip: "203.0.113.7", ip_seen_at: "2026-11-14T10:00:00Z",
+      via_hub: "hub-1" });
+    renderAt("/members/z3-r0/profile");
+    const ip = await screen.findByText("203.0.113.7");
+    expect(ip.className).toContain("hash");
+    expect(ip.getAttribute("title")).toMatch(/^last seen /);
+    expect(ip.parentElement.textContent).toBe("from 203.0.113.7, via hub-1");
+  });
+
+  it("shows no address for a declared location", async () => {
+    mockApi({ source: "declared", label: "Lab", ip: "203.0.113.7" });
+    renderAt("/members/z3-r0/profile");
+    await screen.findByText("Lab");
+    expect(screen.queryByText("203.0.113.7")).toBeNull();
   });
 
   it("keeps the tab and range in the URL", async () => {
