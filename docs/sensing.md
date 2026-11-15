@@ -81,6 +81,25 @@ new frame that is never joined to the last. Tags `telemetry`, `pose` (never
 
 The profile's **Choreography** section draws these, one panel per frame.
 
+The same robot's body, one sensed record per sensor group per window (tags
+`telemetry`, `body`). A group with several channels has an object per sample;
+`stats` per channel:
+
+```json
+{"kind": "sensor", "sensor": "wheels", "modality": "encoder", "unit": "mm/s",
+ "samples": [{"t": 0.0, "v": {"left": 41.2, "right": 40.8}}, {"t": 1.0, "v": {"left": 0.0, "right": 0.0}}],
+ "stats": {"count": 2, "left": {"min": 0.0, "max": 41.2, "mean": 20.6}, "right": {"min": 0.0, "max": 40.8, "mean": 20.4}}}
+```
+
+Its battery and charging go in a separate self-report (tags `internal`,
+`telemetry`, `body-health`), so they're not counted as sensing.
+
+**Body states are episodes**, not a record per flag flip: one `event` tagged
+`episode-start` and one tagged `episode-end`, plus the state (`held`, `cliff`,
+`animating`, …). The end refs the start and carries the duration:
+`refs: {"start": "robot-1:57"}`, payload `{"state": "held", "flags":
+["is_being_held", "is_picked_up"], "duration_s": 6.2}`.
+
 **Send features extracted from images or audio, not the media.** Raw media
 (image bytes, audio) is not telemetry; send what the member extracted from it
 (`image-features`, `sound-level`), with the media kept on the device.
