@@ -19,6 +19,7 @@ export const GROUPS = [
   {
     key: "analyze", label: "Analyze", help: NAV_ANALYZE, collapsible: false,
     items: [
+      { to: "/health", label: "Health" },
       { to: "/volume", label: "Volume" },
       { to: "/outcomes", label: "Outcomes" },
       { to: "/lessons", label: "Lessons & policies" },
