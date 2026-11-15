@@ -1,3 +1,4 @@
+from server.models.attention import AttentionSnooze
 from server.models.audit import AuditLog
 from server.models.auth import AdminSession, AdminUser, AuthChallenge, Token
 from server.models.base import Base
@@ -17,6 +18,7 @@ from server.models.swarm import RecordProvenance, Swarm, SwarmMember
 __all__ = [
     "AdminSession",
     "AdminUser",
+    "AttentionSnooze",
     "AuditLog",
     "AuthChallenge",
     "Base",

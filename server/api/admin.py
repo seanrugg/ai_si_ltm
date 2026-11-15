@@ -111,16 +111,48 @@ async def nav_status(request: Request, directives_seen: str | None = None, admin
     doesn't extend the idle timeout (#378)."""
     from server.services import nav_status as nav_service
 
-    since = None
-    if directives_seen:
-        try:
-            since = datetime.fromisoformat(directives_seen.replace("Z", "+00:00"))
-        except ValueError:
-            raise ServiceError(422, "bad_time", "directives_seen must be an ISO 8601 time") from None
-        if since.tzinfo is None:
-            since = since.replace(tzinfo=timezone.utc)
+    since = _directives_seen(directives_seen)
     async with transaction(request) as session:
         return await nav_service.status(session, request.app.state.config, directives_seen=since)
+
+
+def _directives_seen(value: str | None) -> datetime | None:
+    """``directives_seen`` (ISO time) as an aware datetime, or None."""
+    if not value:
+        return None
+    try:
+        since = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise ServiceError(422, "bad_time", "directives_seen must be an ISO 8601 time") from None
+    return since if since.tzinfo else since.replace(tzinfo=timezone.utc)
+
+
+# Overview's "Needs attention" (#380). Counts come from nav-status, so badges and
+# Overview agree; pass the same ``directives_seen``. Snoozes are per admin.
+@router.get("/admin/attention")
+async def attention_view(request: Request, directives_seen: str | None = None, admin: AdminAuth = ADMIN) -> dict:
+    from server.services import attention
+
+    since = _directives_seen(directives_seen)
+    async with transaction(request) as session:
+        return await attention.view(session, request.app.state, request.app.state.config, admin.id,
+                                    directives_seen=since)
+
+
+@router.post("/admin/attention/snooze")
+async def attention_snooze(request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    from server.services import attention
+
+    async with transaction(request) as session:
+        return await attention.snooze(session, admin.id, str(body.get("key") or ""))
+
+
+@router.delete("/admin/attention/snooze/{key:path}")
+async def attention_unsnooze(key: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    from server.services import attention
+
+    async with transaction(request) as session:
+        return await attention.unsnooze(session, admin.id, key)
 
 
 # --------------------------------------------------------------------------- #
@@ -1188,7 +1220,11 @@ async def integrity_view(request: Request, member: str | None = None, admin: Adm
             if m is None:
                 raise ServiceError(404, "not_found", "member not found")
             return {"members": [await integrity.verify_member(session, m)]}
-        return {"members": await integrity.verify_all(session)}
+        reports = await integrity.verify_all(session)
+        from server.services import attention  # Overview reuses this check (#380)
+
+        attention.remember_integrity(request.app.state, reports)
+        return {"members": reports}
 
 
 @router.get("/admin/recall-log")

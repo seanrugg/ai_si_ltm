@@ -170,6 +170,17 @@ CREATE TABLE admin_sessions (
 	FOREIGN KEY(admin_id) REFERENCES admin_users (id)
 );
 
+CREATE TABLE attention_snoozes (
+	id UUID NOT NULL, 
+	admin_id UUID NOT NULL, 
+	item_key VARCHAR(200) NOT NULL, 
+	until TIMESTAMP WITH TIME ZONE NOT NULL, 
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_attention_snoozes_admin_item UNIQUE (admin_id, item_key), 
+	FOREIGN KEY(admin_id) REFERENCES admin_users (id) ON DELETE CASCADE
+);
+
 CREATE TABLE audit_log (
 	id BIGSERIAL NOT NULL, 
 	ts TIMESTAMP WITH TIME ZONE NOT NULL, 
