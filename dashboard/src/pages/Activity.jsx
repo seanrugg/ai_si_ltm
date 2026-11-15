@@ -159,7 +159,7 @@ export default function Activity() {
 
   return (
     <>
-      <PageHeader title="Activity">
+      <PageHeader title="Overview">
         <form
           onSubmit={(e) => e.preventDefault()}
           className="mb-4 flex flex-wrap items-end gap-3"

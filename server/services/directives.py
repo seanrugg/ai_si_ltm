@@ -173,6 +173,27 @@ async def acknowledgements(session, directives_: list[Directive]) -> dict[str, d
     return out
 
 
+async def declines_since(session, since: datetime | None) -> int:
+    """Members whose latest answer to a directive is a decline sent after
+    ``since`` (all of them when None). For the nav badge (#379): "declines since
+    you last looked". A decline later replaced by an accept isn't counted."""
+    from server.models import Record
+    from server.services import recall
+
+    stmt = select(Record).where(Record.type == "communication",
+                                recall._json_list_contains(session, Record.tags, ACK_TAG))
+    if since is not None:
+        stmt = stmt.where(Record.received_at > since)
+    rows = list(await session.scalars(stmt.order_by(Record.id)))
+    payloads = await recall.fetch_payloads(session, rows)
+    latest: dict[tuple[str, str], str] = {}
+    for r in rows:
+        body = getattr(payloads.get(r.id), "body", None) or {}
+        if body.get("directive") and body.get("status") in ("accepted", "declined"):
+            latest[(body["directive"], r.agent)] = body["status"]
+    return sum(1 for v in latest.values() if v == "declined")
+
+
 async def list_all(session, limit: int = 100) -> list[dict]:
     rows = list(await session.scalars(select(Directive).order_by(Directive.issued_at.desc()).limit(limit)))
     acks = await acknowledgements(session, rows)
