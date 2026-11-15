@@ -6,6 +6,14 @@ the payload. It doesn't summarise, filter for meaning, or invent. The one
 exception is body state, folded into a fixed statistical window (min/max/last
 every 30 s), which is arithmetic, not judgement.
 
+Pose is sensing, not a self-report: each window's pose goes into its own sensed
+record (`kind: pose`, tags `telemetry,pose`, never `internal`), one per frame,
+with a sample at most every second and only when the robot moved more than
+5 mm or 2° (the window's last sample is always kept). A window in which nothing
+moved has no pose record. Vector's odometry restarts when he's picked up, so
+each pose origin is its own frame (`vector-odom:<origin id>`), never joined to
+the last. The dashboard draws these under **Choreography**.
+
 A robot that can't run the LTMS harness itself joins as a **proxied member**:
 this sidecar runs on a nearby host, holds the **robot's** key, and signs as the
 robot. It's a member like any other (`cli_agent.member_main`), so it uses the
@@ -18,7 +26,7 @@ the sidecar records what happens like any other event.
 | Adapter | Reads | Records |
 |---|---|---|
 | `wirepod` | a wire-pod server's UI and debug logs (`/api/get_logs`, `/api/get_debug_logs`) | what it heard and the intent matched (`perception`), intent parameters, custom intents and LLM requests (`event`), LLM replies (`communication`) |
-| `vector_sdk` | the robot's SDK event stream (`wirepod_vector_sdk`), watching only | wake word, user intents, faces (`event` / `perception`), status flags turning on/off (picked up, held, cliff, charger, charging, falling, button) and touch (`event`), body state (one `internal,telemetry,body` record per window) |
+| `vector_sdk` | the robot's SDK event stream (`wirepod_vector_sdk`), watching only | wake word, user intents, faces (`event` / `perception`), status flags turning on/off (picked up, held, cliff, charger, charging, falling, button) and touch (`event`), pose (one sensed `telemetry,pose` record per window and frame, `kind: pose`, frame `vector-odom:<origin id>`), body state without the pose (one `internal,telemetry,body` record per window) |
 
 Each adapter's module docstring lists the exact source lines and SDK names it
 was written against (wire-pod commit `dc6ae0c`, `wirepod_vector_sdk` 0.8.1),
@@ -55,4 +63,4 @@ from `SIDECAR_COGNITION_MODELS`), so the profile shows the robot as **Hybrid**.
 
 `pytest examples/robot-sidecar/tests` (also run by the main `pytest`):
 each event type is exactly one record of the right type, body state is one
-record per window, and the sidecar signs nothing an adapter didn't produce.
+record per window, pose is one sensed record per window and frame, and the sidecar signs nothing an adapter didn't produce.

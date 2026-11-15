@@ -1,5 +1,5 @@
 // Pure helpers for the member and swarm profile pages (issues #192-#198).
-import { CATEGORIES } from "./visual.js";
+import { CATEGORIES, kindOf } from "./visual.js";
 
 export const RANGES = [
   { key: "24h", label: "24h", hours: 24 },
@@ -149,6 +149,58 @@ export function poseSamples(records) {
   return out.sort((a, b) => a.ts.localeCompare(b.ts));
 }
 
+/**
+ * A member with a body (#407): Physical AI, or Hybrid with `kind robot`.
+ * AI agents and hubs have no body, so they get no Choreography.
+ */
+export function hasBody(member) {
+  if (!member) return false;
+  const k = kindOf(member);
+  return k === "physical" || (k === "hybrid" && member.kind === "robot");
+}
+
+/**
+ * Pose tracks (#407): one per member and frame, newest first. A frame is the
+ * member's own (e.g. odometry that restarts when the robot is picked up), so
+ * two frames are never joined. Each track's samples are oldest first;
+ * `newFrame` is true when the member had an older frame before this one.
+ */
+export function poseFrames(records) {
+  const byKey = new Map();
+  for (const r of records || []) {
+    const p = r.payload;
+    if (!p || p.kind !== "pose") continue;
+    const frame = p.frame || "frame";
+    const key = `${r.agent}\u0000${frame}`;
+    if (!byKey.has(key)) byKey.set(key, { key, agent: r.agent, frame, unit: p.unit || null, samples: [] });
+    const track = byKey.get(key);
+    for (const s of p.samples || []) {
+      const x = s.x ?? s.v?.x;
+      const y = s.y ?? s.v?.y;
+      if (typeof x !== "number" || typeof y !== "number") continue;
+      const t = typeof s.t === "number" ? s.t : 0;
+      track.samples.push({ ts: new Date(Date.parse(r.ts) + t * 1000).toISOString(), x, y });
+    }
+  }
+  const tracks = [...byKey.values()].filter((t) => t.samples.length);
+  for (const t of tracks) {
+    t.samples.sort((a, b) => a.ts.localeCompare(b.ts));
+    t.start = t.samples[0].ts;
+    t.end = t.samples[t.samples.length - 1].ts;
+  }
+  tracks.sort((a, b) => b.end.localeCompare(a.end));
+  for (const t of tracks) t.newFrame = tracks.some((o) => o !== t && o.agent === t.agent && o.end <= t.start);
+  return tracks;
+}
+
+/** A round scale-bar length (1, 2 or 5 × 10^n) of about `target` data units. */
+export function niceLength(target) {
+  if (!(target > 0)) return 1;
+  const p = 10 ** Math.floor(Math.log10(target));
+  const m = target / p;
+  return (m >= 5 ? 5 : m >= 2 ? 2 : 1) * p;
+}
+
 /** Action records whose payload carries a pose ({pose: {x, y}} or top-level x, y). */
 export function actionPoses(records) {
   const out = [];
@@ -157,7 +209,8 @@ export function actionPoses(records) {
     const x = p.pose?.x ?? p.x;
     const y = p.pose?.y ?? p.y;
     if (typeof x === "number" && typeof y === "number") {
-      out.push({ agent: r.agent, ts: r.ts, x, y, outcome: r.outcome, summary: r.summary });
+      const frame = p.pose?.frame ?? p.frame;
+      out.push({ agent: r.agent, ts: r.ts, x, y, outcome: r.outcome, summary: r.summary, ...(frame ? { frame } : {}) });
     }
   }
   return out;
