@@ -92,3 +92,10 @@ export const DIRECTIVES_ABOUT = "A directive is signed with this fleet's key and
 export const DIRECTIVE_CONFIRM = "Members follow directives by default.";
 
 export const SPECS_ABOUT = "What the device reports about itself (hardware, models, software), with any field an admin corrected. Each value says which. Not a record: not signed or sent to the LRS.";
+
+// Navigation groups (#379): one line each.
+export const NAV_OPERATE = "Daily fleet work: what members are doing and saying, and the instructions you give them.";
+export const NAV_ANALYZE = "How the fleet is behaving: volume, outcomes, what it has learned, and whether its chains verify.";
+export const NAV_GOVERN = "Rules and records: the charter, the audit log, how long data is kept, and exports.";
+export const NAV_CONFIGURE = "Set once, revisit rarely: server settings, MCP access, LRS endpoints and datasets.";
+export const GET_STARTED = "Steps to set up a new fleet. Each ticks itself when it's done; the list goes away once the required ones are.";

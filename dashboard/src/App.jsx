@@ -67,37 +67,46 @@ function RequireAdmin() {
   );
 }
 
+// Home is Overview (#379). Timeline moved to /timeline; old Timeline links
+// (`/?agent=…`, `/?swarm=…`) keep their query string and go there.
+export function Home() {
+  const { search } = useLocation();
+  return <Navigate to={search ? `/timeline${search}` : "/activity"} replace />;
+}
+
+// The signed-in pages, exported for route tests.
+export const PAGE_ROUTES = [
+  { path: "/", element: <Home /> },
+  { path: "/timeline", element: <Timeline /> },
+  { path: "/activity", element: <Activity /> },
+  { path: "/overview", element: <Navigate to="/activity" replace /> },
+  { path: "/lrs", element: <Lrs /> },
+  { path: "/access", element: <Access /> },
+  { path: "/members", element: <Members /> },
+  { path: "/integrity", element: <Integrity /> },
+  { path: "/retention", element: <Retention /> },
+  { path: "/volume", element: <Volume /> },
+  { path: "/swarms", element: <Swarms /> },
+  { path: "/datasets", element: <Datasets /> },
+  { path: "/charter", element: <Charter /> },
+  { path: "/members/:name/profile", element: <Profile key="member" subject="member" /> },
+  { path: "/swarms/:name/profile", element: <Profile key="swarm" subject="swarm" /> },
+  { path: "/record/:agent/:seq", element: <RecordPage /> },
+  { path: "/conversation", element: <Conversation /> },
+  { path: "/directives", element: <Directives /> },
+  { path: "/decision-trace/:agent/:seq", element: <DecisionTrace /> },
+  { path: "/outcomes", element: <Outcomes /> },
+  { path: "/lessons", element: <Lessons /> },
+  { path: "/audit-log", element: <RecallLog /> },
+  { path: "/recall-log", element: <Navigate to="/audit-log" replace /> },
+  { path: "/export", element: <Export /> },
+  { path: "/settings", element: <Settings /> },
+  { path: "*", element: <Navigate to="/" replace /> },
+];
+
 const router = createHashRouter([
   { path: "/login", element: <Login /> },
-  {
-    element: <RequireAdmin />,
-    children: [
-      { path: "/", element: <Timeline /> },
-      { path: "/activity", element: <Activity /> },
-      { path: "/lrs", element: <Lrs /> },
-      { path: "/access", element: <Access /> },
-      { path: "/members", element: <Members /> },
-      { path: "/integrity", element: <Integrity /> },
-      { path: "/retention", element: <Retention /> },
-      { path: "/volume", element: <Volume /> },
-      { path: "/swarms", element: <Swarms /> },
-      { path: "/datasets", element: <Datasets /> },
-      { path: "/charter", element: <Charter /> },
-      { path: "/members/:name/profile", element: <Profile key="member" subject="member" /> },
-      { path: "/swarms/:name/profile", element: <Profile key="swarm" subject="swarm" /> },
-      { path: "/record/:agent/:seq", element: <RecordPage /> },
-      { path: "/conversation", element: <Conversation /> },
-      { path: "/directives", element: <Directives /> },
-      { path: "/decision-trace/:agent/:seq", element: <DecisionTrace /> },
-      { path: "/outcomes", element: <Outcomes /> },
-      { path: "/lessons", element: <Lessons /> },
-      { path: "/audit-log", element: <RecallLog /> },
-      { path: "/recall-log", element: <Navigate to="/audit-log" replace /> },
-      { path: "/export", element: <Export /> },
-      { path: "/settings", element: <Settings /> },
-      { path: "*", element: <Navigate to="/" replace /> },
-    ],
-  },
+  { element: <RequireAdmin />, children: PAGE_ROUTES },
 ]);
 
 export default function App() {
