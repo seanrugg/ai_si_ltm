@@ -1,11 +1,20 @@
-// Profile Interactions tab: members as neurons, data categories as threads (issue #194).
-import { useState } from "react";
+// Profile Topology tab (was Interactions): the star system (#404). The hub is
+// the star, members are planets, their senses moons, and every record travels
+// to the LTMS pyramid. The table twin holds Paths, By source, Members and the
+// earlier neuron graph (#194) as "Exchanges".
+import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { useApi } from "../../api/useApi.js";
+import { api } from "../../api/client.js";
+import VizFrame, { HoloTable } from "../../components/VizFrame.jsx";
 import { ErrorNote, Loading } from "../../components/ui.jsx";
 import { CategoryLine, KIND_PATHS, KindIcon } from "../../components/visual.jsx";
 import { dendrites, layout, strands } from "../../lib/synapse.js";
 import { CATEGORIES, KINDS, RELAY, ROLES, category, kindOf } from "../../lib/visual.js";
+import { heartbeatBpm } from "../../lib/light.js";
+import { createReplayClock } from "../../lib/replay.js";
+import { relativeTime } from "../../lib/format.js";
+import { buildScene, memberRows, noteHz, pathRows, sourceRows, touchList } from "../../lib/topology.js";
+import SystemView from "./SystemView.jsx";
 
 const W = 640;
 const H = 480;
@@ -86,10 +95,10 @@ function SidePanel({ node, subjectName, edges }) {
   );
 }
 
-export default function Interactions({ subject, name, range }) {
+/** Exchanges: the earlier neuron graph (#194), now a section of the table twin. */
+export function Exchanges({ subject, name, graph }) {
   const [params, setParams] = useSearchParams();
   const [asTable, setAsTable] = useState(false);
-  const graph = useApi("/admin/profile/graph", { [subject]: name, hours: range.hours });
   const selected = params.get("peer");
   function select(peer) {
     setParams((prev) => {
@@ -99,7 +108,7 @@ export default function Interactions({ subject, name, range }) {
     }, { replace: true });
   }
 
-  if (graph.loading && !graph.data) return <Loading what="Loading interactions" />;
+  if (graph.loading && !graph.data) return <Loading what="Loading exchanges" />;
   if (graph.error) return <ErrorNote error={graph.error} onRetry={graph.reload} />;
   const { nodes = [], edges = [], relays = [] } = graph.data || {};
   const { positions } = layout(nodes, { type: subject, name }, { width: W, height: H });
@@ -107,10 +116,10 @@ export default function Interactions({ subject, name, range }) {
   const selectedNode = nodes.find((n) => n.name === selected) || null;
 
   return (
-    <section aria-labelledby="interactions-h">
+    <section aria-labelledby="exchanges-h">
       <style>{STYLE}</style>
       <div className="mb-2 flex items-center justify-between">
-        <h2 id="interactions-h" className="text-lg font-bold">Interactions</h2>
+        <h3 id="exchanges-h" className="text-lg font-bold">Exchanges</h3>
         <button type="button" className="btn" aria-pressed={asTable} onClick={() => setAsTable((v) => !v)}>
           {asTable ? "View as map" : "View as table"}
         </button>
@@ -179,5 +188,183 @@ export default function Interactions({ subject, name, range }) {
         Each thread is one data type. More threads = more traffic. Gray = relay path.
       </p>
     </section>
+  );
+}
+
+// ---------------------------------------------------------------- Topology
+
+const DAY_MS = 24 * 3600_000;
+const ALL_DAYS = 365; // "All": the episodes API reads at most 366 days
+const MAX_SHOWN = 24; // members whose records are fetched on a swarm profile
+const LIVE_RELOAD_MS = 60_000;
+
+/** [since, until] in epoch ms for a profile range ({hours}, 0 = all). */
+export function rangeSpan(range, now = Date.now()) {
+  const hours = range?.hours > 0 ? range.hours : ALL_DAYS * 24;
+  return [now - Math.min(hours * 3600_000, ALL_DAYS * DAY_MS), now];
+}
+
+/** The swarm a profile shows: the swarm itself, or the member's swarm. */
+export function swarmFor(subject, name, swarms) {
+  const list = swarms || [];
+  if (subject === "swarm") return list.find((s) => s.name === name) ?? null;
+  return list.find((s) => (s.members || []).some((m) => m.name === name)) ?? null;
+}
+
+/** The roster: the swarm's members with their admin rows merged in (or the member alone). */
+export function rosterFor(subject, name, swarm, members) {
+  const rows = Object.fromEntries((members || []).map((m) => [m.name, m]));
+  if (swarm) return (swarm.members || []).map((sm) => ({ ...rows[sm.name], name: sm.name, role: sm.role }));
+  return subject === "member" ? [{ ...rows[name], name, role: null }] : [];
+}
+
+function useTopologyData({ subject, name, range, swarm, roster, reloadKey }) {
+  const [state, setState] = useState({ loading: true, error: null, episodes: {}, network: [], models: {}, graph: null });
+  const names = roster.map((m) => m.name);
+  const shown = subject === "member" ? [name] : names.slice(0, MAX_SHOWN);
+  const ids = roster.filter((m) => m.id).map((m) => [m.name, m.id]);
+  const key = JSON.stringify([subject, name, range.hours, swarm?.name ?? null, shown, ids, reloadKey]);
+  useEffect(() => {
+    let live = true;
+    const [since, until] = rangeSpan(range);
+    const iso = (t) => new Date(t).toISOString();
+    const optional = (p) => p.catch(() => null);
+    setState((s) => ({ ...s, loading: true, error: null }));
+    Promise.all([
+      Promise.all(shown.map((m) => api("/admin/profile/episodes",
+        { params: { member: m, since: iso(since), until: iso(until) } }).then((d) => [m, d]))),
+      optional(api("/admin/network", { params: swarm ? { swarm: swarm.name } : { member: name } })),
+      Promise.all(ids.map(([m, id]) => optional(api(`/admin/members/${encodeURIComponent(id)}/specs`))
+        .then((d) => [m, d?.specs?.models?.value ?? []]))),
+      optional(api("/admin/profile/graph", { params: { [subject]: name, hours: range.hours } })),
+    ]).then(([eps, network, models, graph]) => {
+      if (!live) return;
+      setState({
+        loading: false, error: null, since, until,
+        episodes: Object.fromEntries(eps), network: network?.members ?? [],
+        models: Object.fromEntries(models), graph,
+      });
+    }).catch((error) => {
+      if (live) setState((s) => ({ ...s, loading: false, error }));
+    });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return state;
+}
+
+function lastSeen(ts) {
+  return ts ? relativeTime(ts) : "never";
+}
+
+let audio = null;
+/** One short, soft sine at `hz`: the touch note (sound on only). */
+function playNote(hz) {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    audio = audio || new AC();
+    const t0 = audio.currentTime;
+    const o = audio.createOscillator();
+    const g = audio.createGain();
+    o.type = "sine";
+    o.frequency.value = hz;
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(0.06, t0 + 0.04);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.2);
+    o.connect(g);
+    g.connect(audio.destination);
+    o.start(t0);
+    o.stop(t0 + 1.25);
+  } catch {
+    // no audio: the narration line says the same
+  }
+}
+
+export function TopologyTables({ scene, roster, t }) {
+  const paths = pathRows(scene, t);
+  const sources = sourceRows(scene);
+  const members = memberRows(scene, roster);
+  return (
+    <div className="space-y-4">
+      <HoloTable caption="Paths" rows={paths}
+                 columns={[{ key: "from", label: "From" }, { key: "through", label: "Through" },
+                   { key: "to", label: "To" }, { key: "records", label: "Records up to the hand", numeric: true }]} />
+      {paths.length === 0 && <p className="text-sm text-paper-muted">Nothing has arrived up to the hand.</p>}
+      <HoloTable caption="By source" rows={sources}
+                 columns={[{ key: "member", label: "Member" },
+                   { key: "label", label: "Source", render: (r) => (r.moon ? `${r.label} (moon)` : r.label) },
+                   { key: "records", label: "Records in range", numeric: true }]} />
+      <HoloTable caption="Members" rows={members}
+                 columns={[{ key: "name", label: "Name" },
+                   { key: "role", label: "Role", render: (r) => ROLES[r.role]?.label ?? r.role },
+                   { key: "kind", label: "Kind", render: (r) => KINDS[kindOf(r)]?.label ?? "" },
+                   { key: "hub", label: "Home hub" },
+                   { key: "lastSeen", label: "Last seen", render: (r) => lastSeen(r.lastSeen) }]} />
+    </div>
+  );
+}
+
+export default function Topology({ subject, name, range, members, swarms }) {
+  const [params] = useSearchParams();
+  const [reloadKey, setReloadKey] = useState(0);
+  const [selected, setSelected] = useState(null);
+  const [sound, setSound] = useState({ on: false, calm: false });
+  const swarm = swarmFor(subject, name, swarms);
+  const roster = useMemo(() => rosterFor(subject, name, swarm, members), [subject, name, swarm, members]);
+  const data = useTopologyData({ subject, name, range, swarm, roster, reloadKey });
+
+  const [clock] = useState(() => {
+    const [since, until] = rangeSpan(range);
+    return createReplayClock({ start: since, end: until });
+  });
+  useEffect(() => {
+    if (data.since != null) clock.setRange(data.since, data.until);
+  }, [clock, data.since, data.until]);
+  // Live: fetch again now and then so new records join the system.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (clock.getState().mode === "live") setReloadKey((k) => k + 1);
+    }, LIVE_RELOAD_MS);
+    return () => clearInterval(id);
+  }, [clock]);
+
+  const scene = useMemo(() => buildScene({
+    roster, network: data.network, episodes: data.episodes, models: data.models,
+    focus: subject === "member" ? name : null,
+  }), [roster, data.network, data.episodes, data.models, subject, name]);
+  const edges = data.graph?.edges;
+  const touchables = touchList(scene, {
+    bpm: (p) => (p.heartbeat?.interval_s ? heartbeatBpm(p.heartbeat.interval_s) : null),
+  }).map((item) => ({
+    ...item,
+    onTouch: () => {
+      setSelected(item.id);
+      if (sound.on && !sound.calm) playNote(noteHz(item.degree));
+    },
+  }));
+  const graph = { data: data.graph, loading: data.loading && !data.graph, error: null, reload: () => setReloadKey((k) => k + 1) };
+
+  if (data.loading && !Object.keys(data.episodes).length && !data.error) return <Loading what="Loading the topology" />;
+  return (
+    <>
+      <ErrorNote error={data.error} onRetry={() => setReloadKey((k) => k + 1)} />
+      {data.since != null && (
+        <VizFrame title="Topology" clock={clock} touchables={touchables} defaultCalm={params.get("peer") ? true : undefined}
+                  onSoundChange={(on) => setSound((s) => ({ ...s, on }))}
+                  onCalmChange={(calm) => setSound((s) => ({ ...s, calm }))}
+                  renderTable={(frame) => (
+                    <>
+                      <TopologyTables scene={scene} roster={roster} t={frame.t} />
+                      <div className="mt-4"><Exchanges subject={subject} name={name} graph={graph} /></div>
+                    </>
+                  )}>
+          {(frame) => <SystemView scene={scene} frame={frame} edges={edges} selected={selected} />}
+        </VizFrame>
+      )}
+      {scene.events.length === 0 && !data.loading && (
+        <p className="mt-2 text-sm text-paper-muted">Nothing has arrived in this range.</p>
+      )}
+    </>
   );
 }

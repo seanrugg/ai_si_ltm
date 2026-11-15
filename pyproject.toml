@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "aiosqlite>=0.20"]
+dev = ["pytest>=8.0", "pytest-xdist>=3.5", "aiosqlite>=0.20"]  # xdist: CI runs pytest -n auto (#389)
 hub = ["paho-mqtt>=2,<3"]  # Jetson hub entrypoint: cli_agent.hub_main
 mcp = ["mcp>=2,<3"]  # ltms_mcp uses MCPServer, added in mcp 2.0
 geo = []  # kept so `pip install "ltms[geo]"` still works; maxminddb is a base dependency since #388

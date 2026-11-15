@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
-import LocationForm, { locationBody } from "./LocationForm.jsx";
+import LocationForm, { accuracyText, locationBody } from "./LocationForm.jsx";
 import { api } from "../api/client.js";
 
 vi.mock("../api/client.js", () => ({ api: vi.fn() }));
@@ -66,5 +66,72 @@ describe("LocationForm", () => {
 
   it("locationBody turns blanks into nulls", () => {
     expect(locationBody({ label: " A ", room: " ", lat: "", lon: "" })).toEqual({ label: "A", room: null, lat: null, lon: null });
+  });
+
+  // #399: estimates on the Members row.
+  const NET = { source: "network", label: "Example City, Example Country", lat: 1, lon: 2, accuracy_km: 20,
+    ip: "203.0.113.7", ip_seen_at: "2026-11-14T10:00:00Z" };
+
+  it("shows a network estimate with its address, the hub, and accuracy on hover", () => {
+    const { container } = render(React.createElement(LocationForm, { subjectType: "member", name: "z3-r0",
+      current: null, estimate: { ...NET, via_hub: "hub-1" } }));
+    expect(screen.getByText("Example City, Example Country").getAttribute("title")).toBe("±20 km");
+    const ip = screen.getByText("203.0.113.7");
+    expect(ip.className).toContain("hash");
+    expect(ip.getAttribute("title")).toMatch(/^last seen /);
+    expect(container.textContent).toContain("(network estimate · 203.0.113.7, via hub-1)");
+    expect(container.textContent).not.toContain("declared");
+    expect(container.textContent).not.toContain("not set");
+  });
+
+  it("says when the address is no longer kept, and shows no address for gps", () => {
+    const { container, unmount } = render(React.createElement(LocationForm, { subjectType: "member", name: "z3-r0",
+      current: null, estimate: { ...NET, ip: undefined, ip_seen_at: undefined } }));
+    expect(container.textContent).toContain("(network estimate · address no longer kept)");
+    unmount();
+    const gps = render(React.createElement(LocationForm, { subjectType: "member", name: "z3-r0", current: null,
+      estimate: { source: "gps", label: "GPS fix", lat: 1, lon: 2, accuracy_km: 0.008 } }));
+    expect(gps.container.textContent).toContain("GPS fix (gps)");
+    expect(screen.getByText("GPS fix").getAttribute("title")).toBe("±8 m");
+  });
+
+  it("a declared or inherited location wins over an estimate, with no address", () => {
+    const { container, unmount } = render(React.createElement(LocationForm, { subjectType: "member", name: "z3-r0",
+      current: { label: "Lab", room: null }, estimate: NET }));
+    expect(screen.getByText("Lab")).toBeDefined();
+    expect(container.textContent).not.toContain("203.0.113.7");
+    unmount();
+    const inh = render(React.createElement(LocationForm, { subjectType: "member", name: "z3-r0", current: null,
+      inherited: { label: "Home", inherited_from: "swarm echo-base" }, estimate: NET }));
+    expect(screen.getByText("Home (from swarm echo-base)")).toBeDefined();
+    expect(inh.container.textContent).not.toContain("203.0.113.7");
+  });
+
+  it("credits DB-IP only with attribution, and only for a network estimate", () => {
+    const geo = { attribution: true, credit_url: "https://db-ip.com" };
+    const { unmount } = render(React.createElement(LocationForm, { subjectType: "member", name: "a", current: null,
+      estimate: NET, geo }));
+    expect(screen.getByText("IP geolocation by DB-IP")).toBeDefined();
+    unmount();
+    const off = render(React.createElement(LocationForm, { subjectType: "member", name: "a", current: null,
+      estimate: NET, geo: { attribution: false } }));
+    expect(screen.queryByText("IP geolocation by DB-IP")).toBeNull();
+    off.unmount();
+    render(React.createElement(LocationForm, { subjectType: "member", name: "a", current: { label: "Lab" },
+      estimate: NET, geo }));
+    expect(screen.queryByText("IP geolocation by DB-IP")).toBeNull();
+  });
+
+  it("with nothing at all says not set and why", () => {
+    render(React.createElement(LocationForm, { subjectType: "member", name: "a", current: null,
+      unplaced: "It has never connected to LTMS directly." }));
+    expect(screen.getByText("not set")).toBeDefined();
+    expect(screen.getByText("It has never connected to LTMS directly.")).toBeDefined();
+  });
+
+  it("accuracyText", () => {
+    expect(accuracyText(20)).toBe("±20 km");
+    expect(accuracyText(0.25)).toBe("±250 m");
+    expect(accuracyText(null)).toBeNull();
   });
 });

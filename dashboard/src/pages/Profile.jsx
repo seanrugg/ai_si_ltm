@@ -10,7 +10,7 @@ import ProxiedBadge from "../components/ProxiedBadge.jsx";
 import { localTime, relativeTime } from "../lib/format.js";
 import { DEFAULT_TAB, RANGES, nextTab, rangeOf, swarmCount, tabOf, tabsFor } from "../lib/profile.js";
 import { KINDS, NEUTRAL, ROLES, kindOf, roleOf } from "../lib/visual.js";
-import Overview from "./profile/Overview.jsx";
+import Overview, { HeartbeatValue } from "./profile/Overview.jsx";
 import Activity from "./profile/Activity.jsx";
 import History from "./profile/History.jsx";
 import Members from "./profile/Members.jsx";
@@ -24,7 +24,7 @@ import Senses from "./profile/Senses.jsx";
 export const SWARM_PATH = "M10 6a2 2 0 1 0 4 0a2 2 0 1 0-4 0 M3 18a2 2 0 1 0 4 0a2 2 0 1 0-4 0 M17 18a2 2 0 1 0 4 0a2 2 0 1 0-4 0 M11 7.8 6 16.2 M13 7.8l5 8.4 M7 18h10";
 
 // Tabs built so far; the rest say "Coming soon" until their issue merges.
-const TAB_VIEWS = { overview: Overview, members: Members, specs: Specs, manage: Manage, places: Places, interactions: Interactions, network: Network, chronology: Activity,
+const TAB_VIEWS = { overview: Overview, members: Members, specs: Specs, manage: Manage, places: Places, topology: Interactions, network: Network, chronology: Activity,
   senses: Senses, history: History };
 
 export function SwarmMark({ size = 40 }) {
@@ -175,6 +175,7 @@ export default function Profile({ subject }) {
         {member && (
           <div className="flex flex-wrap gap-6">
             <Fact label="Status"><StatusBadge status={member.status} /></Fact>
+            {summary.data?.self_report_interval_s != null && <Fact label="Heartbeat"><HeartbeatValue summary={summary.data} /></Fact>}
             <Fact label="Memory">
               {member.memory_generation > 0
                 ? `generation ${member.memory_generation}${wipes[0] ? `, last wiped ${relativeTime(wipes[0].ts)}` : ""}`
@@ -184,6 +185,12 @@ export default function Profile({ subject }) {
               <Fact label="Location">
                 {best.label || "unnamed"}{best.room ? `, ${best.room}` : ""}
                 <span className="text-paper-muted"> ({best.source})</span>
+                {best.source === "network" && best.ip && (
+                  <span className="block text-xs text-paper-muted">
+                    from <span className="hash" title={best.ip_seen_at ? `last seen ${localTime(best.ip_seen_at)}` : undefined}>{best.ip}</span>
+                    {best.via_hub ? `, via ${best.via_hub}` : ""}
+                  </span>
+                )}
               </Fact>
             )}
             <Fact label="Last seen">
