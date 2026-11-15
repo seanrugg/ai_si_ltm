@@ -95,3 +95,10 @@ export const SPECS_ABOUT = "What the device reports about itself (hardware, mode
 
 // #407: the room-level view under Geography's globe (#405; was Places & movement).
 export const CHOREOGRAPHY = "Choreography: where a member's body went, from its own pose readings, in its own frame.";
+
+// Navigation groups (#379): one line each.
+export const NAV_OPERATE = "Daily fleet work: what members are doing and saying, and the instructions you give them.";
+export const NAV_ANALYZE = "How the fleet is behaving: volume, outcomes, what it has learned, and whether its chains verify.";
+export const NAV_GOVERN = "Rules and records: the charter, the audit log, how long data is kept, and exports.";
+export const NAV_CONFIGURE = "Set once, revisit rarely: server settings, MCP access, LRS endpoints and datasets.";
+export const GET_STARTED = "Steps to set up a new fleet. Each ticks itself when it's done; the list goes away once the required ones are.";

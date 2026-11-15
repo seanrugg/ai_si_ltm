@@ -102,6 +102,27 @@ async def me(admin: AdminAuth = ADMIN) -> dict:
     return {"username": admin.username}
 
 
+@router.get("/admin/nav-status")
+async def nav_status(request: Request, directives_seen: str | None = None, admin: AdminAuth = ADMIN) -> dict:
+    """Badge counts and Get started progress for the dashboard nav (#379):
+    ``{as_of, members_pending, charter_overdue, directive_declines, lrs_failing, setup}``.
+    ``directives_seen`` (ISO time) limits declines to those sent after it. The
+    dashboard polls this in the background without ``X-LTMS-Activity``, so it
+    doesn't extend the idle timeout (#378)."""
+    from server.services import nav_status as nav_service
+
+    since = None
+    if directives_seen:
+        try:
+            since = datetime.fromisoformat(directives_seen.replace("Z", "+00:00"))
+        except ValueError:
+            raise ServiceError(422, "bad_time", "directives_seen must be an ISO 8601 time") from None
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=timezone.utc)
+    async with transaction(request) as session:
+        return await nav_service.status(session, request.app.state.config, directives_seen=since)
+
+
 # --------------------------------------------------------------------------- #
 # Admin session settings (issue #378)
 # --------------------------------------------------------------------------- #
