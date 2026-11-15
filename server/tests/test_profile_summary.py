@@ -143,3 +143,57 @@ def test_self_reports_are_not_sensing(mesh, admin):
     assert len(tl) == 3
     tl = admin.get("/api/admin/timeline", params={"agent": "jetson-hub", "type": "sensed"}).json()["records"]
     assert [r["summary"] for r in tl] == ["cpu temp"]
+
+
+def _beats(client, gaps_s, end=None):
+    """Self-reports spaced by ``gaps_s`` seconds, the last at ``end`` (default: a minute ago)."""
+    t = end or datetime.now(timezone.utc) - timedelta(minutes=1)
+    times = [t]
+    for g in reversed(gaps_s):
+        times.insert(0, times[0] - timedelta(seconds=g))
+    for ts in times:
+        client.append("perception", summary="heartbeat", tags=["telemetry", "internal"], ts=ts.isoformat())
+    client.flush()
+    return times
+
+
+def test_self_report_pulse_none(mesh, admin):
+    """No self-reports: no last time, no interval (#406)."""
+    _seed(mesh)
+    s = _summary(admin, member="z3-r0")
+    assert s["self_report_last"] is None and s["self_report_interval_s"] is None
+    assert "self_report_members" not in s
+
+
+def test_self_report_pulse_one(mesh, admin):
+    hub = mesh.member("hub-one", kind="relay")
+    times = _beats(hub, [])
+    s = _summary(admin, member="hub-one")
+    assert datetime.fromisoformat(s["self_report_last"]) == times[-1]
+    assert s["self_report_interval_s"] is None  # one report has no interval
+
+
+def test_self_report_pulse_six_uses_last_five(mesh, admin):
+    hub = mesh.member("hub-one", kind="relay")
+    # The oldest gap (900 s) is outside the last five reports; of the four gaps left the median is 30.
+    times = _beats(hub, [900, 20, 30, 30, 60])
+    hub.append("perception", summary="cpu temp", tags=["telemetry"])  # sensing, not a self-report
+    hub.flush()
+    s = _summary(admin, member="hub-one", hours=1)
+    assert s["flow"]["self_report"] == 6
+    assert datetime.fromisoformat(s["self_report_last"]) == times[-1]
+    assert s["self_report_interval_s"] == 30
+
+
+def test_self_report_pulse_swarm_members(mesh, admin, home):
+    a, b = mesh.member("z3-r0"), mesh.member("dx-1")
+    home.add(a)
+    home.add(b)
+    _beats(a, [30, 30])
+    s = _summary(admin, swarm="echo-base")
+    assert s["flow"]["self_report"] == 3
+    assert s["self_report_interval_s"] == 30
+    by_name = {m["name"]: m for m in s["self_report_members"]}
+    assert set(by_name) == {"z3-r0", "dx-1"}
+    assert by_name["z3-r0"]["interval_s"] == 30 and by_name["z3-r0"]["last"] is not None
+    assert by_name["dx-1"] == {"name": "dx-1", "last": None, "interval_s": None}
