@@ -1,20 +1,14 @@
-// Profile Overview tab: category tiles, activity trend, top peers (issue #192).
-import { useState } from "react";
+// Profile Overview tab: category tiles, self-report heartbeat (#406), activity trend, top peers (issue #192).
+import { useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import HelpTip from "../../components/HelpTip.jsx";
 import { COUNT_ACT, COUNT_COMM, COUNT_LEARN, COUNT_SELF_REPORT, COUNT_SENSE } from "../../lib/help.js";
 import { CategoryLine, MemberMark } from "../../components/visual.jsx";
 import { bucketIndex, dayTotal, niceMax, percent, stackDay, wipesOf } from "../../lib/profile.js";
-import { CATEGORIES, NEUTRAL } from "../../lib/visual.js";
+import { CATEGORIES, NEUTRAL, kindOf } from "../../lib/visual.js";
 import { memberWithRole } from "../Profile.jsx";
 
 const HELP = { sense: COUNT_SENSE, act: COUNT_ACT, comm: COUNT_COMM, learn: COUNT_LEARN };
-
-/** Self-reports (heartbeat, health) are counted apart from sensing (#348). */
-export function selfReportNote(summary) {
-  const n = summary?.flow?.self_report || 0;
-  if (!n) return null;
-  return `${n.toLocaleString()} self-report${n === 1 ? "" : "s"} (heartbeat, health) not counted here`;
-}
 
 const NOTES = {
   sense: () => "sensed and perceived records",
@@ -23,9 +17,147 @@ const NOTES = {
   learn: () => "lessons and policies",
 };
 
-function Tiles({ summary }) {
+// Self-reports (#406): the member's pulse gets its own tile, apart from Sensing (#348).
+export const SELF = { key: "self", label: "Self-reports", color: "#6aa8ff" }; // cat-self
+
+/**
+ * Sensing no longer carries a self-report footnote (#406): the Self-reports tile says it.
+ * Kept as a function so callers and tests have one place to ask.
+ */
+export function selfReportNote() {
+  return null;
+}
+
+/** Heart rate for the median self-report interval: 30 s or slower → 48 bpm, 10 s or faster → 60 (#406). */
+export function bpmOf(intervalS) {
+  if (intervalS == null || !(intervalS > 0)) return null;
+  return Math.round(Math.min(60, Math.max(48, 66 - 0.6 * intervalS)));
+}
+
+/** "12 s ago", "2 min ago", "3 h ago", "2 d ago". */
+export function agoText(seconds) {
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return `${s} s ago`;
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} d ago`;
+}
+
+/**
+ * The live heartbeat from the summary's ``self_report_last`` and ``self_report_interval_s``.
+ * state: "beating"; "slowing" when the last report is over 2 intervals old; "quiet" after
+ * 4 missed intervals; "reported" with one report (no interval to judge by); null with none.
+ */
+export function pulseOf(last, intervalS, now = Date.now()) {
+  if (!last) return null;
+  const age = Math.max(0, (now - Date.parse(last)) / 1000);
+  const bpm = bpmOf(intervalS);
+  let state = "reported";
+  if (bpm != null) state = age > 4 * intervalS ? "quiet" : age > 2 * intervalS ? "slowing" : "beating";
+  return { state, bpm, age };
+}
+
+/** The tile's live line: "beating · 48 bpm · last 12 s ago", "slowing · last 2 min ago", "quiet · last 9 min ago". */
+export function pulseText(p) {
+  if (!p) return "no self-reports yet";
+  const last = `last ${agoText(p.age)}`;
+  if (p.state === "beating") return `beating · ${p.bpm} bpm · ${last}`;
+  if (p.state === "reported") return last;
+  return `${p.state} · ${last}`;
+}
+
+/** The header's Heartbeat fact: "● 48 bpm", "slowing" or "quiet"; null when there is nothing to say. */
+export function heartbeatFact(p) {
+  if (!p || p.state === "reported") return null;
+  return p.state === "beating" ? `● ${p.bpm} bpm` : p.state;
+}
+
+/** Swarm: how many of its current members are beating now. */
+export function membersBeating(rows, now = Date.now()) {
+  const list = rows || [];
+  const n = list.filter((m) => pulseOf(m.last, m.interval_s, now)?.state === "beating").length;
+  return { n, m: list.length, text: `${n} of ${list.length} member${list.length === 1 ? "" : "s"} beating` };
+}
+
+/** Current time, ticking once a second, so "last 12 s ago" stays live. */
+export function useNow(ms = 1000) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), ms);
+    return () => clearInterval(t);
+  }, [ms]);
+  return now;
+}
+
+export function prefersReducedMotion() {
+  return typeof window !== "undefined" && !!window.matchMedia
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+const BEAT_STYLE = `
+@keyframes ltms-lubdub { 0% { transform: scale(1); } 10% { transform: scale(1.08); } 20% { transform: scale(1); }
+  30% { transform: scale(1.05); } 42%, 100% { transform: scale(1); } }
+.ltms-beat { animation: ltms-lubdub var(--beat, 1.25s) ease-out infinite; transform-origin: center; }
+@media (prefers-reduced-motion: reduce) { .ltms-beat { animation: none; } }`;
+
+/** A cat-self dot: lub-dub at the heart rate while beating, still with reduced motion, dimmed when quiet. */
+export function BeatDot({ pulse, size = 10 }) {
+  const beating = pulse?.state === "beating" && !prefersReducedMotion();
   return (
-    <ul className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Records by category">
+    <span aria-hidden="true" data-beat={beating ? "beating" : "still"}
+          className={`inline-block shrink-0 rounded-full ${beating ? "ltms-beat" : ""}`}
+          style={{ width: size, height: size, background: SELF.color,
+                   opacity: pulse?.state === "quiet" ? 0.35 : 1,
+                   ...(beating ? { "--beat": `${(60 / pulse.bpm).toFixed(3)}s` } : {}) }} />
+  );
+}
+
+/** The header's Heartbeat fact value, beside Status (#406). */
+export function HeartbeatValue({ summary }) {
+  const now = useNow();
+  const pulse = pulseOf(summary?.self_report_last, summary?.self_report_interval_s, now);
+  const text = heartbeatFact(pulse);
+  if (!text) return null;
+  return <span className={pulse.state === "beating" ? "" : "text-paper-muted"}>{text}</span>;
+}
+
+function SelfReportTile({ subject, summary, member }) {
+  const now = useNow();
+  const [params] = useSearchParams();
+  const swarm = subject === "swarm";
+  const pulse = pulseOf(summary.self_report_last, summary.self_report_interval_s, now);
+  const beating = swarm && summary.self_report_members ? membersBeating(summary.self_report_members, now) : null;
+  // Swarm: the dot beats while any member beats, at the swarm's own rate.
+  const dotPulse = beating
+    ? { state: beating.n ? "beating" : pulse?.state === "quiet" ? "quiet" : "still", bpm: pulse?.bpm ?? 48 }
+    : pulse;
+  const health = new URLSearchParams(params);
+  health.set("tab", "senses");
+  return (
+    <li className="panel p-3">
+      <div className="flex items-center gap-2 text-sm">
+        <span aria-hidden="true" className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: SELF.color }} />
+        <span>{SELF.label}</span>
+        <HelpTip id="tile-self" label="What Self-reports counts">{COUNT_SELF_REPORT}</HelpTip>
+      </div>
+      <p className="mt-1 font-mono text-[32px] leading-tight">{(summary.flow?.self_report ?? 0).toLocaleString()}</p>
+      <p className="text-xs text-paper-muted">heartbeat and health reports</p>
+      <p className="flex items-center gap-2 text-xs text-paper-muted" data-testid="pulse">
+        <BeatDot pulse={dotPulse} />
+        <span>{beating ? beating.text : pulseText(pulse)}</span>
+      </p>
+      {!swarm && member && kindOf(member) === "hub" && (
+        <Link to={`?${health}`} className="text-xs text-led hover:underline">Machine health</Link>
+      )}
+    </li>
+  );
+}
+
+function Tiles({ subject, summary, member }) {
+  return (
+    <ul className="mb-6 grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}
+        aria-label="Records by category">
+      <style>{BEAT_STYLE}</style>
       {CATEGORIES.map((c) => (
         <li key={c.key} className="panel p-3">
           <div className="flex items-center gap-2 text-sm">
@@ -35,14 +167,9 @@ function Tiles({ summary }) {
           </div>
           <p className="mt-1 text-2xl font-bold">{summary.categories[c.key].toLocaleString()}</p>
           <p className="text-xs text-paper-muted">{NOTES[c.key](summary)}</p>
-          {c.key === "sense" && selfReportNote(summary) && (
-            <p className="flex items-center gap-1 text-xs text-paper-muted">
-              {selfReportNote(summary)}
-              <HelpTip id="tile-self-report" label="What a self-report is">{COUNT_SELF_REPORT}</HelpTip>
-            </p>
-          )}
         </li>
       ))}
+      <SelfReportTile subject={subject} summary={summary} member={member} />
     </ul>
   );
 }
@@ -180,10 +307,12 @@ function People({ subject, summary, members, swarms, onSelectPeer }) {
   );
 }
 
-export default function Overview({ subject, summary, history, members, swarms, onSelectPeer }) {
+export default function Overview({ subject, name, summary, history, members, swarms, onSelectPeer }) {
+  const member = subject === "member"
+    ? memberWithRole((members || []).find((m) => m.name === name) || null, swarms) : null;
   return (
     <>
-      <Tiles summary={summary} />
+      <Tiles subject={subject} summary={summary} member={member} />
       <Trend daily={summary.daily} wipes={wipesOf(history?.events)} />
       <People subject={subject} summary={summary} members={members} swarms={swarms} onSelectPeer={onSelectPeer} />
     </>

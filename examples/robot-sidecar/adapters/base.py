@@ -1,4 +1,4 @@
-"""What an adapter gives the sidecar (#312).
+"""What an adapter gives the sidecar (#312, #408).
 
 An adapter reads one source (a robot SDK, a bridge's log) and calls ``emit``
 with exactly one ``Item`` per thing that happened. It never summarises,
@@ -10,14 +10,29 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 RECORD_TYPES = ("perception", "event", "communication")
+KINDS = ("record", "body", "sample", "health", "flicker")
 
 
 @dataclass
 class Item:
-    """One record to sign (``kind="record"``) or one body-state sample (``kind="body"``).
+    """One record to sign, or one sample for the sidecar's window.
 
-    A body sample is ``values``: flat ``{name: number}``; the sidecar folds
-    samples into one ``internal,telemetry`` record per window (min/max/last).
+    ``kind``:
+
+    - ``record``: one record (``type``, ``summary``, ``tags``, ``payload``).
+      ``key`` names it so a later item can refer to it; ``refs`` maps a ref
+      name to such a key (``{"start": "ep:held:3"}``), and the sidecar turns it
+      into ``"<agent>:<seq>"`` when it signs. A key it hasn't signed is dropped.
+      ``at`` (epoch seconds) is when it happened, if not when it was emitted.
+    - ``body``: flat ``{name: value}``; pose values (``pose_*``) become the
+      sensed pose record (#407), the rest a sensed ``body`` group.
+    - ``sample``: one reading of one sensor group (``sensor`` names it:
+      ``{"sensor", "modality", "unit"}``), ``values`` ``{channel: value}``;
+      the sidecar signs one sensed record per group per window (#408).
+    - ``health``: the body reporting on itself (battery, charging); folded
+      into one ``internal`` self-report per window (min/max/last).
+    - ``flicker``: ``{state: n}`` flag flips too short to be an episode,
+      counted in the next window's ``stats.flicker``.
     """
     kind: str
     type: str | None = None
@@ -25,8 +40,12 @@ class Item:
     tags: list[str] = field(default_factory=list)
     payload: dict | None = None
     peers: list[str] | None = None
-    values: dict[str, float] | None = None
+    values: dict | None = None
     source: str = ""
+    sensor: dict | None = None
+    key: str | None = None
+    refs: dict[str, str] | None = None
+    at: float | None = None
 
     def __post_init__(self):
         if self.kind == "record":
@@ -34,9 +53,11 @@ class Item:
                 raise ValueError(f"an adapter record is one of {RECORD_TYPES}, not {self.type!r}")
             if not self.summary:
                 raise ValueError("a record needs a summary")
-        elif self.kind == "body":
+        elif self.kind in KINDS[1:]:
             if not self.values:
-                raise ValueError("a body sample needs values")
+                raise ValueError(f"a {self.kind} item needs values")
+            if self.kind == "sample" and not (self.sensor or {}).get("sensor"):
+                raise ValueError("a sample needs sensor={'sensor': name, ...}")
         else:
             raise ValueError(f"unknown item kind {self.kind!r}")
 

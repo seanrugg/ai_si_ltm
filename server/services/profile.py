@@ -189,6 +189,33 @@ def self_report_clause(session: AsyncSession):
                 recall._json_list_contains(session, Record.tags, "internal"))
 
 
+SELF_REPORT_WINDOW = 5
+
+
+def _median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    v = sorted(values)
+    mid = len(v) // 2
+    return v[mid] if len(v) % 2 else (v[mid - 1] + v[mid]) / 2
+
+
+async def self_report_pulse(session: AsyncSession, who) -> dict:
+    """The live heartbeat (#406): newest self-report and the median gap of the last five.
+
+    ``who`` is an SQL condition on Record. Not limited to the profile's range:
+    the pulse is "now". ``interval_s`` is None with fewer than two reports.
+    """
+    rows = (await session.scalars(
+        select(Record.ts).where(who, self_report_clause(session))
+        .order_by(Record.ts.desc()).limit(SELF_REPORT_WINDOW))).all()
+    ts = [t if t.tzinfo else t.replace(tzinfo=timezone.utc) for t in rows]
+    gaps = [(a - b).total_seconds() for a, b in zip(ts, ts[1:])]
+    median = _median(gaps)
+    return {"last": ts[0].isoformat() if ts else None,
+            "interval_s": round(median, 3) if median is not None else None}
+
+
 async def summary(session: AsyncSession, subject: Subject, hours: int) -> dict:
     since = _since(hours)
     base = and_(subject.records(), _in_range(since))
@@ -298,6 +325,14 @@ async def summary(session: AsyncSession, subject: Subject, hours: int) -> dict:
             .order_by(Record.ts.desc(), Record.id.desc()).limit(NEWEST_LESSONS))
     ]
 
+    # The live heartbeat (#406); for a swarm, also each current member's, for "N of M beating".
+    pulse = await self_report_pulse(session, subject.records())
+    self_report_members = []
+    if subject.type == "swarm":
+        for mid, mname in zip(subject.member_ids, subject.member_names):
+            p = await self_report_pulse(session, Record.member_id == mid)
+            self_report_members.append({"name": mname, **p})
+
     return {
         "subject": subject.as_dict(),
         "hours": hours,
@@ -310,6 +345,9 @@ async def summary(session: AsyncSession, subject: Subject, hours: int) -> dict:
         "peers": peers,
         "members": members,
         "lessons": lessons,
+        "self_report_last": pulse["last"],
+        "self_report_interval_s": pulse["interval_s"],
+        **({"self_report_members": self_report_members} if subject.type == "swarm" else {}),
     }
 
 
