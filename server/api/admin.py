@@ -28,6 +28,7 @@ from server.services import records as records_service
 from server.services import cognition, memory_wipe
 from server.services import location as location_service
 from server.services import network as network_service
+from server.services import episodes as episodes_service
 from server.services import profile as profile_service
 from server.services import datasets as datasets_service
 from server.services import charter, dataset_uploads, integrations, reference_sources, url_snapshot
@@ -449,6 +450,17 @@ async def profile_reading(request: Request, admin: AdminAuth = ADMIN, member: st
     async with transaction(request) as session:
         subject = await profile_service.resolve_subject(session, member, swarm)
         return await profile_service.reading(session, subject, hours)
+
+
+@router.get("/admin/profile/episodes")
+async def profile_episodes(request: Request, admin: AdminAuth = ADMIN, member: str | None = None,
+                           swarm: str | None = None, since: str | None = None,
+                           until: str | None = None) -> dict:
+    """Lanes, pulses, series and heartbeat derived from records at read time (#401)."""
+    start, end = episodes_service.parse_range(since, until)
+    async with transaction(request) as session:
+        subject = await profile_service.resolve_subject(session, member, swarm)
+        return await episodes_service.episodes(session, subject, start, end)
 
 
 @router.get("/admin/profile/history")
