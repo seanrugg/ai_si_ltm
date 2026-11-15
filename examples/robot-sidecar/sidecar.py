@@ -5,9 +5,23 @@ answered.
 
 **The sidecar never interprets.** Each thing an adapter reports becomes exactly
 one record, with the robot's own values in the payload. The only aggregation is
-body state: numeric samples folded into one ``perception`` tagged
-``internal,telemetry,body`` per ``BODY_SECONDS`` window (min/max/last), a fixed
-statistical window, not a judgement.
+the body window (``BODY_SECONDS``), a fixed statistical window, not a judgement.
+Each window signs (#408):
+
+- **one self-report for health only** (battery, charging; ``health`` items):
+  ``perception`` tagged ``internal,telemetry,body-health``, min/max/last per
+  value, plus ``stats.flicker``: flag flips too short to be episodes;
+- **one sensed record per sensor group** (``sample`` items: wheels, imu, head,
+  lift, touch, proximity, …): ``perception`` tagged ``telemetry,body``, never
+  ``internal``, in the docs/sensing.md shape (``kind: sensor``, ``sensor``,
+  ``modality``, ``unit``, ``samples`` ``[{t, v}]``, ``stats``). A group that
+  didn't change is still sent once per window, so a gap means silence, not
+  stillness;
+- the pose record(s) below.
+
+Records may link to earlier ones: an item's ``refs`` name the ``key`` of an
+item already signed, and the sidecar writes ``"<agent>:<seq>"`` (an episode's
+end refs its start; an LLM reply refs its request).
 
 **Pose is sensing, not health (#407).** Body samples may carry a pose:
 ``pose_x_mm``, ``pose_y_mm``, optional ``pose_z_mm``, ``pose_angle_rad`` and
@@ -31,7 +45,9 @@ variables, plus:
 
   SIDECAR_ADAPTERS      comma-separated: wirepod, vector_sdk
   BODY_SECONDS          (default 30) body-state window
-  SIDECAR_COGNITION_MODELS  optional "name@where,…" for the cognition report (offboard)
+  SIDECAR_COGNITION_MODELS  "name@where,…": the models the robot's AI uses, for the cognition
+                        report (offboard) and the wirepod adapter's replies. Empty: a warning
+                        at start, and the profile shows "Language models: not reported".
   adapter settings      see each adapter's module docstring
 
   python sidecar.py
@@ -54,27 +70,62 @@ from adapters.base import Adapter, Item  # noqa: E402
 
 
 class BodyWindow:
-    """min/max/last per value since the last report."""
+    """min/max/last per value since the last report (the health self-report)."""
 
     def __init__(self):
         self.values: dict[str, list[float]] = {}
         self.samples = 0
 
-    def add(self, values: dict[str, float]) -> None:
+    def add(self, values: dict) -> None:
         self.samples += 1
         for k, v in values.items():
-            if isinstance(v, (int, float)) and not isinstance(v, bool):
-                self.values.setdefault(k, []).append(float(v))
-            elif isinstance(v, bool):
+            if isinstance(v, bool):
                 self.values.setdefault(k, []).append(1.0 if v else 0.0)
+            elif isinstance(v, (int, float)):
+                self.values.setdefault(k, []).append(float(v))
 
-    def report(self) -> dict | None:
+    def report(self, kind: str = "body") -> dict | None:
         if not self.samples:
             return None
-        out = {"kind": "body", "samples": self.samples,
+        out = {"kind": kind, "samples": self.samples,
                "values": {k: {"min": min(v), "max": max(v), "last": v[-1]} for k, v in sorted(self.values.items())}}
         self.values, self.samples = {}, 0
         return out
+
+
+def _num(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+class GroupWindow:
+    """One sensor group's readings in a window, sent whole as one sensed record (#408)."""
+
+    def __init__(self, sensor: dict):
+        self.sensor = {"sensor": sensor["sensor"], "modality": sensor.get("modality"), "unit": sensor.get("unit")}
+        self.samples: list[tuple[float, dict]] = []
+
+    def add(self, at: float, values: dict) -> None:
+        self.samples.append((at, dict(values)))
+
+    def report(self) -> tuple[float, dict]:
+        t0 = self.samples[0][0]
+        channels = sorted({k for _, v in self.samples for k in v})
+        single = channels == ["value"]
+        samples = [{"t": round(at - t0, 3), "v": v["value"] if single else v} for at, v in self.samples]
+        stats: dict = {"count": len(self.samples)}
+        for ch in channels:
+            vals = [v[ch] for _, v in self.samples if ch in v]
+            if vals and all(isinstance(x, bool) for x in vals):
+                st = {"true": sum(vals)}
+            elif vals and all(_num(x) for x in vals):
+                st = {"min": min(vals), "max": max(vals), "mean": round(sum(vals) / len(vals), 6)}
+            else:
+                continue
+            if single:
+                stats.update(st)
+            else:
+                stats[ch] = st
+        return t0, {"kind": "sensor", **self.sensor, "samples": samples, "stats": stats}
 
 
 POSE_KEYS = ("pose_x_mm", "pose_y_mm", "pose_z_mm", "pose_angle_rad", "pose_frame")
@@ -159,14 +210,17 @@ class Sidecar:
         self.body_seconds = body_seconds
         self.clock = clock  # wall clock, to time each item when the adapter emits it
         self.items: "queue.Queue[tuple[float, Item]]" = queue.Queue()
-        self.body = BodyWindow()
+        self.health = BodyWindow()
+        self.groups: dict[str, GroupWindow] = {}
+        self.flicker: dict[str, int] = {}
         self.pose = PoseTrack()
         self.next_body = now + body_seconds
         self.signed = 0
+        self.ids: dict[str, str] = {}  # item key -> "<agent>:<seq>" of the record signed for it
 
     def emit(self, item: Item, at: float | None = None) -> None:
-        """Queue an item; ``at`` (epoch seconds) defaults to now, when the adapter emits it."""
-        self.items.put((self.clock() if at is None else at, item))
+        """Queue an item; ``at`` (epoch seconds) defaults to the item's own, else now."""
+        self.items.put((at if at is not None else item.at if item.at is not None else self.clock(), item))
 
     def start(self) -> None:
         for a in self.adapters:
@@ -177,6 +231,26 @@ class Sidecar:
         for a in self.adapters:
             a.stop()
 
+    def _group(self, sensor: dict) -> GroupWindow:
+        g = self.groups.get(sensor["sensor"])
+        if g is None:
+            g = self.groups[sensor["sensor"]] = GroupWindow(sensor)
+        return g
+
+    def _sign(self, link, item: Item, at: float) -> None:
+        header = {"summary": item.summary[:280], "tags": item.tags or None, "peers": item.peers or None}
+        refs = {k: self.ids[v] for k, v in (item.refs or {}).items() if v in self.ids}
+        if refs:
+            header["refs"] = refs
+        if item.at is not None:
+            header["ts"] = iso_ts(at)
+        rec = link.append(item.type, payload=item.payload, **{k: v for k, v in header.items() if v})
+        if item.key and isinstance(rec, dict) and rec.get("agent") and rec.get("seq") is not None:
+            self.ids[item.key] = f"{rec['agent']}:{rec['seq']}"
+            if len(self.ids) > 2000:  # only recent items refer back
+                for k in list(self.ids)[:1000]:
+                    del self.ids[k]
+
     def poll(self, link, now: float) -> int:
         """Sign every queued record, and the body window when it's due. Returns records signed."""
         n = 0
@@ -185,30 +259,49 @@ class Sidecar:
                 at, item = self.items.get_nowait()
             except queue.Empty:
                 break
-            if item.kind == "body":
+            if item.kind == "record":
+                self._sign(link, item, at)
+                n += 1
+            elif item.kind == "body":
                 pose, rest = split_pose(item.values)
                 if pose is not None:
                     self.pose.add(at, str(item.values.get("pose_frame") or "odom"), pose)
                 if rest:
-                    self.body.add(rest)
-                continue
-            header = {"summary": item.summary[:280], "tags": item.tags or None}
-            if item.peers:
-                header["peers"] = item.peers
-            link.append(item.type, payload=item.payload, **{k: v for k, v in header.items() if v})
-            n += 1
+                    self._group({"sensor": "body"}).add(at, rest)
+            elif item.kind == "sample":
+                self._group(item.sensor).add(at, item.values)
+            elif item.kind == "health":
+                self.health.add(item.values)
+            elif item.kind == "flicker":
+                for k, v in item.values.items():
+                    self.flicker[k] = self.flicker.get(k, 0) + int(v)
         if now >= self.next_body:
             self.next_body = now + self.body_seconds
-            for t0, payload in self.pose.report():
-                link.append("perception", summary=f"pose in {payload['frame']}"[:280], tags=["telemetry", "pose"],
-                            payload=payload, ts=iso_ts(t0))
-                n += 1
-            report = self.body.report()
-            if report is not None:
-                link.append("perception", summary="body state", tags=["internal", "telemetry", "body"],
-                            payload=report)
-                n += 1
+            n += self._window(link)
         self.signed += n
+        return n
+
+    def _window(self, link) -> int:
+        n = 0
+        for t0, payload in self.pose.report():
+            link.append("perception", summary=f"pose in {payload['frame']}"[:280], tags=["telemetry", "pose"],
+                        payload=payload, ts=iso_ts(t0))
+            n += 1
+        for name in sorted(self.groups):
+            t0, payload = self.groups[name].report()
+            link.append("perception", summary=f"{name} readings"[:280], tags=["telemetry", "body"],
+                        payload=payload, ts=iso_ts(t0))
+            n += 1
+        self.groups = {}
+        health = self.health.report("body-health")
+        if health is not None or self.flicker:
+            health = health or {"kind": "body-health", "samples": 0, "values": {}}
+            if self.flicker:
+                health["stats"] = {"flicker": dict(sorted(self.flicker.items()))}
+            link.append("perception", summary="body health", tags=["internal", "telemetry", "body-health"],
+                        payload=health)
+            n += 1
+        self.flicker = {}
         return n
 
 
@@ -219,6 +312,18 @@ def parse_models(spec: str | None) -> list[dict]:
         if name.strip():
             out.append({"name": name.strip()[:64], "runs_on": (where.strip() or "bridge")[:64]})
     return out[:4]
+
+
+MODELS_WARNING = ("Sidecar: SIDECAR_COGNITION_MODELS is empty, so the profile will show 'Language models: "
+                  "not reported'; set SIDECAR_COGNITION_MODELS=<model>@<host>")
+
+
+def cognition_models(env) -> list[dict]:
+    """The models from ``SIDECAR_COGNITION_MODELS``; logs a warning when there are none (#408)."""
+    models = parse_models(env.get("SIDECAR_COGNITION_MODELS"))
+    if not models:
+        logging.warning(MODELS_WARNING)
+    return models
 
 
 def build_adapters(env) -> list[Adapter]:
@@ -246,11 +351,16 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     env = os.environ
-    sidecar = Sidecar(build_adapters(env), float(env.get("BODY_SECONDS", "30")), time.monotonic())
+    models = cognition_models(env)
+    adapters = build_adapters(env)
+    sidecar = Sidecar(adapters, float(env.get("BODY_SECONDS", "30")), time.monotonic())
     if env.get("LTMS_SERVER") and env.get("LTMS_KEY_PATH"):
+        client = LTMSClient(env["LTMS_SERVER"], key_path=env["LTMS_KEY_PATH"])
         # The robot's AI runs off board (in the bridge), so the profile shows it as Hybrid (#185).
-        LTMSClient(env["LTMS_SERVER"], key_path=env["LTMS_KEY_PATH"]).report_cognition(
-            "offboard", parse_models(env.get("SIDECAR_COGNITION_MODELS")))
+        client.report_cognition("offboard", models)
+        for a in adapters:
+            if hasattr(a, "on_specs"):
+                a.on_specs = client.report_specs  # the robot's spec sheet, once connected (#408)
     sidecar.start()
     try:
         member_main.main(poll=sidecar.poll)

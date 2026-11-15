@@ -9,7 +9,10 @@ Closes #
 ## Anything I was unsure about
 -
 
-<!-- Required. One Agent-Model line per model if the model changed. See AGENTS.md rule 9. -->
-Agent-Harness:
+<!-- Attribution (AGENTS.md rule 9). Agents: replace "none" with your harness and fill in
+Agent-Model (one line per model if it changed) and Agent-Host. Keep the lines unindented. -->
+Human edit? Leave Agent-Harness: none.
+
+Agent-Harness: none
 Agent-Model:
 Agent-Host:

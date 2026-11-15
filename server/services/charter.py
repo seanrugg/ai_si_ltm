@@ -334,6 +334,18 @@ async def admin_view(session: AsyncSession, cfg) -> dict:
             "grace_days": cfg.charter_grace_days}
 
 
+async def overdue_count(session: AsyncSession, cfg, now: datetime | None = None) -> int:
+    """Active members past their due date for the current version (as on the
+    Charter page). 0 with no charter. For the nav badge (#379)."""
+    cur = await current(session)
+    if cur is None:
+        return 0
+    now = now or datetime.now(timezone.utc)
+    members = list(await session.scalars(select(Member).where(Member.status == "active")))
+    read_at = await _read_at(session, cur, [m.id for m in members])
+    return sum(1 for m in members if m.id not in read_at and _due(cfg.charter_grace_days, cur, m) <= now)
+
+
 async def version_text(session: AsyncSession, version: int) -> dict:
     """Any remaining version's text, for admins (withdrawn ones too)."""
     cur, v, item = await _version(session, version)

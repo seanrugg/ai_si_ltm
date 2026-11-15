@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-library/react";
 import React from "react";
 import { MemoryRouter } from "react-router-dom";
 
@@ -22,10 +22,12 @@ const swarms = [
 
 let allMembers;
 let bulkResults;
+let locationsData = null;
 vi.mock("../api/useApi.js", () => ({
   useApi: vi.fn((path) => {
     if (path === "/admin/members") return { data: { members: allMembers }, error: null, loading: false, reload: () => {} };
     if (path === "/admin/swarms") return { data: swarms, loading: false };
+    if (path === "/admin/locations") return { data: locationsData, error: null, loading: false, reload: () => {} };
     return { data: null, error: null, loading: false, reload: () => {} };
   }),
 }));
@@ -44,6 +46,7 @@ beforeEach(() => {
     { id: "5", name: "eve", status: "pending", kind: "agent", permissions: [], requested_permissions: ["recall"], public_key: "bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222", created_at: "2026-01-02T00:00:00Z" },
   ];
   bulkResults = [{ id: "4", ok: true }, { id: "5", ok: true }];
+  locationsData = null;
   vi.mocked(api).mockResolvedValue({ results: bulkResults });
 });
 
@@ -273,5 +276,62 @@ describe("proxied members (#311)", () => {
     expect(screen.getAllByText("Proxied").length).toBeGreaterThanOrEqual(2);
     expect(container.textContent).toContain("Signed for it by sidecar on hub-host, not by the device itself.");
     expect(container.textContent).toContain("Its key is held by sidecar on hub-host");
+  });
+});
+
+describe("locations on the member rows (#399)", () => {
+  const net = { source: "network", label: "Example City, Example Country", room: null, lat: 1, lon: 2, accuracy_km: 20,
+    ip: "203.0.113.7", ip_seen_at: "2026-11-14T10:00:00Z", via_hub: "hub-1" };
+  const rowOf = (name) => screen.getByRole("link", { name: `Profile of ${name}` }).closest("li");
+
+  it("shows an estimate, a declared location over an estimate, the swarm home, and why there is none", () => {
+    locationsData = {
+      geo: { enabled: true, attribution: true, credit_url: "https://db-ip.com" },
+      members: [
+        { name: "alice", best: net, all: [net] },
+        { name: "bob", all: [{ source: "declared", label: "Lab", room: "B12", inherited_from: null }, net] },
+        { name: "charlie", all: [{ source: "declared", label: "Home", room: null, inherited_from: "swarm echo-base" }] },
+      ],
+    };
+    renderMembers();
+    const alice = rowOf("alice").textContent;
+    expect(alice).toContain("Example City, Example Country (network estimate · 203.0.113.7, via hub-1)");
+    expect(alice).toContain("IP geolocation by DB-IP");
+    expect(alice).not.toContain("not set");
+    const bob = rowOf("bob").textContent;
+    expect(bob).toContain("Lab, B12");
+    expect(bob).not.toContain("203.0.113.7");
+    expect(bob).not.toContain("DB-IP");
+    expect(rowOf("charlie").textContent).toContain("Home (from swarm echo-base)");
+  });
+
+  it("no DB-IP credit without attribution; not set shows the unplaced reason", () => {
+    locationsData = {
+      geo: { enabled: true, attribution: false },
+      members: [
+        { name: "alice", best: net, all: [net] },
+        { name: "bob", best: null, all: [], unplaced: "It has never connected to LTMS directly." },
+      ],
+    };
+    renderMembers();
+    expect(rowOf("alice").textContent).not.toContain("DB-IP");
+    const bob = rowOf("bob").textContent;
+    expect(bob).toContain("not set");
+    expect(bob).toContain("It has never connected to LTMS directly.");
+  });
+
+  it("Edit pre-fills from the estimate and saves only on Save", async () => {
+    locationsData = { geo: { enabled: true }, members: [{ name: "alice", best: net, all: [net] }] };
+    vi.mocked(api).mockReset();
+    vi.mocked(api).mockResolvedValue({});
+    renderMembers();
+    const row = rowOf("alice");
+    fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+    expect(within(row).getByLabelText("Label").value).toBe("Example City, Example Country");
+    expect(within(row).getByLabelText("Latitude").value).toBe("1");
+    expect(vi.mocked(api)).not.toHaveBeenCalled();
+    fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith("/admin/locations/member/alice",
+      { method: "PUT", body: { label: "Example City, Example Country", room: null, lat: 1, lon: 2 } }));
   });
 });

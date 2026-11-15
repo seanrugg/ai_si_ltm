@@ -2,7 +2,8 @@
 
 LTMS can show where a member is. Every location is returned with its
 **source** and how uncertain it is, and the dashboard always shows both.
-Locations, like addresses, are **admin-only** and are **never sent to an LRS**.
+Locations, like addresses, are **admin-only** and are **never sent to an LRS**
+or included in exports. That includes the IP address behind a network estimate.
 
 Nothing here makes an online lookup: it all works on a closed network.
 
@@ -32,6 +33,15 @@ LTMS a private address, which can't be located. So:
   why (only a LAN address seen, estimates off, never connected directly). The
   Geography tab gathers these in its "Unplaced" ring and table, with any
   address taken out of the reason.
+
+### The address behind a network estimate (#399)
+
+A `network` entry carries `ip`, the "seen" address that was looked up, and
+`ip_seen_at`, when LTMS last saw it, so an admin can check the estimate. A
+relayed estimate (`via_hub`) carries **the hub's** address. Declared and GPS
+entries carry no address. Estimates are worked out live from the addresses
+still kept, so an address removed by the address-retention prune is no longer
+shown; the Members page then says "estimate (address no longer kept)".
 
 `GET /api/admin/locations` also returns `geo`: `{enabled, path, reason}`, shown
 on Settings → Location estimates, so it's clear when estimates are off.

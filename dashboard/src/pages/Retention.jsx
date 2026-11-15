@@ -220,7 +220,7 @@ export default function Retention() {
   const { data, error, loading, reload } = useApi("/admin/retention");
   return (
     <>
-      <PageHeader title="Data retention" />
+      <PageHeader title="Retention" />
       <p className="mb-2 max-w-prose text-sm text-paper-muted">
         How long payloads and audit entries are kept. Storage is the operator&apos;s responsibility; these settings
         apply at the next scheduled run, with no restart.
