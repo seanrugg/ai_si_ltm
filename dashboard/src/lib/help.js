@@ -92,6 +92,7 @@ export const DIRECTIVES_ABOUT = "A directive is signed with this fleet's key and
 export const DIRECTIVE_CONFIRM = "Members follow directives by default.";
 
 export const FLEET_HEALTH_ABOUT = "Every active member: when LTMS last heard from it, whether its heartbeat is on time, late (over 1.5× its usual gap) or silent (over 2×), its latest health report and its specs. Heartbeats and health are self-reports.";
+export const SYSTEM_ABOUT = "Read-only checks after a deploy: version, migrations, background jobs, the fleet key and integrations. Job results are kept since the server started. Copy diagnostics gives text for a bug report with no secrets in it.";
 export const SPECS_ABOUT = "What the device reports about itself (hardware, models, software), with any field an admin corrected. Each value says which. Not a record: not signed or sent to the LRS.";
 
 // Navigation groups (#379): one line each.

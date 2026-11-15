@@ -15,7 +15,7 @@ describe("nav groups (#379)", () => {
       ["Operate", false, ["Timeline", "Conversation", "Members", "Swarms", "Directives"]],
       ["Analyze", false, ["Health", "Volume", "Outcomes", "Lessons & policies", "Integrity", "Geography"]],
       ["Govern", true, ["Charter", "Audit log", "Retention", "Export"]],
-      ["Configure", true, ["Settings", "MCP access", "LRS endpoints", "Datasets"]],
+      ["Configure", true, ["Settings", "MCP access", "LRS endpoints", "Datasets", "System status"]],
     ]);
   });
 

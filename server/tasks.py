@@ -6,6 +6,7 @@ import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from server.services import system_status
 from server.services import cognition, dataset_uploads, enrollment, geoip_source, lrs, network, reference_sources, retention
 
 log = logging.getLogger("ltms.tasks")
@@ -20,9 +21,11 @@ def start_scheduler(app) -> AsyncIOScheduler:
                 result = await fn(session, *args)
                 await session.commit()
                 log.info("%s: %s", name, result)
-            except Exception:
+                system_status.record_job(app.state, name)
+            except Exception as exc:
                 await session.rollback()
                 log.exception("%s failed", name)
+                system_status.record_job(app.state, name, exc)
 
     sched = AsyncIOScheduler(timezone="UTC")
     sched.add_job(run, "interval", minutes=5, args=("purge_expired_auth", retention.purge_expired_auth))
