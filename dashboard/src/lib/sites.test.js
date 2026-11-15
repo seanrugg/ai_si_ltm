@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { flowWidth, roomsOf, sitesOf } from "../../lib/sites.js";
-import { homeLayout } from "./HomeView.jsx";
+// Was HomeView.test.js; the Home view is replaced by the star system on the globe (#405).
+import { flowWidth, roomsOf, sitesOf } from "./sites.js";
 
 const locs = [
   { name: "z3-r0", best: { source: "declared", label: "Home", lat: 1, lon: 2 }, all: [{ source: "declared", label: "Home", room: "Lab" }] },
@@ -19,13 +19,6 @@ describe("rooms and sites", () => {
       { room: "Lab", members: ["jetson-hub", "z3-r0"] },
       { room: "Unassigned", members: ["dx-1"] },
     ]);
-    const { boxes, positions } = homeLayout(rooms);
-    expect(boxes.map((b) => b.room)).toEqual(["Kitchen", "Lab", "Unassigned"]);
-    const lab = boxes[1];
-    for (const n of ["jetson-hub", "z3-r0"]) {
-      expect(positions[n].x).toBeGreaterThan(lab.x);
-      expect(positions[n].x).toBeLessThan(lab.x + lab.w);
-    }
   });
   it("groups declared members into one home site; others are their own site", () => {
     const sites = sitesOf(locs, [{ name: "cloud-agent", kind: "agent" }]);

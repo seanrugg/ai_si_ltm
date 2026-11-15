@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import React from "react";
-import Places from "./Places.jsx";
+import Places, { PlacesTables } from "./Places.jsx";
 import { api } from "../../api/client.js";
 import { actionPoses, hasBody, makeScaler, niceLength, poseFrames, poseSamples } from "../../lib/profile.js";
 
@@ -38,23 +38,22 @@ describe("pose helpers", () => {
   });
 });
 
-describe("Places tab", () => {
-  it("with no pose data, explains the convention", async () => {
-    vi.mocked(api).mockReset();
-    vi.mocked(api).mockImplementation(async (path) => {
-      if (path === "/admin/timeline") return { records: [] };
-      if (path === "/admin/locations") return { members: [{ name: "z3-r0", best: null, all: [
-        { source: "declared", label: "Lab", room: "B12", lat: null, lon: null, accuracy_km: null }] }] };
-      throw new Error(path);
-    });
-    render(React.createElement(Places, { subject: "member", name: "z3-r0", members: [{ name: "z3-r0", kind: "robot" }], swarms: [],
-      summary: { places: [{ place: "kitchen", total: 4, sense: 2, act: 2, comm: 0, learn: 0, action_success: 0.5 }] } }));
-    expect(await screen.findByText(/No pose data yet/)).toBeDefined();
-    expect(screen.getByText("4 records · 50% action success")).toBeDefined();
-    expect(await screen.findByText("Lab, B12")).toBeDefined();
+describe("Places tables, in Geography's twin (#405; were the Places & movement tab)", () => {
+  it("lists records by place and the member's location sources", () => {
+    render(React.createElement(PlacesTables, { subject: "member",
+      places: [{ place: "kitchen", total: 4, sense: 2, act: 2, comm: 0, learn: 0, action_success: 0.5 }],
+      entries: [{ source: "declared", label: "Lab", room: "B12", lat: null, lon: null, accuracy_km: null }] }));
+    expect(screen.getByText("Records by place")).toBeDefined();
+    expect(screen.getByText("kitchen")).toBeDefined();
+    expect(screen.getByText("50% action success")).toBeDefined();
+    expect(screen.getByText("2 sensing, 2 deciding & acting")).toBeDefined();
+    expect(screen.getByText("Lab, B12")).toBeDefined();
     expect(screen.getByText(/High precision/)).toBeDefined(); // GPS row: explanation only
-    const sensed = vi.mocked(api).mock.calls.find(([p, o]) => p === "/admin/timeline" && o.params.type === "sensed");
-    expect(sensed[1].params).toEqual({ agent: "z3-r0", type: "sensed", limit: 200 });
+  });
+  it("says when no record has a place, and shows sources on member profiles only", () => {
+    render(React.createElement(PlacesTables, { subject: "swarm", places: [], entries: [] }));
+    expect(screen.getByText("No records with a place in this range.")).toBeDefined();
+    expect(screen.queryByText("Location sources")).toBeNull();
   });
 });
 
@@ -76,20 +75,20 @@ describe("Choreography (#407)", () => {
     expect(screen.getByRole("heading", { name: /Choreography/ })).toBeDefined();
     expect(await screen.findByText(/Members with a body send movement/)).toBeDefined();
     expect(screen.queryByText(/^Movement$/)).toBeNull();
+    const sensed = vi.mocked(api).mock.calls.find(([p, o]) => p === "/admin/timeline" && o.params.type === "sensed");
+    expect(sensed[1].params).toEqual({ agent: "bot-1", type: "sensed", limit: 200 });
   });
 
   it("is hidden for AI agents and hubs, without even the empty state", async () => {
     mockApi();
     render(React.createElement(Places, { subject: "member", name: "helper", summary, swarms: [],
       members: [{ name: "helper", kind: "agent" }] }));
-    await screen.findByText("Places");
     expect(screen.queryByText(/Choreography/)).toBeNull();
     expect(screen.queryByText(/No pose data yet/)).toBeNull();
     cleanup();
     render(React.createElement(Places, { subject: "member", name: "hub-1", summary,
       swarms: [{ name: "lab", members: [{ name: "hub-1", role: "hub" }] }],
       members: [{ name: "hub-1", kind: "robot" }] }));
-    await screen.findByText("Places");
     expect(screen.queryByText(/Choreography/)).toBeNull();
     expect(vi.mocked(api).mock.calls.some(([p]) => p === "/admin/timeline")).toBe(false);
   });

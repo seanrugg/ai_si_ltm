@@ -13,9 +13,9 @@ export const TABS = [
   { key: "overview", label: "Overview" },
   { key: "specs", label: "Specs", memberOnly: true },
   { key: "members", label: "Members", swarmOnly: true },
-  { key: "places", label: "Places & movement" },
+  // #405: Geography was Network, and Places & movement folds into it (?tab=places opens it zoomed in).
+  { key: "geography", label: "Geography", aliases: ["network", "places"] },
   { key: "topology", label: "Topology", aliases: ["interactions"] }, // #404: was Interactions
-  { key: "network", label: "Network" },
   { key: "chronology", label: "Chronology", aliases: ["activity"] }, // #403: was Activity
   { key: "senses", label: "Senses" },
   { key: "history", label: "History" },

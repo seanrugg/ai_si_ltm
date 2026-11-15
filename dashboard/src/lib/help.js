@@ -99,5 +99,5 @@ export const NAV_ANALYZE = "How the fleet is behaving: volume, outcomes, what it
 export const NAV_GOVERN = "Rules and records: the charter, the audit log, how long data is kept, and exports.";
 export const NAV_CONFIGURE = "Set once, revisit rarely: server settings, MCP access, LRS endpoints and datasets.";
 export const GET_STARTED = "Steps to set up a new fleet. Each ticks itself when it's done; the list goes away once the required ones are.";
-// #407: the pose section of Places & movement.
+// #407: the room-level view under Geography's globe (#405; was Places & movement).
 export const CHOREOGRAPHY = "Choreography: where a member's body went, from its own pose readings, in its own frame.";

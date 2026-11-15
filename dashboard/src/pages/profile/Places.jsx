@@ -1,7 +1,10 @@
-// Profile Places & movement tab (issue #193); Choreography, for members with a body (#407).
+// Places & movement (issue #193), folded into Geography (#405): its tables go to
+// Geography's table twin, and Choreography (#407), for members with a body, is
+// the room-level view under the globe.
 import { useEffect, useState } from "react";
 import { api } from "../../api/client.js";
 import HelpTip from "../../components/HelpTip.jsx";
+import { HoloTable } from "../../components/VizFrame.jsx";
 import { MemberMark } from "../../components/visual.jsx";
 import { localTime } from "../../lib/format.js";
 import { CHOREOGRAPHY } from "../../lib/help.js";
@@ -28,36 +31,15 @@ function Icon({ d }) {
   );
 }
 
-function PlaceList({ places }) {
-  const max = Math.max(1, ...places.map((p) => p.total));
-  return (
-    <section aria-labelledby="places-h" className="mb-6">
-      <h2 id="places-h" className="mb-2 text-lg font-bold">Places</h2>
-      {places.length === 0 ? (
-        <p className="text-sm text-paper-muted">No records with a place in this range.</p>
-      ) : (
-        <ul className="panel">
-          {places.map((p) => (
-            <li key={p.place} className="flex flex-wrap items-center gap-3 border-b border-ink-line px-3 py-2 last:border-b-0">
-              <span className="w-40 font-bold">{p.place}</span>
-              <span className="w-56 text-sm text-paper-muted">
-                {p.total} records{p.action_success != null ? ` · ${percent(p.action_success)} action success` : ""}
-              </span>
-              <span className="flex h-2 overflow-hidden rounded bg-ink-line" aria-hidden="true"
-                    style={{ width: `${Math.max(4, (p.total / max) * 240)}px` }}>
-                {CATEGORIES.map((c) => (p[c.key] ? (
-                  <span key={c.key} style={{ width: `${(p[c.key] / p.total) * 100}%`, background: c.color }} />
-                ) : null))}
-              </span>
-              <span className="sr-only">
-                {CATEGORIES.filter((c) => p[c.key]).map((c) => `${p[c.key]} ${c.label.toLowerCase()}`).join(", ")}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
+/** Records by place (`summary.places`): rows for the Geography table twin. */
+export function placeRecordRows(places) {
+  return (places || []).map((p) => ({
+    id: p.place,
+    place: p.place,
+    records: p.total,
+    success: p.action_success != null ? `${percent(p.action_success)} action success` : "—",
+    mix: CATEGORIES.filter((c) => p[c.key]).map((c) => `${p[c.key]} ${c.label.toLowerCase()}`).join(", ") || "—",
+  }));
 }
 
 function describeEntry(e) {
@@ -68,25 +50,31 @@ function describeEntry(e) {
   return `${where || "unnamed"}${coords}${unc}${from}`;
 }
 
-function Sources({ entries }) {
+/** Location sources for one member: one row per source, its entry or what it would be. */
+export function locationSourceRows(entries) {
+  return SOURCES.map((src) => {
+    const e = (entries || []).find((x) => x.source === src.key);
+    return { id: src.key, source: src.label, icon: ICONS[src.key], value: e ? describeEntry(e) : src.explain, set: Boolean(e) };
+  });
+}
+
+/** The twin's tables from Places & movement (#193), folded into Geography (#405). */
+export function PlacesTables({ places, entries, subject }) {
+  const rows = placeRecordRows(places);
   return (
-    <section aria-labelledby="sources-h" className="mb-6">
-      <h2 id="sources-h" className="mb-2 text-lg font-bold">Location sources</h2>
-      <ul className="panel">
-        {SOURCES.map((s) => {
-          const e = (entries || []).find((x) => x.source === s.key);
-          return (
-            <li key={s.key} className="flex items-start gap-3 border-b border-ink-line px-3 py-2 last:border-b-0">
-              <Icon d={ICONS[s.key]} />
-              <span className="w-36 font-bold">{s.label}</span>
-              <span className="text-sm">
-                {e ? describeEntry(e) : <span className="text-paper-muted">{s.explain}</span>}
-              </span>
-            </li>
-          );
-        })}
-      </ul>
-    </section>
+    <>
+      <HoloTable caption="Records by place" rows={rows}
+                 columns={[{ key: "place", label: "Place" }, { key: "records", label: "Records", numeric: true },
+                   { key: "success", label: "Actions" }, { key: "mix", label: "By category" }]} />
+      {rows.length === 0 && <p className="text-sm text-paper-muted">No records with a place in this range.</p>}
+      {subject === "member" && (
+        <HoloTable caption="Location sources" rows={locationSourceRows(entries)}
+                   columns={[{ key: "source", label: "Source", render: (r) => (
+                     <span className="inline-flex items-center gap-2"><Icon d={r.icon} />{r.source}</span>
+                   ) },
+                   { key: "value", label: "Location", render: (r) => (r.set ? r.value : <span className="text-paper-muted">{r.value}</span>) }]} />
+      )}
+    </>
   );
 }
 
@@ -249,8 +237,8 @@ export function Choreography({ tracks, actions, members, swarms }) {
   );
 }
 
-export default function Places({ subject, name, summary, members, swarms }) {
-  const [entries, setEntries] = useState(null);
+/** Pose tracks and posed actions for the subject's members with a body (#407). */
+export function usePoseTracks({ subject, name, members, swarms }) {
   const [tracks, setTracks] = useState([]);
   const [actions, setActions] = useState([]);
   const agents = subject === "member"
@@ -259,17 +247,6 @@ export default function Places({ subject, name, summary, members, swarms }) {
   // Choreography is only for bodies (#407): AI agents and hubs never show it.
   const bodies = agents.filter((a) => hasBody(memberWithRole((members || []).find((m) => m.name === a), swarms)));
   const agentKey = bodies.join(",");
-
-  useEffect(() => {
-    let live = true;
-    setEntries(null);
-    if (subject === "member") {
-      api("/admin/locations", { params: { member: name } })
-        .then((d) => { if (live) setEntries(d?.members?.[0]?.all ?? []); })
-        .catch(() => {}); // an older server without #191: show the explanations only
-    }
-    return () => { live = false; };
-  }, [subject, name]);
 
   useEffect(() => {
     let live = true;
@@ -286,12 +263,16 @@ export default function Places({ subject, name, summary, members, swarms }) {
     });
     return () => { live = false; };
   }, [agentKey]);
+  return { bodies, tracks, actions };
+}
 
-  return (
-    <>
-      <PlaceList places={summary.places} />
-      {subject === "member" && <Sources entries={entries} />}
-      {bodies.length > 0 && <Choreography tracks={tracks} actions={actions} members={members} swarms={swarms} />}
-    </>
-  );
+/**
+ * The room-level view under Geography's globe (#405): Choreography, for members
+ * with a body only. (Places & movement was its own tab; its tables are now in
+ * Geography's table twin, see PlacesTables.)
+ */
+export default function RoomLevel({ subject, name, members, swarms }) {
+  const { bodies, tracks, actions } = usePoseTracks({ subject, name, members, swarms });
+  if (!bodies.length) return null;
+  return <Choreography tracks={tracks} actions={actions} members={members} swarms={swarms} />;
 }

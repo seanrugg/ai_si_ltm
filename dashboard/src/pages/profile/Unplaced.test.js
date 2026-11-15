@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import React from "react";
-import { Unplaced } from "./Network.jsx";
+import { GeographyTables } from "./Network.jsx";
 import { GeoStatus } from "../Settings.jsx";
 import { sitesOf, unplacedOf } from "../../lib/sites.js";
+import { buildGeography } from "../../lib/geography.js";
 
 afterEach(() => cleanup());
 
@@ -13,11 +14,14 @@ const LOCS = [
 ];
 
 describe("unplaced members (#346)", () => {
-  it("lists who isn't on the globe and why", () => {
+  it("lists who isn't on the globe and why, without the address (#405)", () => {
     expect(unplacedOf(LOCS)).toEqual([{ name: "jetson-hub", reason: LOCS[0].unplaced }]);
-    render(React.createElement(Unplaced, { rows: unplacedOf(LOCS), geo: { enabled: false, reason: "LTMS_GEOIP_DB isn't set" } }));
-    expect(screen.getByText("Not on the globe (1)")).toBeTruthy();
-    expect(screen.getByText(/10\.0\.0\.50/)).toBeTruthy();
+    const locations = { members: LOCS, geo: { enabled: false, reason: "LTMS_GEOIP_DB isn't set" }, server: null };
+    const geo = buildGeography({ locations, members: [{ name: "jetson-hub", kind: "relay" }, { name: "z3-r0", kind: "robot" }] });
+    render(React.createElement(GeographyTables, { geo, server: null, events: [], t: 0, locations, network: [], members: [] }));
+    expect(screen.getByText("Unplaced (1)")).toBeTruthy();
+    expect(screen.getByText("Only a local network address has been seen.")).toBeTruthy();
+    expect(screen.queryByText(/10\.0\.0\.50/)).toBeNull(); // addresses are only in "Members and addresses"
     expect(screen.getByText(/Network estimates are off: LTMS_GEOIP_DB isn't set/)).toBeTruthy();
   });
 
