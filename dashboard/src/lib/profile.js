@@ -16,7 +16,7 @@ export const TABS = [
   { key: "places", label: "Places & movement" },
   { key: "topology", label: "Topology", aliases: ["interactions"] }, // #404: was Interactions
   { key: "network", label: "Network" },
-  { key: "activity", label: "Activity" },
+  { key: "chronology", label: "Chronology", aliases: ["activity"] }, // #403: was Activity
   { key: "senses", label: "Senses" },
   { key: "history", label: "History" },
   { key: "manage", label: "Manage", swarmOnly: true },
