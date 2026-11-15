@@ -23,6 +23,7 @@ export const GROUPS = [
       { to: "/outcomes", label: "Outcomes" },
       { to: "/lessons", label: "Lessons & policies" },
       { to: "/integrity", label: "Integrity" },
+      { to: "/geography", label: "Geography" },
     ],
   },
   {
