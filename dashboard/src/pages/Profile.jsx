@@ -10,7 +10,7 @@ import ProxiedBadge from "../components/ProxiedBadge.jsx";
 import { localTime, relativeTime } from "../lib/format.js";
 import { DEFAULT_TAB, RANGES, nextTab, rangeOf, swarmCount, tabOf, tabsFor } from "../lib/profile.js";
 import { KINDS, NEUTRAL, ROLES, kindOf, roleOf } from "../lib/visual.js";
-import Overview from "./profile/Overview.jsx";
+import Overview, { HeartbeatValue } from "./profile/Overview.jsx";
 import Activity from "./profile/Activity.jsx";
 import History from "./profile/History.jsx";
 import Members from "./profile/Members.jsx";
@@ -175,6 +175,7 @@ export default function Profile({ subject }) {
         {member && (
           <div className="flex flex-wrap gap-6">
             <Fact label="Status"><StatusBadge status={member.status} /></Fact>
+            {summary.data?.self_report_interval_s != null && <Fact label="Heartbeat"><HeartbeatValue summary={summary.data} /></Fact>}
             <Fact label="Memory">
               {member.memory_generation > 0
                 ? `generation ${member.memory_generation}${wipes[0] ? `, last wiped ${relativeTime(wipes[0].ts)}` : ""}`
