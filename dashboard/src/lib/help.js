@@ -91,6 +91,7 @@ export const LEADER_ABOUT = "The leader directs the swarm. Members follow its di
 export const DIRECTIVES_ABOUT = "A directive is signed with this fleet's key and pulled by each swarm's hub onto its bus. Members check the signature, then record that they received it and whether they accepted or declined it, with a reason.";
 export const DIRECTIVE_CONFIRM = "Members follow directives by default.";
 
+export const FLEET_HEALTH_ABOUT = "Every active member: when LTMS last heard from it, whether its heartbeat is on time, late (over 1.5× its usual gap) or silent (over 2×), its latest health report and its specs. Heartbeats and health are self-reports.";
 export const SPECS_ABOUT = "What the device reports about itself (hardware, models, software), with any field an admin corrected. Each value says which. Not a record: not signed or sent to the LRS.";
 
 // Navigation groups (#379): one line each.

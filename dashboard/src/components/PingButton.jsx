@@ -8,16 +8,22 @@ import { pingState } from "../lib/ping.js";
 const POLL_MS = 5000;
 const STOP_AFTER_MS = 10 * 60 * 1000;
 
-export default function PingButton({ name }) {
-  const [status, setStatus] = useState(null);
+/**
+ * `initial`: a ping status the caller already has (the Health page's rows, #381);
+ * when given, the button doesn't fetch it again. The button's accessible name
+ * includes the member's name, so a page with many of them stays clear (508).
+ */
+export default function PingButton({ name, initial }) {
+  const [status, setStatus] = useState(initial ?? null);
   const [polling, setPolling] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    if (initial !== undefined) return undefined;
     let live = true;
     api(`/admin/members/${encodeURIComponent(name)}/ping`).then((s) => { if (live) setStatus(s); }).catch(() => {});
     return () => { live = false; };
-  }, [name]);
+  }, [name, initial]);
 
   useEffect(() => {
     if (!polling) return undefined;
@@ -47,7 +53,7 @@ export default function PingButton({ name }) {
   const st = pingState(status);
   return (
     <span className="flex flex-wrap items-center gap-2 text-sm">
-      <button type="button" className="btn" onClick={ping} disabled={polling}>
+      <button type="button" className="btn" onClick={ping} disabled={polling} aria-label={`Ping ${name}`}>
         {polling ? "Pinging…" : "Ping"}
       </button>
       <HelpTip id={`ping-${name}`} label="About ping">{PING_ABOUT}</HelpTip>

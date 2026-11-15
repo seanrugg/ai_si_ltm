@@ -43,7 +43,7 @@ describe("Shell nav (#379)", () => {
     expect(links.slice(0, 1)).toEqual(["Overview"]);
     expect(within(nav()).getAllByRole("link", { hidden: true }).map((a) => a.textContent)).toEqual([
       "Overview", "Timeline", "Conversation", "Members", "Swarms", "Directives",
-      "Volume", "Outcomes", "Lessons & policies", "Integrity",
+      "Health", "Volume", "Outcomes", "Lessons & policies", "Integrity",
       "Charter", "Audit log", "Retention", "Export",
       "Settings", "MCP access", "LRS endpoints", "Datasets",
     ]);

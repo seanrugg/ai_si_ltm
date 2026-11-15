@@ -8,6 +8,7 @@ import Conversation from "./pages/Conversation.jsx";
 import Directives from "./pages/Directives.jsx";
 import DecisionTrace from "./pages/DecisionTrace.jsx";
 import Integrity from "./pages/Integrity.jsx";
+import Health from "./pages/Health.jsx";
 import Lessons from "./pages/Lessons.jsx";
 import Volume from "./pages/Volume.jsx";
 import Swarms from "./pages/Swarms.jsx";
@@ -84,6 +85,7 @@ export const PAGE_ROUTES = [
   { path: "/access", element: <Access /> },
   { path: "/members", element: <Members /> },
   { path: "/integrity", element: <Integrity /> },
+  { path: "/health", element: <Health /> },
   { path: "/retention", element: <Retention /> },
   { path: "/volume", element: <Volume /> },
   { path: "/swarms", element: <Swarms /> },

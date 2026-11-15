@@ -519,6 +519,15 @@ async def cancel_directive(directive_id: str, request: Request, admin: AdminAuth
         return await directives.cancel(session, request.app.state.config, directive_id, actor=f"admin:{admin.username}")
 
 
+# Fleet health (#381): last heard, heartbeat status, hub health, specs and ping per active member.
+@router.get("/admin/health")
+async def fleet_health(request: Request, admin: AdminAuth = ADMIN) -> dict:
+    from server.services import fleet_health as fleet_health_service
+
+    async with transaction(request) as session:
+        return await fleet_health_service.fleet(session)
+
+
 # Admin ping (#356): ask a member for a heartbeat.
 @router.post("/admin/members/{name}/ping")
 async def ping_member(name: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
