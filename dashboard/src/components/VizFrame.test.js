@@ -4,6 +4,7 @@ import React from "react";
 import VizFrame, { HoloTable } from "./VizFrame.jsx";
 import { MINUTE, createReplayClock } from "../lib/replay.js";
 import { setCalmStart } from "../lib/light.js";
+import { createSound, sound as sharedSound } from "../lib/sound.js";
 
 const h = React.createElement;
 const HOUR = 3600_000;
@@ -33,6 +34,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  sharedSound.setEnabled(false); // the shared engine outlives each render
   vi.useRealTimers();
   delete window.matchMedia;
   try { window.localStorage.clear(); } catch { /* ignore */ }
@@ -208,5 +210,88 @@ describe("legend", () => {
     expect(within(legend).getByText("Communicating")).toBeDefined();
     expect(within(legend).queryByText("Learning & rules")).toBeNull();
     expect(within(legend).getByText("Self-report (heartbeat)")).toBeDefined();
+  });
+});
+
+describe("sound", () => {
+  function engine() {
+    const played = [];
+    const made = [];
+    class FakeContext {
+      constructor() {
+        made.push(this);
+        this.currentTime = 0;
+        this.state = "running";
+        this.destination = {};
+      }
+      createGain() { return { gain: { value: 1, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} }; }
+      createBiquadFilter() { return { frequency: {}, connect() {} }; }
+      createDelay() { return { delayTime: {}, connect() {} }; }
+      createOscillator() { return { frequency: {}, connect() {}, start() {}, stop() {} }; }
+    }
+    const store = new Map();
+    const storage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v), removeItem: (k) => store.delete(k) };
+    const eng = createSound({ AudioContext: FakeContext, storage, autoTick: false, onVoice: (v) => played.push(v) });
+    return { eng, played, made };
+  }
+
+  it("the toggle creates the audio context and drives the engine", () => {
+    const { eng, made } = engine();
+    setup({ soundEngine: eng });
+    expect(made).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Sound" }));
+    expect(made).toHaveLength(1);
+    expect(eng.getState().on).toBe(true);
+    expect(pressed("Sound")).toBe("true");
+  });
+
+  it("plays a touched light's note when sound is on", () => {
+    const { eng, played } = engine();
+    setup({ soundEngine: eng, touchables: [{ id: "rover-1", label: "rover-1" }] });
+    fireEvent.click(screen.getByRole("button", { name: "rover-1" }));
+    expect(played).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Sound" }));
+    played.length = 0;
+    fireEvent.click(screen.getByRole("button", { name: "rover-1" }));
+    expect(played.map((v) => v.voice)).toEqual(["touch"]);
+  });
+
+  it("nothing plays in Calm view, and the toggle says why", () => {
+    const { eng, played } = engine();
+    setup({ soundEngine: eng, touchables: [{ id: "rover-1", label: "rover-1" }] });
+    fireEvent.click(screen.getByRole("button", { name: "Sound" }));
+    played.length = 0;
+    fireEvent.click(screen.getByRole("button", { name: "Table" }));
+    const toggle = screen.getByRole("button", { name: "Sound" });
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.getAttribute("title")).toBe("Sound is off in Calm view");
+    expect(eng.pulse("sense")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "rover-1" }));
+    eng.heartbeat("m1", { intervalSec: 30, sinceLastSec: 1 });
+    for (let i = 0; i < 8; i++) eng.tick(1_000_000 + i * 500);
+    expect(played).toHaveLength(0);
+    // Back to View: the remembered choice is still on.
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    expect(pressed("Sound")).toBe("true");
+    expect(eng.pulse("sense")).toBe(true);
+  });
+
+  it("reduced motion holds sound off even in View", () => {
+    window.matchMedia = vi.fn().mockReturnValue({ matches: true });
+    const { eng } = engine();
+    setup({ soundEngine: eng });
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    const toggle = screen.getByRole("button", { name: "Sound" });
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.getAttribute("title")).toMatch(/reduced motion/);
+    expect(eng.getState().held).toBe(true);
+  });
+
+  it("releases its hold when unmounted", () => {
+    const { eng } = engine();
+    setup({ soundEngine: eng, defaultCalm: true });
+    expect(eng.getState().held).toBe(true);
+    cleanup();
+    expect(eng.getState().held).toBe(false);
   });
 });

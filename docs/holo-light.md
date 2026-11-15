@@ -129,6 +129,26 @@ Self-reports are a member's pulse. In the current dashboard they are a number no
   Silence is the signal. There is no alarm sound.
 - **Visual:** the member's light swells in time with the lub-dub (scale 1.0 to 1.08, opacity `light-lit` to `light-live`). In Geography it is the swarm's light, the sum of its members' beats.
 
+## Sound in code
+
+`dashboard/src/lib/sound.js` is one shared engine. VizFrame's Sound toggle turns it on (the click starts audio, and the choice is remembered in this browser), and VizFrame holds it silent in Calm view and with reduced motion, with the reason on the disabled toggle. Views import it and call it whether sound is on or not; when it is off every call does nothing.
+
+```js
+import { sound } from "../lib/sound.js";
+
+sound.pulse("comm");                    // a record arrived: sense | act | comm | learn
+sound.pulse("act", { failed: true });   // a failed outcome: the same voice, one step lower
+sound.note(memberId);                   // a light on the canvas was touched (same key, same pitch)
+const hb = sound.heartbeat(memberId, { intervalSec, sinceLastSec });
+// every frame while the clock plays; draw the light with hb.swell (0..1) when frame.animate
+```
+
+- **pulse** is quantized: sense and learn wait for the next beat, act for the next off-beat, comm for the next bar it hasn't played in. Call it once per record as the hand passes it; the engine merges.
+- **note** plays at once. Touchables given to VizFrame already play their note (`item.note ?? item.id`), so call it yourself only for touches on the canvas.
+- **heartbeat** returns `{bpm, level, alive, slowing, lastBeat, swell}`, and beats for the light even when sound is off. `swell` is `heartbeatSwell(now, lastBeat)` times the fade level, so the light and the lub-dub are one envelope. One member is heard at a time; pass `{audible: false}` for members that should only beat visually, and `sound.forget(id)` when a member leaves the view.
+- **Topology:** pulse each record's category as its light arrives at the star or the pyramid; heartbeat per planet (audible for the hub's member or the selected planet); note on canvas touches.
+- **Chronology:** pulse each record's category as the hand passes it; heartbeat for the member at the core; touching a ring is a touchable, so the frame plays its note (give it `note: ringIndex` for a pitch per ring).
+
 # Visualizations
 
 Three views replace today's profile tabs. The tabs are renamed **Geography**, **Topology** and **Chronology**; the drawings keep their names (the globe, the star system, the chronograph). Each sits inside a profile, under the profile header and tabs, in a `radius-lg` frame on `void`, with a table twin one toggle away. There is no entry screen: the view is live when the tab opens.
