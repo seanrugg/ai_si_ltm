@@ -13,7 +13,7 @@ describe("nav groups (#379)", () => {
     expect(OVERVIEW).toEqual({ to: "/activity", label: "Overview" });
     expect(GROUPS.map((g) => [g.label, g.collapsible, g.items.map((i) => i.label)])).toEqual([
       ["Operate", false, ["Timeline", "Conversation", "Members", "Swarms", "Directives"]],
-      ["Analyze", false, ["Volume", "Outcomes", "Lessons & policies", "Integrity", "Geography"]],
+      ["Analyze", false, ["Health", "Volume", "Outcomes", "Lessons & policies", "Integrity", "Geography"]],
       ["Govern", true, ["Charter", "Audit log", "Retention", "Export"]],
       ["Configure", true, ["Settings", "MCP access", "LRS endpoints", "Datasets", "System status"]],
     ]);
