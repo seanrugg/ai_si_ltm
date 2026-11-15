@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui.jsx";
+import NeedsAttention from "../components/NeedsAttention.jsx";
 import { Sparkline, StackedBar, TypeLegend } from "../components/charts.jsx";
 import { isSurge, trend, typeColor, TYPE_ORDER } from "../lib/activity.js";
 import { localTime, plural } from "../lib/format.js";
@@ -154,12 +155,21 @@ export default function Activity() {
     setTypeFilter(null);
   }
 
-  if (loading && !data) return <Loading what="Loading activity" />;
-  if (error) return <ErrorNote error={error} onRetry={reload} />;
+  // Overview (#380): what needs the admin first, then the activity summary.
+  const top = (
+    <>
+      <PageHeader title="Overview" />
+      <NeedsAttention />
+      <h2 className="mb-2 text-base font-bold">Activity</h2>
+    </>
+  );
+  if (loading && !data) return <>{top}<Loading what="Loading activity" /></>;
+  if (error) return <>{top}<ErrorNote error={error} onRetry={reload} /></>;
 
   return (
     <>
-      <PageHeader title="Overview">
+      {top}
+      <div>
         <form
           onSubmit={(e) => e.preventDefault()}
           className="mb-4 flex flex-wrap items-end gap-3"
@@ -197,7 +207,7 @@ export default function Activity() {
             Live — refetch every 30 s
           </label>
         </form>
-      </PageHeader>
+      </div>
 
       <TypeLegend counts={summed} onType={toggleType} active={typeFilter} />
 
