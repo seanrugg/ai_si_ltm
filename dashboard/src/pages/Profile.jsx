@@ -184,6 +184,12 @@ export default function Profile({ subject }) {
               <Fact label="Location">
                 {best.label || "unnamed"}{best.room ? `, ${best.room}` : ""}
                 <span className="text-paper-muted"> ({best.source})</span>
+                {best.source === "network" && best.ip && (
+                  <span className="block text-xs text-paper-muted">
+                    from <span className="hash" title={best.ip_seen_at ? `last seen ${localTime(best.ip_seen_at)}` : undefined}>{best.ip}</span>
+                    {best.via_hub ? `, via ${best.via_hub}` : ""}
+                  </span>
+                )}
               </Fact>
             )}
             <Fact label="Last seen">
