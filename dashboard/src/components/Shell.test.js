@@ -45,7 +45,7 @@ describe("Shell nav (#379)", () => {
       "Overview", "Timeline", "Conversation", "Members", "Swarms", "Directives",
       "Volume", "Outcomes", "Lessons & policies", "Integrity", "Geography",
       "Charter", "Audit log", "Retention", "Export",
-      "Settings", "MCP access", "LRS endpoints", "Datasets",
+      "Settings", "MCP access", "LRS endpoints", "Datasets", "System status",
     ]);
     expect(within(nav()).getByRole("link", { name: "MCP access", hidden: true }).getAttribute("href")).toBe("/access");
   });
