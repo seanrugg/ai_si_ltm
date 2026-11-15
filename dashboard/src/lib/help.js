@@ -93,5 +93,5 @@ export const DIRECTIVE_CONFIRM = "Members follow directives by default.";
 
 export const SPECS_ABOUT = "What the device reports about itself (hardware, models, software), with any field an admin corrected. Each value says which. Not a record: not signed or sent to the LRS.";
 
-// #407: the pose section of Places & movement.
+// #407: the room-level view under Geography's globe (#405; was Places & movement).
 export const CHOREOGRAPHY = "Choreography: where a member's body went, from its own pose readings, in its own frame.";
