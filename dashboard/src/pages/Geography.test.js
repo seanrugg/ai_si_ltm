@@ -63,7 +63,7 @@ describe("Fleet Geography page (#382)", () => {
   it("puts every placed member on the globe and lists the rest as unplaced, with no address", async () => {
     renderPage();
     const list = await screen.findByRole("list", { name: "Geography lights" });
-    expect(lightLabels(list)).toEqual(["Zoom in", "Zoom out", "Into field", "Into lab", "Whole globe", "LTMS",
+    expect(lightLabels(list)).toEqual(["Zoom in", "Zoom out", "Into field", "Into lab", "Whole globe", "FLTMS",
       "field · Field site", "lab · Town (estimated)", "solo · Harbour", "helper (satellite)", "lost (unplaced)"]);
     expect(list.textContent).not.toMatch(IP);
 
@@ -78,7 +78,7 @@ describe("Fleet Geography page (#382)", () => {
     expect(unplaced.textContent).not.toMatch(IP);
   });
 
-  it("the table twin matches the markers: one Places row per light, plus satellites and LTMS", async () => {
+  it("the table twin matches the markers: one Places row per light, plus satellites and FLTMS", async () => {
     renderPage();
     await screen.findByRole("list", { name: "Geography lights" });
     fireEvent.click(screen.getByRole("button", { name: "Table" }));
@@ -94,11 +94,11 @@ describe("Fleet Geography page (#382)", () => {
   it("filters to one swarm, or to the free agents", async () => {
     renderPage("/geography?swarm=field");
     let list = await screen.findByRole("list", { name: "Geography lights" });
-    expect(lightLabels(list)).toEqual(["Zoom in", "Zoom out", "Into field", "Whole globe", "LTMS",
+    expect(lightLabels(list)).toEqual(["Zoom in", "Zoom out", "Into field", "Whole globe", "FLTMS",
       "field · Field site", "lost (unplaced)"]);
     fireEvent.change(screen.getByRole("combobox", { name: "Swarm" }), { target: { value: FREE_AGENTS } });
     await waitFor(() => expect(lightLabels(screen.getByRole("list", { name: "Geography lights" })))
-      .toEqual(["Zoom in", "Zoom out", "Whole globe", "LTMS", "solo · Harbour", "helper (satellite)"]));
+      .toEqual(["Zoom in", "Zoom out", "Whole globe", "FLTMS", "solo · Harbour", "helper (satellite)"]));
     fireEvent.change(screen.getByRole("combobox", { name: "Swarm" }), { target: { value: "" } });
     list = await screen.findByRole("list", { name: "Geography lights" });
     await waitFor(() => expect(lightLabels(screen.getByRole("list", { name: "Geography lights" })))

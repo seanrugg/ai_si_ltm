@@ -31,7 +31,7 @@ describe("Holo globe markers (#347)", () => {
       members: [{ name: "hub-a", kind: "relay" }],
     });
     const items = globeTouchables(g, null);
-    expect(items.map((t) => t.label)).toEqual(["LTMS", "lab · Town (estimated)"]);
+    expect(items.map((t) => t.label)).toEqual(["FLTMS", "lab · Town (estimated)"]);
     expect(items[1].narration).toMatch(/hub hub-a\. Estimated place: Town, within about 30 km/);
   });
 });

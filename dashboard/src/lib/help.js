@@ -20,11 +20,11 @@ export const MEMORY_WIPE =
   "Gives the droid a clean slate: it stops recalling anything from before now, from any member. Nothing is deleted, policies still apply, and it can't be undone.";
 export const WIPE_VS_DELETE = "Wipe changes what a droid remembers; delete removes records from the log.";
 export const ADD_SWARM =
-  "Creates the swarm and its root key pair in your browser. The public key goes to LTMS; the private key is shown once, next.";
+  "Creates the swarm and its root key pair in your browser. The public key goes to FLTMS; the private key is shown once, next.";
 export const ROOT_PRIVATE_KEY =
-  "The private root key signs hub appointments for this swarm. It never leaves this page. LTMS can't recover it, and anyone who has it can appoint a hub.";
+  "The private root key signs hub appointments for this swarm. It never leaves this page. FLTMS can't recover it, and anyone who has it can appoint a hub.";
 export const ROOT_PUBLIC_KEY =
-  "LTMS keeps only the public key. It checks every hub appointment against it. The swarm's ID is a hash of this public key.";
+  "FLTMS keeps only the public key. It checks every hub appointment against it. The swarm's ID is a hash of this public key.";
 
 
 export const SWARM_RENAME =
@@ -39,13 +39,13 @@ export const SWARM_REMOVE_RECORDS =
 // Datasets (#242)
 export const DATASET_APPROVE = "Approved data is readable by every member of the fleet. Check its contents and licence first.";
 export const DATASET_SCOPE = "Every dataset is shared with the whole fleet.";
-export const DATASET_LARGE = "Large files served to many members at once slow LTMS down. For large or frequently read data, add a catalog integration instead.";
-export const INTEGRATION_ABOUT = "A pointer to data or models that stay where they are (MCP, Hugging Face, S3). LTMS never fetches from it: members connect themselves and report what they read. To copy content into LTMS, use Reference sources.";
-export const REFERENCE_SOURCES = "Material LTMS can import itself, one item per entry, rights kept. Import fetches from the source's own site; on a closed network, use a saved copy. Each import is a pending version you approve.";
-export const REFERENCE_REFRESH = "After the first import, LTMS checks the source on this schedule. A new publication arrives as a pending version; members see nothing new until you approve it. LTMS_REFERENCE_REFRESH_HOURS=0 turns it off.";
+export const DATASET_LARGE = "Large files served to many members at once slow FLTMS down. For large or frequently read data, add a catalog integration instead.";
+export const INTEGRATION_ABOUT = "A pointer to data or models that stay where they are (MCP, Hugging Face, S3). FLTMS never fetches from it: members connect themselves and report what they read. To copy content into FLTMS, use Reference sources.";
+export const REFERENCE_SOURCES = "Material FLTMS can import itself, one item per entry, rights kept. Import fetches from the source's own site; on a closed network, use a saved copy. Each import is a pending version you approve.";
+export const REFERENCE_REFRESH = "After the first import, FLTMS checks the source on this schedule. A new publication arrives as a pending version; members see nothing new until you approve it. LTMS_REFERENCE_REFRESH_HOURS=0 turns it off.";
 export const INTEGRATION_EMPTY = "This integration dataset has no items, so members can't find anything through it. Add item locators to a version, or connect members to the integration directly.";
-export const INTEGRATION_CREDENTIAL = "The NAME of an environment variable on each member, like HF_TOKEN. Never paste the secret itself: LTMS doesn't store credentials.";
-export const URL_SNAPSHOT = "LTMS fetches the page or file once and keeps it as a new version, never a live link, so lessons that cite it stay checkable. Only https hosts on LTMS_DATASET_URL_ALLOW; off when that's empty.";
+export const INTEGRATION_CREDENTIAL = "The NAME of an environment variable on each member, like HF_TOKEN. Never paste the secret itself: FLTMS doesn't store credentials.";
+export const URL_SNAPSHOT = "FLTMS fetches the page or file once and keeps it as a new version, never a live link, so lessons that cite it stay checkable. Only https hosts on LTMS_DATASET_URL_ALLOW; off when that's empty.";
 
 // Fleet charter (#256)
 export const CHARTER = "The charter is the fleet's governance: every member reads it when it joins and whenever it changes. Reads are logged and sent to the LRS.";
@@ -79,19 +79,19 @@ export const COUNT_ACT = "Thoughts, decisions, actions and events this member si
 export const COUNT_COMM = "Messages this member sent or received, including swarm messages relayed by a hub.";
 export const COUNT_LEARN = "Lessons and policies: what this member learned from outcomes, and the rules it holds.";
 export const COUNT_SELF_REPORT = "The member reporting on itself: heartbeat, uptime, members seen, temperature, memory. Not a perception of the world, so it is counted apart from Sensing.";
-export const COUNT_HEARTBEAT = "A hub sends a heartbeat every few minutes (HUB_HEARTBEAT_SECONDS) so LTMS knows it is alive: uptime, members seen, dropped messages. It's a self-report.";
+export const COUNT_HEARTBEAT = "A hub sends a heartbeat every few minutes (HUB_HEARTBEAT_SECONDS) so FLTMS knows it is alive: uptime, members seen, dropped messages. It's a self-report.";
 export const GUIDED_SETUP = "The device said which swarm and role it is meant for. Each step happens only when you click it, and any step can wait. A hub is added as a member first, then appointed with the swarm root key, signed here in the browser.";
 
-export const MSG_SUMMARY = "LTMS keeps every swarm message. Only the LRS copy of a busy member's messages (over 60 an hour, for 3 hours) is grouped into one statement per 5 minutes.";
+export const MSG_SUMMARY = "FLTMS keeps every swarm message. Only the LRS copy of a busy member's messages (over 60 an hour, for 3 hours) is grouped into one statement per 5 minutes.";
 export const MSG_OVER_HALF = "Messages are over half of this swarm's LRS traffic. Members over 60 messages/hour are already summarised; consider lowering the threshold in Settings.";
 
-export const PING_ABOUT = "Asks the member for a heartbeat now. Its hub (or the member itself, if it talks to LTMS directly) checks for pings every 30 s; the answer is the next record LTMS receives from it. Heartbeats otherwise come twice a day.";
+export const PING_ABOUT = "Asks the member for a heartbeat now. Its hub (or the member itself, if it talks to FLTMS directly) checks for pings every 30 s; the answer is the next record FLTMS receives from it. Heartbeats otherwise come twice a day.";
 export const LEADER_ABOUT = "The leader directs the swarm. Members follow its directives by default and record any refusal with a reason. The fleet owner's directives and interventions still come first.";
 
 export const DIRECTIVES_ABOUT = "A directive is signed with this fleet's key and pulled by each swarm's hub onto its bus. Members check the signature, then record that they received it and whether they accepted or declined it, with a reason.";
 export const DIRECTIVE_CONFIRM = "Members follow directives by default.";
 
-export const FLEET_HEALTH_ABOUT = "Every active member: when LTMS last heard from it, whether its heartbeat is on time, late (over 1.5× its usual gap) or silent (over 2×), its latest health report and its specs. Heartbeats and health are self-reports.";
+export const FLEET_HEALTH_ABOUT = "Every active member: when FLTMS last heard from it, whether its heartbeat is on time, late (over 1.5× its usual gap) or silent (over 2×), its latest health report and its specs. Heartbeats and health are self-reports.";
 export const SYSTEM_ABOUT = "Read-only checks after a deploy: version, migrations, background jobs, the fleet key and integrations. Job results are kept since the server started. Copy diagnostics gives text for a bug report with no secrets in it.";
 export const SPECS_ABOUT = "What the device reports about itself (hardware, models, software), with any field an admin corrected. Each value says which. Not a record: not signed or sent to the LRS.";
 

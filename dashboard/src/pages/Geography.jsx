@@ -149,7 +149,7 @@ export default function Geography() {
     <>
       <PageHeader title="Geography">
         <p className="mb-4 max-w-prose text-sm text-paper-muted">
-          Where the whole fleet is: every swarm and free agent, and every stream of records to LTMS.
+          Where the whole fleet is: every swarm and free agent, and every stream of records to FLTMS.
           Zoom into a swarm to see its star system and hub relays. The Table view lists every site.
         </p>
         <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -186,7 +186,7 @@ export default function Geography() {
       )}
       {ready && !serverPlace(data.locations) && (
         <p className="mt-2 text-xs text-paper-muted">
-          Declare the server&apos;s location (a member location named <code>ltms-server</code>) to place the LTMS pyramid on the globe.
+          Declare the server&apos;s location (a member location named <code>ltms-server</code>) to place the FLTMS pyramid on the globe.
         </p>
       )}
     </>

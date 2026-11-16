@@ -189,7 +189,7 @@ describe("places on the globe", () => {
 });
 
 describe("the table twin", () => {
-  it("has a row per place, the satellites and LTMS, counting records up to the hand", () => {
+  it("has a row per place, the satellites and FLTMS, counting records up to the hand", () => {
     const events = [{ t: 1, member: "hub-1" }, { t: 2, member: "rover-1" }, { t: 3, member: "helper" }, { t: 9, member: "hub-1" }];
     const rows = placeRows(geo(), LOCATIONS.server, countsUpTo(events, 5));
     expect(rows.map((r) => [r.site, r.members, r.source, r.records])).toEqual([
@@ -197,7 +197,7 @@ describe("the table twin", () => {
       ["lab · Far Town", "far-hub", "network, estimated (±20 km)", 0],
       ["solo", "solo", "GPS", 0],
       ["Cloud (satellites)", "helper", "provider's place", 1],
-      ["LTMS", "—", "declared", null],
+      ["FLTMS", "—", "declared", null],
     ]);
     expect(placeRows(geo(), null).at(-1).source).toBe("not declared");
   });

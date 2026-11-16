@@ -290,14 +290,14 @@ export default function Lrs() {
     <>
       <PageHeader title="LRS endpoints" />
       <p className="mb-4 text-sm text-paper-muted">
-        Optional. LTMS works without an LRS. Any xAPI-conformant LRS can be added.
+        Optional. FLTMS works without an LRS. Any xAPI-conformant LRS can be added.
       </p>
       <EndpointForm onSaved={reload} />
 
       {endpoints.length === 0 && (
         <EmptyState title="No LRS endpoints yet">
-          Add an xAPI-conformant LRS (for example a Yet Analytics SQL LRS) so LTMS can forward
-          in-scope records to it. LTMS works fine without one.
+          Add an xAPI-conformant LRS (for example a Yet Analytics SQL LRS) so FLTMS can forward
+          in-scope records to it. FLTMS works fine without one.
         </EmptyState>
       )}
       <ul className="panel" aria-label="LRS endpoints">

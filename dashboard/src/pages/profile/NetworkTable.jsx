@@ -38,13 +38,13 @@ export default function NetworkTable({ netRows, locRows, members }) {
                      <><span style={{ color: ROLES[r.role].color }}>{ROLES[r.role].label}</span>{` · ${KINDS[r.kind].label}`}</>
                    ) },
                    { key: "path", label: "Path" },
-                   { key: "seen", label: "Seen by LTMS" },
+                   { key: "seen", label: "Seen by FLTMS" },
                    { key: "reported", label: "Reported LAN IP" },
                    { key: "location", label: "Location" },
                    { key: "lastSeen", label: "Last seen", render: (r) => (r.lastSeen ? relativeTime(r.lastSeen) : "—") },
                  ]} />
       <ul className="mt-2 list-disc pl-5 text-xs text-paper-muted">
-        <li>&ldquo;Seen by LTMS&rdquo; is what the server saw, and is reliable. Members behind a hub show the hub&apos;s address.</li>
+        <li>&ldquo;Seen by FLTMS&rdquo; is what the server saw, and is reliable. Members behind a hub show the hub&apos;s address.</li>
         <li>Reported addresses are unverified.</li>
         <li>Cloud agents show their provider&apos;s address.</li>
         <li>Addresses are for admins only: they are never drawn on the globe, narrated, or sent to an LRS.</li>

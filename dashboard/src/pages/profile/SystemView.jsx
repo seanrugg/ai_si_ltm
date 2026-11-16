@@ -129,7 +129,7 @@ export function drawSystem(ctx, scene, layout, look) {
     ctx.globalAlpha = alpha;
     pyramid(ctx, ltms.x, ltms.y, 30, still ? 0 : nowMs / 1000, f ? f.a : (lit.ltms ?? 0));
     ctx.restore();
-    label(ctx, "LTMS", ltms.x, ltms.y - 34, LTMS_CORE, A(1));
+    label(ctx, "FLTMS", ltms.x, ltms.y - 34, LTMS_CORE, A(1));
     if (selected === "ltms") ring(ctx, ltms.x, ltms.y - 4, 26, LTMS_CORE, A(1));
   }
 

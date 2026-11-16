@@ -27,7 +27,7 @@ describe("safe markdown", () => {
   });
 
   it("renders external links safely", () => {
-    const out = html("[LTMS](https://example.org)");
+    const out = html("[FLTMS](https://example.org)");
     expect(out).toContain('href="https://example.org"');
     expect(out).toContain('rel="noopener noreferrer nofollow"');
   });

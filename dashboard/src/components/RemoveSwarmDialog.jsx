@@ -92,7 +92,7 @@ export default function RemoveSwarmDialog({ name, onClose, onRemoved }) {
             Make them free agents</label>
           <label className="flex items-center gap-2"><input type="radio" name="members" value="remove"
             checked={members === "remove"} onChange={() => setMembers("remove")} className="accent-led" />
-            Remove them from LTMS</label>
+            Remove them from FLTMS</label>
           {members === "remove" && (
             <p className="mt-1 text-bad">They are revoked and can&apos;t send records until re-enrolled.</p>
           )}

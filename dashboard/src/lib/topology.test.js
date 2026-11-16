@@ -118,7 +118,7 @@ describe("pulses", () => {
     expect(route("rover-1", "stt", "act")).toEqual(["planet:rover-1", "star:hub-1", "ltms"]);
     expect(route("rover-1", "hub", "comm")).toEqual(["planet:rover-1", "star:hub-1", "ltms"]);
     expect(route("hub-1", "hub", null)).toEqual(["star:hub-1", "ltms"]);
-    expect(route("agent-1", "hub", "act")).toEqual(["planet:agent-1", "ltms"]); // elsewhere: straight to LTMS
+    expect(route("agent-1", "hub", "act")).toEqual(["planet:agent-1", "ltms"]); // elsewhere: straight to FLTMS
   });
 
   it("travel time is 0.9 s + transit × 0.15 s, within the style guide's 2.5 s", () => {
@@ -173,7 +173,7 @@ describe("touch", () => {
   it("names each light, with a planet's heartbeat", () => {
     const list = touchList(scene(), { bpm: (p) => (p.heartbeat?.interval_s ? 48 : null) });
     expect(list.map((x) => x.label)).toEqual([
-      "LTMS", "hub-1",
+      "FLTMS", "hub-1",
       "agent-1",
       "rover-1", "rover-1 (camera)", "rover-1 (mics)", "rover-1 (cliff sensors)", "rover-1 (battery)",
       "rover-2", "rover-2 (IMU)",
@@ -210,7 +210,7 @@ describe("table twin", () => {
     // Up to the hand only.
     expect(pathRows(s, T0 + 20_000).reduce((n, r) => n + r.records, 0)).toBe(4);
     const camera = pathRows(s).find((r) => r.from === "rover-1 camera");
-    expect(camera).toMatchObject({ through: "rover-1 → hub-1", to: "LTMS", records: 1 });
+    expect(camera).toMatchObject({ through: "rover-1 → hub-1", to: "FLTMS", records: 1 });
     expect(pathRows(s).find((r) => r.from === "hub-1" && r.through === "rover-1 → hub-1")).toBeDefined(); // LLM reply
     expect(pathRows(s).find((r) => r.from === "hub-1" && r.through === "direct")).toBeDefined();
   });

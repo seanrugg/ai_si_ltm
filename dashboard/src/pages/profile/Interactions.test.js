@@ -61,7 +61,7 @@ describe("Topology tab", () => {
     expect(await screen.findByRole("heading", { name: "Topology" })).toBeDefined();
     const lights = screen.getByRole("list", { name: "Topology lights" });
     const labels = within(lights).getAllByRole("button").map((b) => b.textContent);
-    expect(labels).toEqual(["LTMS", "jetson-hub", "z3-r0", "z3-r0 (camera)", "z3-r0 (battery)"]);
+    expect(labels).toEqual(["FLTMS", "jetson-hub", "z3-r0", "z3-r0 (camera)", "z3-r0 (battery)"]);
     fireEvent.click(within(lights).getByRole("button", { name: "z3-r0" }));
     expect(await screen.findByText("z3-r0, a member planet around jetson-hub, beating at 48 bpm.")).toBeDefined();
     const calls = vi.mocked(api).mock.calls.filter(([p]) => p === "/admin/profile/episodes").map(([, o]) => o.params.member);

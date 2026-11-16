@@ -562,7 +562,7 @@ export default function Datasets() {
       </PageHeader>
       <p className="mb-4 text-sm text-paper-muted">
         Reference material for the whole fleet. Members read approved versions; every read is logged and sent
-        to the LRS. LTMS doesn&apos;t train on it.
+        to the LRS. FLTMS doesn&apos;t train on it.
       </p>
       <ReferenceSources data={refs.data} onChanged={() => { refs.reload(); reload(); }} />
       <Integrations data={ints.data} onChanged={() => { ints.reload(); reload(); }} />

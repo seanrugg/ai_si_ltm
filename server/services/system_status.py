@@ -303,7 +303,7 @@ def diagnostics(out: dict) -> str:
     """Plain text for a bug report, built only from the (already safe) sections."""
     s, db, j, k, i = out["server"], out["database"], out["jobs"], out["keys"], out["integrations"]
     lines = [
-        "LTMS system status",
+        "FLTMS system status",
         f"generated: {out['generated_at']}",
         f"version: {s['version']}" + (f" ({s['commit']})" if s["commit"] else ""),
         f"started: {s['started_at'] or 'unknown'}; uptime seconds: {s['uptime_seconds']}",

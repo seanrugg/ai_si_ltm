@@ -33,7 +33,7 @@ beforeEach(() => {
       mcp: { label: "MCP tokens", state: "ok", total: 3, active: 2, revoked: 1, expired: 0 },
       reference_sources: { label: "Reference sources", state: "ok", total: 4, imported: 2, pending_versions: 0 },
     },
-    diagnostics: "LTMS system status\nversion: 0.9.0 (abc123def456)\n",
+    diagnostics: "FLTMS system status\nversion: 0.9.0 (abc123def456)\n",
   };
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });

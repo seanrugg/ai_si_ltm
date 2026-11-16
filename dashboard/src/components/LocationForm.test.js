@@ -124,9 +124,9 @@ describe("LocationForm", () => {
 
   it("with nothing at all says not set and why", () => {
     render(React.createElement(LocationForm, { subjectType: "member", name: "a", current: null,
-      unplaced: "It has never connected to LTMS directly." }));
+      unplaced: "It has never connected to FLTMS directly." }));
     expect(screen.getByText("not set")).toBeDefined();
-    expect(screen.getByText("It has never connected to LTMS directly.")).toBeDefined();
+    expect(screen.getByText("It has never connected to FLTMS directly.")).toBeDefined();
   });
 
   it("accuracyText", () => {
