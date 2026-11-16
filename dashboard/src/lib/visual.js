@@ -20,10 +20,10 @@ export const KINDS = {
 
 // Each category has its own color AND dash, so meaning never rests on color alone.
 export const CATEGORIES = [
-  { key: "sense", label: "Sensing", types: ["perception"], color: "#00ff9d", dash: "2 6", direction: "member → LTMS" },
-  { key: "act", label: "Deciding & acting", types: ["thought", "decision", "action", "event"], color: "#ff8a5c", dash: "8 6", direction: "member → LTMS" },
+  { key: "sense", label: "Sensing", types: ["perception"], color: "#00ff9d", dash: "2 6", direction: "member → FLTMS" },
+  { key: "act", label: "Deciding & acting", types: ["thought", "decision", "action", "event"], color: "#ff8a5c", dash: "8 6", direction: "member → FLTMS" },
   { key: "comm", label: "Communicating", types: ["communication"], color: "#f2f6ff", dash: "14 6", direction: "between members" },
-  { key: "learn", label: "Learning & rules", types: ["lesson", "policy"], color: "#ff5fd2", dash: "10 4 2 4", direction: "policies LTMS → member" },
+  { key: "learn", label: "Learning & rules", types: ["lesson", "policy"], color: "#ff5fd2", dash: "10 4 2 4", direction: "policies FLTMS → member" },
 ];
 
 export const NEUTRAL = "#e2eaf5"; // places, admin events, wipes: anything that is neither a role nor a category

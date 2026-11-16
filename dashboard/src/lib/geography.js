@@ -183,8 +183,8 @@ export function unplacedNarration(u) {
 
 export function ltmsNarration(server) {
   return server
-    ? `LTMS, the pyramid${server.label ? ` at ${server.label}` : ""}. Every record ends here.`
-    : "LTMS, the pyramid. Its place isn't declared, so it waits at the frame edge. Every record ends here.";
+    ? `FLTMS, the pyramid${server.label ? ` at ${server.label}` : ""}. Every record ends here.`
+    : "FLTMS, the pyramid. Its place isn't declared, so it waits at the frame edge. Every record ends here.";
 }
 
 /** Records per member up to the hand `t` (ms), from sorted events [{t, member}]. */
@@ -216,7 +216,7 @@ export function placeRows(geo, server, atHand = {}) {
     rows.push({ id: "satellites", site: "Cloud (satellites)", members: names.join(", "),
       source: "provider's place", estimated: false, records: sum(names) });
   }
-  rows.push({ id: "ltms", site: "LTMS", members: "—", source: server ? "declared" : "not declared",
+  rows.push({ id: "ltms", site: "FLTMS", members: "—", source: server ? "declared" : "not declared",
     estimated: false, records: null });
   return rows;
 }
@@ -226,7 +226,7 @@ export function placeRows(geo, server, atHand = {}) {
  * satellite, each unplaced member. Each is {id, label, narration, note}.
  */
 export function globeTouchables(geo, server) {
-  const out = [{ id: "ltms", label: "LTMS", narration: ltmsNarration(server), note: 7 }];
+  const out = [{ id: "ltms", label: "FLTMS", narration: ltmsNarration(server), note: 7 }];
   geo.lights.forEach((l, i) => {
     out.push({ id: l.id, label: `${l.label}${l.place ? ` · ${l.place}` : ""}${l.estimated ? " (estimated)" : ""}`,
       narration: lightNarration(l), note: i % 5 });

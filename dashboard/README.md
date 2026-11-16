@@ -1,4 +1,4 @@
-# LTMS dashboard
+# FLTMS dashboard
 
 React 18 + Vite 5 + Tailwind 3. Admin-only; talks to `/api/admin/*` with the
 `ltms_admin` cookie.

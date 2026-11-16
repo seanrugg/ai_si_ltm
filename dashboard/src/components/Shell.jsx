@@ -178,7 +178,7 @@ export default function Shell({ children }) {
       <aside className="border-b border-ink-line bg-ink-raised md:min-h-screen md:border-b-0 md:border-r">
         <div className="flex items-center justify-between px-4 py-4">
           <span className="text-lg font-bold">
-            LTMS<span className="ml-2 inline-block h-2 w-2 rounded-full bg-led align-middle" aria-hidden="true" />
+            FLTMS<span className="ml-2 inline-block h-2 w-2 rounded-full bg-led align-middle" aria-hidden="true" />
           </span>
           <button className="btn md:hidden" aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}>
             Menu

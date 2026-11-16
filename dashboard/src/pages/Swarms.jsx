@@ -78,7 +78,7 @@ export function KeyOnceDialog({ swarmName, swarmId, keyString, onDone }) {
           Root key for {swarmName}
         </h2>
         <p id="key-once-d" className="mb-3 text-sm text-paper-muted">
-          This is the swarm&apos;s root key. LTMS does not keep it and cannot show it again. Store it in your
+          This is the swarm&apos;s root key. FLTMS does not keep it and cannot show it again. Store it in your
           password manager. Anyone with it can appoint this swarm&apos;s hub.
         </p>
         <div className="mb-1 flex items-center gap-2 text-sm font-bold">
@@ -171,7 +171,7 @@ export function CreateSwarm({ onCreated, initialName = "" }) {
       <h2 id="create-h" className="mb-3 text-lg font-bold">Create a swarm</h2>
       <p className="mb-3 text-sm text-paper-muted">
         {mode === "generate"
-          ? "Your browser creates the swarm's root key and shows it to you once. Only its public key is sent to LTMS."
+          ? "Your browser creates the swarm's root key and shows it to you once. Only its public key is sent to FLTMS."
           : "Register a swarm whose root key you made with the command line. Only its public key is sent."}
       </p>
       <form onSubmit={submit} className="mb-2 flex flex-wrap items-end gap-2" aria-label="Create swarm"

@@ -73,7 +73,7 @@ describe("Geography tab (#405)", () => {
     renderTab();
     const list = await screen.findByRole("list", { name: "Geography lights" });
     const labels = within(list).getAllByRole("button").map((b) => b.textContent);
-    expect(labels).toEqual(["Zoom in", "Zoom out", "Into lab", "Whole globe", "LTMS", "lab · Town (estimated)",
+    expect(labels).toEqual(["Zoom in", "Zoom out", "Into lab", "Whole globe", "FLTMS", "lab · Town (estimated)",
       "helper (satellite)", "lost (unplaced)"]);
     expect(list.textContent).not.toMatch(/\d+\.\d+\.\d+\.\d+/);
     fireEvent.click(within(list).getByRole("button", { name: "lost (unplaced)" }));
@@ -107,7 +107,7 @@ describe("Geography tab (#405)", () => {
     expect(rows.map((r) => r.slice(0, 3))).toEqual([
       ["lab · Town", "hub-1, rover-1", "network, estimated (±25 km)"],
       ["Cloud (satellites)", "helper", "provider's place"],
-      ["LTMS", "—", "declared"],
+      ["FLTMS", "—", "declared"],
     ]);
     const unplaced = within(twin).getByRole("table", { name: "Unplaced (1)" });
     expect(unplaced.textContent).toContain("Only a local network address has been seen.");
@@ -139,7 +139,7 @@ describe("Geography tab (#405)", () => {
     expect(within(touchList()).getByRole("button", { name: "Into lab" })).toBeDefined();
   });
 
-  it("streams each record to LTMS for its measured transit; self-reports beat instead", () => {
+  it("streams each record to FLTMS for its measured transit; self-reports beat instead", () => {
     const events = [{ t: 1000, member: "rover-1", category: "sense", transit: 4 },
       { t: 2000, member: "rover-1", category: "self", transit: 0 }];
     const m = createGlobeMotion(events);

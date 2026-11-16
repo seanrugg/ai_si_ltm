@@ -35,9 +35,9 @@ export default function Login() {
     <main className="flex min-h-screen items-center justify-center px-4">
       <form onSubmit={submit} className="panel w-full max-w-sm p-6">
         <h1 className="text-xl font-bold">
-          LTMS<span className="ml-2 inline-block h-2 w-2 rounded-full bg-led align-middle" aria-hidden="true" />
+          FLTMS<span className="ml-2 inline-block h-2 w-2 rounded-full bg-led align-middle" aria-hidden="true" />
         </h1>
-        <p className="mb-6 mt-1 text-sm text-paper-muted">Memory for the robot mesh. Administrator sign-in.</p>
+        <p className="mb-6 mt-1 text-sm text-paper-muted">A Multi-Swarm Fleet Management System for Hybrid Agentic and Physical AI mesh networks. Administrator sign-in.</p>
         <label className="mb-3 block text-sm">
           Username
           <input

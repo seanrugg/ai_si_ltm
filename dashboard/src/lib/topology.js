@@ -365,7 +365,7 @@ export function plural(n, one, many = `${one}s`) {
  */
 export function touchList(scene, { bpm = () => null, skipLtms = false } = {}) {
   const out = [];
-  if (!skipLtms) out.push({ id: "ltms", label: "LTMS", narration: "LTMS, the pyramid. Every record ends here.", degree: 7 });
+  if (!skipLtms) out.push({ id: "ltms", label: "FLTMS", narration: "FLTMS, the pyramid. Every record ends here.", degree: 7 });
   for (const h of scene.hubs) {
     const flare = scene.thinking.some((x) => x.hub === h.name) ? " A model runs here." : "";
     out.push({ id: `star:${h.name}`, label: h.name,
@@ -390,7 +390,7 @@ export function touchList(scene, { bpm = () => null, skipLtms = false } = {}) {
 // ---------------------------------------------------------------- table twin
 
 function nodeName(key) {
-  if (key === "ltms") return "LTMS";
+  if (key === "ltms") return "FLTMS";
   const [kind, member, source] = key.split(":");
   if (kind === "moon") return `${member} ${SOURCE_LABELS[source] ?? source}`;
   return member;

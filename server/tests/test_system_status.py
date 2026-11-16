@@ -108,7 +108,7 @@ def test_diagnostics_text_has_no_secrets(app, admin):
     key = fleet_key.load(app.state.config)
     system_status.record_job(app.state, "geoip_refresh", ValueError("token=abcdef0123456789abcdef0123456789 at 192.168.1.20"))
     diag = admin.get("/api/admin/system").json()["diagnostics"]
-    assert diag.startswith("LTMS system status\n")
+    assert diag.startswith("FLTMS system status\n")
     for section in ("version:", "migrations:", "scheduler:", "job geoip_refresh: error", "fleet key: present", "LRS endpoints:"):
         assert section in diag
     cfg = app.state.config

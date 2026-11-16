@@ -103,7 +103,7 @@ export function GeographyTables({ geo, server, events, t, locations, network, me
                  columns={[{ key: "site", label: "Site", render: (r) => <strong>{r.site}</strong> },
                    { key: "members", label: "Members" },
                    { key: "source", label: "Location source" },
-                   { key: "records", label: "Records to LTMS up to the hand", numeric: true,
+                   { key: "records", label: "Records to FLTMS up to the hand", numeric: true,
                      render: (r) => (r.records == null ? "—" : r.records) }]} />
       <HoloTable caption={`Unplaced (${unplaced.length})`} rows={unplaced}
                  columns={[{ key: "name", label: "Member", render: (r) => <strong>{r.name}</strong> },
@@ -218,7 +218,7 @@ export function GeographyView({
     { id: "whole", label: "Whole globe", narration: "The whole globe.", onTouch: wholeGlobe },
   ];
   const lights = insideScene
-    ? [{ id: "ltms", label: "LTMS", narration: globeTouchables(geo, server)[0].narration, note: 7 },
+    ? [{ id: "ltms", label: "FLTMS", narration: globeTouchables(geo, server)[0].narration, note: 7 },
       ...touchList(insideScene, {
         skipLtms: true,
         bpm: (p) => (p.heartbeat?.interval_s ? heartbeatBpm(p.heartbeat.interval_s) : null),
@@ -312,7 +312,7 @@ export default function Geography({ subject, name, range, members, swarms, summa
       )}
       {data.locations && !serverPlace(data.locations) && (
         <p className="mt-2 text-xs text-paper-muted">
-          Declare the server&apos;s location (a member location named <code>ltms-server</code>) to place the LTMS pyramid on the globe.
+          Declare the server&apos;s location (a member location named <code>ltms-server</code>) to place the FLTMS pyramid on the globe.
         </p>
       )}
       <div className="mt-6">

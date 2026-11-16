@@ -66,9 +66,9 @@ export function groupSettings(settings) {
 
 export const GEO_HELP = (manualUrl) => (
   <>
-    Estimates come from a city database file kept on this server: LTMS never sends members&apos; addresses
+    Estimates come from a city database file kept on this server: FLTMS never sends members&apos; addresses
     to an online service. Turning estimates on downloads DB-IP&apos;s free City Lite file from db-ip.com,
-    which only learns that this server fetched the file; LTMS fetches a new one every month. On a closed
+    which only learns that this server fetched the file; FLTMS fetches a new one every month. On a closed
     network, download the MMDB file by hand from {manualUrl} and upload it here. Estimates are city-level
     at best, and private and local addresses are never placed.
   </>
@@ -195,7 +195,7 @@ export function GeoStatus({ geo, src, onChanged }) {
       )}
       {error && <p className="mt-2 text-sm text-bad" role="alert">{error}</p>}
       <p className="mt-2 max-w-prose text-xs text-paper-muted">
-        LTMS can place a member from the public address it connects from, using a city database kept on this
+        FLTMS can place a member from the public address it connects from, using a city database kept on this
         server. Nothing is looked up online. Members on a local network are placed through their hub, or by
         their swarm&apos;s declared home.
       </p>
@@ -315,7 +315,7 @@ export default function Settings() {
       </p>
       <section className="panel mb-6 p-4" aria-labelledby="server-location-h">
         <h2 id="server-location-h" className="font-bold">Server location</h2>
-        <p className="text-sm text-paper-muted">Where this LTMS server is. The Geography tab&apos;s globe puts the LTMS pyramid here.</p>
+        <p className="text-sm text-paper-muted">Where this FLTMS server is. The Geography tab&apos;s globe puts the FLTMS pyramid here.</p>
         <LocationForm key={JSON.stringify(locations.data?.server ?? null)} subjectType="member" name="ltms-server"
                       title="Server" current={locations.data?.server ?? null} onDone={locations.reload} />
       </section>

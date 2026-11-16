@@ -530,7 +530,7 @@ export default function Globe({
         system = null;
       }
 
-      label(ctx, ltmsPin.edge ? `LTMS ${ltmsPin.arrow}` : server ? "LTMS" : "LTMS (place not declared)",
+      label(ctx, ltmsPin.edge ? `FLTMS ${ltmsPin.arrow}` : server ? "FLTMS" : "FLTMS (place not declared)",
             L.x + (ltmsPin.edge && L.x > W / 2 ? -16 : 18), L.y - (ltmsPin.edge ? 16 : 8), LTMS_CORE, 1,
             ltmsPin.edge && L.x > W / 2 ? "right" : "left");
       label(ctx, `zoom ${view.zoom.toFixed(1)}×`, W - 12, H - 12, colors.faint, 1, "right", '400 11px "DM Sans", sans-serif');

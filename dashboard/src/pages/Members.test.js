@@ -310,14 +310,14 @@ describe("locations on the member rows (#399)", () => {
       geo: { enabled: true, attribution: false },
       members: [
         { name: "alice", best: net, all: [net] },
-        { name: "bob", best: null, all: [], unplaced: "It has never connected to LTMS directly." },
+        { name: "bob", best: null, all: [], unplaced: "It has never connected to FLTMS directly." },
       ],
     };
     renderMembers();
     expect(rowOf("alice").textContent).not.toContain("DB-IP");
     const bob = rowOf("bob").textContent;
     expect(bob).toContain("not set");
-    expect(bob).toContain("It has never connected to LTMS directly.");
+    expect(bob).toContain("It has never connected to FLTMS directly.");
   });
 
   it("Edit pre-fills from the estimate and saves only on Save", async () => {

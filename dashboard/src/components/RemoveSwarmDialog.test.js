@@ -37,7 +37,7 @@ describe("RemoveSwarmDialog", () => {
   it("sends the chosen options, warns about them, and shows a server error", async () => {
     mock(async () => { throw new Error("purge in steps: too many"); });
     render(React.createElement(RemoveSwarmDialog, { name: "echo-base", onClose: () => {} }));
-    fireEvent.click(screen.getByLabelText("Remove them from LTMS"));
+    fireEvent.click(screen.getByLabelText("Remove them from FLTMS"));
     fireEvent.click(screen.getByLabelText("Purge records that came through this swarm"));
     expect(screen.getByText(/can't send records until re-enrolled/)).toBeDefined();
     expect(screen.getByText(/can't be undone/)).toBeDefined();

@@ -19,7 +19,7 @@ export function MemberFacts({ member, net, loc, rates }) {
       </div>
       <dl className="grid grid-cols-[8rem_1fr] gap-x-3 gap-y-1">
         <dt className="text-paper-muted">Path</dt><dd>{net?.path ?? "—"}</dd>
-        <dt className="text-paper-muted">Seen by LTMS</dt><dd>{net?.seen?.ip ?? "—"}</dd>
+        <dt className="text-paper-muted">Seen by FLTMS</dt><dd>{net?.seen?.ip ?? "—"}</dd>
         <dt className="text-paper-muted">Reported LAN</dt>
         <dd>{net?.reported?.length ? net.reported.map((a) => `${a.ip} (${a.source})`).join(", ") : "—"}</dd>
         <dt className="text-paper-muted">Location</dt>

@@ -260,7 +260,7 @@ async def _unplaced_reason(session, row: dict, geo: dict, declared: dict) -> str
     if not geo["enabled"]:
         return f"No GPS or declared location, {no_home}, and network estimates are off: {geo['reason']}."
     if seen is None:
-        return f"It has never connected to LTMS directly, and {no_home}."
+        return f"It has never connected to FLTMS directly, and {no_home}."
     return f"Its address ({seen.ip}) isn't in the city database, and {no_home}."
 
 
