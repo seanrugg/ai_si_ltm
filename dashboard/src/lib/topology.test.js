@@ -173,10 +173,10 @@ describe("touch", () => {
   it("names each light, with a planet's heartbeat", () => {
     const list = touchList(scene(), { bpm: (p) => (p.heartbeat?.interval_s ? 48 : null) });
     expect(list.map((x) => x.label)).toEqual([
-      "LTMS", "hub-1 (star)",
-      "agent-1 (planet)",
-      "rover-1 (planet)", "rover-1 camera (moon)", "rover-1 mics (moon)", "rover-1 cliff sensors (moon)", "rover-1 battery (moon)",
-      "rover-2 (planet)", "rover-2 IMU (moon)",
+      "LTMS", "hub-1",
+      "agent-1",
+      "rover-1", "rover-1 (camera)", "rover-1 (mics)", "rover-1 (cliff sensors)", "rover-1 (battery)",
+      "rover-2", "rover-2 (IMU)",
     ]);
     const byId = Object.fromEntries(list.map((x) => [x.id, x.narration]));
     expect(byId["planet:rover-1"]).toBe("rover-1, a member planet around hub-1, beating at 48 bpm.");
@@ -188,6 +188,13 @@ describe("touch", () => {
     expect(new Set(list.map((x) => x.id)).size).toBe(list.length);
     expect(noteHz(0)).toBeCloseTo(293.66, 2);
     expect(noteHz(5)).toBeCloseTo(587.32, 1);
+  });
+
+  it("has unique labels with no role suffix", () => {
+    const list = touchList(scene(), { bpm: (p) => (p.heartbeat?.interval_s ? 48 : null) });
+    const labels = list.map((x) => x.label);
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(labels.some((l) => /\(star\)|\(planet\)|\(moon\)/.test(l))).toBe(false);
   });
 });
 

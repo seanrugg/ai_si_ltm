@@ -368,7 +368,7 @@ export function touchList(scene, { bpm = () => null, skipLtms = false } = {}) {
   if (!skipLtms) out.push({ id: "ltms", label: "LTMS", narration: "LTMS, the pyramid. Every record ends here.", degree: 7 });
   for (const h of scene.hubs) {
     const flare = scene.thinking.some((x) => x.hub === h.name) ? " A model runs here." : "";
-    out.push({ id: `star:${h.name}`, label: `${h.name} (star)`,
+    out.push({ id: `star:${h.name}`, label: h.name,
                narration: `${h.name}, the star: relays for ${plural(h.planets.length, "member")}.${flare}`, degree: 0 });
   }
   scene.order.forEach((name, i) => {
@@ -376,11 +376,11 @@ export function touchList(scene, { bpm = () => null, skipLtms = false } = {}) {
     const rate = bpm(p);
     const where = p.elsewhere ? " elsewhere" : p.hub ? ` around ${p.hub}` : "";
     const beat = rate ? `beating at ${Math.round(rate)} bpm` : "no heartbeat in this range";
-    out.push({ id: `planet:${name}`, label: `${name} (planet)`,
+    out.push({ id: `planet:${name}`, label: name,
                narration: `${name}, a ${ROLES[p.role]?.label.toLowerCase() ?? "member"} planet${where}, ${beat}.`,
                degree: 2 + i });
     p.moons.forEach((src, j) => {
-      out.push({ id: `moon:${name}:${src}`, label: `${name} ${SOURCE_LABELS[src] ?? src} (moon)`,
+      out.push({ id: `moon:${name}:${src}`, label: `${name} (${SOURCE_LABELS[src] ?? src})`,
                  narration: `${name}'s ${SOURCE_LABELS[src] ?? src}, a moon.`, degree: 5 + j });
     });
   });

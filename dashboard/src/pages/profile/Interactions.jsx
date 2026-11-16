@@ -293,7 +293,7 @@ export function TopologyTables({ scene, roster, t }) {
       {paths.length === 0 && <p className="text-sm text-paper-muted">Nothing has arrived up to the hand.</p>}
       <HoloTable caption="By source" rows={sources}
                  columns={[{ key: "member", label: "Member" },
-                   { key: "label", label: "Source", render: (r) => (r.moon ? `${r.label} (moon)` : r.label) },
+                   { key: "label", label: "Source", render: (r) => r.label },
                    { key: "records", label: "Records in range", numeric: true }]} />
       <HoloTable caption="Members" rows={members}
                  columns={[{ key: "name", label: "Name" },

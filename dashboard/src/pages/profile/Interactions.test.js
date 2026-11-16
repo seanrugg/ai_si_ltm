@@ -61,8 +61,8 @@ describe("Topology tab", () => {
     expect(await screen.findByRole("heading", { name: "Topology" })).toBeDefined();
     const lights = screen.getByRole("list", { name: "Topology lights" });
     const labels = within(lights).getAllByRole("button").map((b) => b.textContent);
-    expect(labels).toEqual(["LTMS", "jetson-hub (star)", "z3-r0 (planet)", "z3-r0 camera (moon)", "z3-r0 battery (moon)"]);
-    fireEvent.click(within(lights).getByRole("button", { name: "z3-r0 (planet)" }));
+    expect(labels).toEqual(["LTMS", "jetson-hub", "z3-r0", "z3-r0 (camera)", "z3-r0 (battery)"]);
+    fireEvent.click(within(lights).getByRole("button", { name: "z3-r0" }));
     expect(await screen.findByText("z3-r0, a member planet around jetson-hub, beating at 48 bpm.")).toBeDefined();
     const calls = vi.mocked(api).mock.calls.filter(([p]) => p === "/admin/profile/episodes").map(([, o]) => o.params.member);
     expect(calls.sort()).toEqual(["jetson-hub", "z3-r0"]);
@@ -77,7 +77,7 @@ describe("Topology tab", () => {
     const bySource = within(twin).getByText("By source").closest("table");
     const counts = within(bySource).getAllByRole("row").slice(1).map((r) => r.lastChild.textContent);
     expect(counts.map(Number).reduce((a, b) => a + b, 0)).toBe(episodes["z3-r0"].count);
-    expect(within(bySource).getByText("camera (moon)")).toBeDefined();
+    expect(within(bySource).getByText("camera")).toBeDefined();
     const members_ = within(twin).getByText("Members").closest("table");
     expect(within(members_).getByText("is the hub")).toBeDefined();
     expect(within(twin).getByText("Paths")).toBeDefined();
