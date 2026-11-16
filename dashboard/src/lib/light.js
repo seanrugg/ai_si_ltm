@@ -102,6 +102,7 @@ export function createFlashGate(maxPerSecond = 3) {
 // ---------------------------------------------------------------- glow sprites
 
 const GLOW_CACHE_MAX = 256;
+const GLOW_RADIUS_MAX = 512; // px: a canvas this side of every browser's limit
 const glowCache = new Map();
 
 function defaultCanvas(size) {
@@ -116,12 +117,17 @@ function defaultCanvas(size) {
  * A cached radial-gradient glow sprite: a square canvas 2·radius wide, `color`
  * at full strength in the middle fading to transparent at the edge. Sprites are
  * cached by color and whole-pixel radius (at most 256, oldest dropped first),
+ * with the radius capped at 512 px. A non-finite radius or a non-string color
+ * draws nothing (returns null), so one bad value can't crash a view.
  * so a view can draw thousands of lights a frame without new gradients.
  * `makeCanvas(size)` is for tests and workers; it defaults to OffscreenCanvas or
  * a <canvas>. Returns null when no 2D context is available (e.g. jsdom).
  */
 export function glowSprite(color, radius, makeCanvas = defaultCanvas) {
-  const r = Math.max(1, Math.round(radius));
+  // A bad radius (NaN, a string, Infinity) skips the glow rather than throwing
+  // from new OffscreenCanvas() and taking the whole page down.
+  if (typeof radius !== "number" || !Number.isFinite(radius) || typeof color !== "string") return null;
+  const r = Math.min(GLOW_RADIUS_MAX, Math.max(1, Math.round(radius)));
   const key = `${color}|${r}`;
   if (glowCache.has(key)) {
     const hit = glowCache.get(key);

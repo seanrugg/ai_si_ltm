@@ -144,6 +144,19 @@ function fakeCanvas() {
 }
 
 describe("glow sprite cache", () => {
+  it("draws nothing for a bad radius or color, and never makes a canvas for one (regression)", () => {
+    const make = vi.fn(() => ({ width: 0, getContext: () => null }));
+    for (const r of [NaN, Infinity, -Infinity, "#ff7a59", undefined, null]) expect(glowSprite("#6aa8ff", r, make)).toBeNull();
+    expect(glowSprite(7, 5, make)).toBeNull();
+    expect(make).not.toHaveBeenCalled();
+  });
+
+  it("caps a glow at 512 px radius", () => {
+    const make = vi.fn((size) => ({ width: size, getContext: () => ({
+      createRadialGradient: () => ({ addColorStop() {} }), fillRect() {} }) }));
+    expect(glowSprite("#123456", 1e6, make).width).toBe(1024);
+  });
+
   it("makes one sprite per color and whole-pixel radius", () => {
     const { make, made } = fakeCanvas();
     const a = glowSprite("#6aa8ff", 10, make);
