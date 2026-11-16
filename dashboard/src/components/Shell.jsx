@@ -71,7 +71,7 @@ function Group({ group, status, open, onToggle, onPick }) {
         <HelpTip id={`nav-help-${group.key}`} label={`About ${group.label}`}>{group.help}</HelpTip>
       </div>
       <ul id={listId} hidden={!open} aria-labelledby={group.collapsible ? undefined : `${listId}-h`}
-          aria-label={group.collapsible ? group.label : undefined} className="flex flex-col gap-0.5">
+          aria-label={group.collapsible ? group.label : undefined} className={open ? "flex flex-col gap-0.5" : "hidden"}>
         {group.items.map((item) => <Item key={item.to} item={item} status={status} onPick={onPick} />)}
       </ul>
     </div>

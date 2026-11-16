@@ -78,6 +78,25 @@ describe("Shell nav (#379)", () => {
     expect(JSON.parse(window.localStorage.getItem("ltms.nav.groups"))).toEqual({ govern: true });
   });
 
+  it("toggles hidden/flex classes on a collapsible group's list", async () => {
+    mockStatus();
+    renderAt("/activity");
+    await waitFor(() => expect(api).toHaveBeenCalled());
+    const govern = header("Govern");
+    const list = document.getElementById(govern.getAttribute("aria-controls"));
+    expect(list).not.toBeNull();
+    // Closed: the list carries the `hidden` class, not `flex`.
+    expect(list.classList.contains("hidden")).toBe(true);
+    expect(list.classList.contains("flex")).toBe(false);
+    expect(list.hidden).toBe(true);
+
+    fireEvent.click(govern);
+    // Open: the list carries `flex`, not `hidden`.
+    expect(list.classList.contains("flex")).toBe(true);
+    expect(list.classList.contains("hidden")).toBe(false);
+    expect(list.hidden).toBe(false);
+  });
+
   it("opens the group holding the current page", async () => {
     mockStatus();
     renderAt("/lrs");

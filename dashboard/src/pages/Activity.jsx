@@ -59,7 +59,7 @@ export default function Activity() {
   const requested = Number(params.get("hours"));
   const hours = Number.isFinite(requested) && requested >= 1 && requested <= 720 ? requested : 24;
 
-  const { data, error, loading, reload } = useApi("/admin/activity", { params: { hours } });
+  const { data, error, loading, reload } = useApi("/admin/activity", { hours });
   const groups = (data?.groups || []).map((g) =>
     includeTelemetry ? g : withoutTelemetry(g)
   );
@@ -297,7 +297,7 @@ function DrillPanel({ group, hours, since, bucketSeconds, activeType, includeTel
   const navigate = useNavigate();
   const [tableView, setTableView] = useState(false);
   const { data, error, loading, reload } = useApi("/admin/activity", {
-    params: { hours, group: "member", swarm: group.key ?? "none" },
+    hours, group: "member", swarm: group.key ?? "none",
   });
   const members = (data?.groups || [])
     .map((m) => (includeTelemetry ? m : withoutTelemetry(m)))
