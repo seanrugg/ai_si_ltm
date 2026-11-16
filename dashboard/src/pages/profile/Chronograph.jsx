@@ -501,7 +501,7 @@ export function drawChronograph(ctx, W, H, opts) {
     ctx.moveTo(e.from[0], e.from[1]);
     ctx.lineTo(e.to[0], e.to[1]);
     ctx.stroke();
-    if (!small) drawGlow(ctx, e.to[0], e.to[1], 3, e.color, 0.45);
+    if (!small) drawGlow(ctx, e.to[0], e.to[1], e.color, 3, 0.45);
   }
   ctx.globalAlpha = 1;
   ctx.fillStyle = withAlpha(LTMS_CORE, 0.1);
@@ -516,9 +516,9 @@ export function drawChronograph(ctx, W, H, opts) {
     const leap = dance.active[i];
     if (leap) {
       const p = leapPoint(leap.from, leap.to, leap.u);
-      drawGlow(ctx, p[0], p[1], small ? 5 : 10, leap.color, LIGHT.live);
+      drawGlow(ctx, p[0], p[1], leap.color, small ? 5 : 10, LIGHT.live);
     } else {
-      drawGlow(ctx, pts[i][0], pts[i][1], small ? 3 : 7, nodeColor(k), LIGHT.lit);
+      drawGlow(ctx, pts[i][0], pts[i][1], nodeColor(k), small ? 3 : 7, LIGHT.lit);
     }
   });
   ctx.restore();
@@ -526,7 +526,7 @@ export function drawChronograph(ctx, W, H, opts) {
   ctx.lineWidth = 1;
   arc(ctx, cx, cy, core, 0, TAU);
   const alive = heartAlive(data?.heartbeat, hand, data?.pulses);
-  drawGlow(ctx, cx, cy, core * 0.32 * (1 + 0.15 * swell), CAT_SELF,
+  drawGlow(ctx, cx, cy, CAT_SELF, core * 0.32 * (1 + 0.15 * swell),
            alive ? LIGHT.trail * 0.7 + 0.35 * swell : LIGHT.asleep * 0.35);
 
   // The hand
@@ -541,7 +541,7 @@ export function drawChronograph(ctx, W, H, opts) {
   ctx.lineTo(hx1, hy1);
   ctx.stroke();
   ctx.globalAlpha = 1;
-  drawGlow(ctx, hx1, hy1, small ? 5 : 9, led, LIGHT.live);
+  drawGlow(ctx, hx1, hy1, led, small ? 5 : 9, LIGHT.live);
   ctx.restore();
 
   if (small) return;
