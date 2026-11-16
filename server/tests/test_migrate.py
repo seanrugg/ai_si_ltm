@@ -536,10 +536,16 @@ def test_records_stay_append_only_after_upgrade(db_url):
     with TestClient(app, base_url="http://testserver"):
         _seed_one_record(db_url)
 
+        # Its own engine on its own loop: borrowing app.state.sessionmaker here
+        # drove the app's pooled asyncpg connection from a second event loop
+        # while TestClient's loop held it, which segfaulted intermittently on 3.11.
         async def go():
-            async with app.state.sessionmaker() as session:
-                await session.execute(text("UPDATE records SET seq = seq"))
-                await session.commit()
+            engine = create_async_engine(db_url)
+            try:
+                async with engine.begin() as conn:
+                    await conn.execute(text("UPDATE records SET seq = seq"))
+            finally:
+                await engine.dispose()
 
         with pytest.raises(Exception):
             asyncio.run(go())
