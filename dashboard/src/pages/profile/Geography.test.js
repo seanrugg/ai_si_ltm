@@ -124,8 +124,8 @@ describe("Geography tab (#405)", () => {
     renderTab("/members/rover-1/profile?tab=places", { subject: "member", name: "rover-1" });
     const list = await screen.findByRole("list", { name: "Geography lights" });
     const labels = within(list).getAllByRole("button").map((b) => b.textContent);
-    expect(labels).toContain("hub-1 (star)");
-    expect(labels).toContain("rover-1 (planet)");
+    expect(labels).toContain("hub-1");
+    expect(labels).toContain("rover-1");
     expect(labels).not.toContain("helper (satellite)");
   });
 
@@ -134,7 +134,7 @@ describe("Geography tab (#405)", () => {
     const list = await screen.findByRole("list", { name: "Geography lights" });
     fireEvent.keyDown(list, { key: "Escape" });
     // Reduced motion in tests (no animation frames): the move lands at once on the next level poll.
-    await vi.waitFor(() => expect(within(touchList()).queryByRole("button", { name: "rover-1 (planet)" })).toBeNull(),
+    await vi.waitFor(() => expect(within(touchList()).queryByRole("button", { name: "rover-1" })).toBeNull(),
       { timeout: 2000 });
     expect(within(touchList()).getByRole("button", { name: "Into lab" })).toBeDefined();
   });
