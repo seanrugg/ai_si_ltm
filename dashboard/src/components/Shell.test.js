@@ -97,6 +97,29 @@ describe("Shell nav (#379)", () => {
     expect(list.hidden).toBe(false);
   });
 
+  it("collapses Operate and Analyze too, open by default, remembered, and reopened on their own pages (#426)", async () => {
+    mockStatus();
+    const { unmount } = renderAt("/activity");
+    await waitFor(() => expect(api).toHaveBeenCalled());
+    for (const name of ["Operate", "Analyze"]) {
+      const h = header(name);
+      expect(h.getAttribute("aria-expanded")).toBe("true");
+      const list = document.getElementById(h.getAttribute("aria-controls"));
+      expect(list.classList.contains("flex")).toBe(true);
+      fireEvent.click(h);
+      expect(h.getAttribute("aria-expanded")).toBe("false");
+      expect(list.hidden).toBe(true);
+      expect(list.classList.contains("hidden")).toBe(true);
+      expect(list.classList.contains("flex")).toBe(false);
+    }
+    expect(JSON.parse(window.localStorage.getItem("ltms.nav.groups"))).toEqual({ operate: false, analyze: false });
+    unmount();
+
+    renderAt("/members");
+    await waitFor(() => expect(header("Operate").getAttribute("aria-expanded")).toBe("true"));
+    expect(header("Analyze").getAttribute("aria-expanded")).toBe("false");
+  });
+
   it("opens the group holding the current page", async () => {
     mockStatus();
     renderAt("/lrs");

@@ -115,12 +115,12 @@ export function Nav({ status, onPick }) {
   const [dismissed, setDismissed] = useState(isChecklistDismissed);
   const done = setupDone(status?.setup);
 
-  const isOpen = (g) => !g.collapsible || auto.has(g.key) || groupOpen(g.key, choices, done);
+  const isOpen = (g) => !g.collapsible || auto.has(g.key) || groupOpen(g.key, choices, done, g.openByDefault);
 
   const current = groupOf(pathname);
   useEffect(() => {
     const g = GROUPS.find((x) => x.key === current);
-    if (g && g.collapsible && !groupOpen(g.key, choices, done)) {
+    if (g && g.collapsible && !groupOpen(g.key, choices, done, g.openByDefault)) {
       setAuto((s) => (s.has(g.key) ? s : new Set(s).add(g.key)));
     }
     // Only on navigation: collapsing the current group by hand must stick.

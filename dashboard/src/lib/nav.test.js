@@ -12,8 +12,8 @@ describe("nav groups (#379)", () => {
   it("match the agreed order and grouping", () => {
     expect(OVERVIEW).toEqual({ to: "/activity", label: "Overview" });
     expect(GROUPS.map((g) => [g.label, g.collapsible, g.items.map((i) => i.label)])).toEqual([
-      ["Operate", false, ["Timeline", "Conversation", "Members", "Swarms", "Directives"]],
-      ["Analyze", false, ["Health", "Volume", "Outcomes", "Lessons & policies", "Integrity", "Geography"]],
+      ["Operate", true, ["Timeline", "Conversation", "Members", "Swarms", "Directives"]],
+      ["Analyze", true, ["Health", "Volume", "Outcomes", "Lessons & policies", "Integrity", "Geography"]],
       ["Govern", true, ["Charter", "Audit log", "Retention", "Export"]],
       ["Configure", true, ["Settings", "MCP access", "LRS endpoints", "Datasets", "System status"]],
     ]);
@@ -60,6 +60,11 @@ describe("collapse defaults", () => {
     expect(groupOpen("govern", {}, true)).toBe(false);
     expect(groupOpen("govern", { govern: true }, true)).toBe(true);
     expect(groupOpen("govern", { govern: false }, false)).toBe(false);
+    // Operate and Analyze (#426): open by default whatever the setup state; a choice still wins.
+    expect(GROUPS.filter((g) => g.openByDefault).map((g) => g.key)).toEqual(["operate", "analyze"]);
+    expect(groupOpen("operate", {}, true, true)).toBe(true);
+    expect(groupOpen("operate", {}, undefined, true)).toBe(true);
+    expect(groupOpen("operate", { operate: false }, true, true)).toBe(false);
   });
 
   it("needs every required checklist item, not the optional LRS", () => {

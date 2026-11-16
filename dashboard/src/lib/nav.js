@@ -7,7 +7,7 @@ export const OVERVIEW = { to: "/activity", label: "Overview" };
 // URLs never change; only labels and grouping do.
 export const GROUPS = [
   {
-    key: "operate", label: "Operate", help: NAV_OPERATE, collapsible: false,
+    key: "operate", label: "Operate", help: NAV_OPERATE, collapsible: true, openByDefault: true,
     items: [
       { to: "/timeline", label: "Timeline" },
       { to: "/conversation", label: "Conversation" },
@@ -17,7 +17,7 @@ export const GROUPS = [
     ],
   },
   {
-    key: "analyze", label: "Analyze", help: NAV_ANALYZE, collapsible: false,
+    key: "analyze", label: "Analyze", help: NAV_ANALYZE, collapsible: true, openByDefault: true,
     items: [
       { to: "/health", label: "Health" },
       { to: "/volume", label: "Volume" },
@@ -145,10 +145,13 @@ export const getDirectivesSeen = () => read(SEEN_KEY) || undefined;
 export const setDirectivesSeen = (iso) => write(SEEN_KEY, iso);
 
 /**
- * Whether a collapsible group is open: a hand-made choice wins; otherwise open
- * while the fleet isn't set up yet, collapsed once it is (or while unknown).
+ * Whether a collapsible group is open: a hand-made choice wins. Otherwise a group
+ * marked `openByDefault` (Operate, Analyze: daily use) is open; the others
+ * (Govern, Configure) are open while the fleet isn't set up yet and collapsed
+ * once it is (or while unknown). Every group collapses (#426).
  */
-export function groupOpen(key, choices, done) {
+export function groupOpen(key, choices, done, openByDefault = false) {
   if (typeof choices[key] === "boolean") return choices[key];
+  if (openByDefault) return true;
   return done === false;
 }
