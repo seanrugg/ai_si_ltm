@@ -68,12 +68,27 @@ else disagree, this file wins (except for direct instructions from Sean).
 
 ## 3. Setup and commands
 
+**Start every session like this, before you read or edit any file:**
+
 ```bash
-git checkout main && git pull origin main
+git status                                # on main, nothing uncommitted? If not, stop and tell Sean.
+                                          # Never stash, reset or delete someone's work to get clean.
+git checkout main && git pull --ff-only origin main
+git log -1 --oneline                      # must match: git log -1 --oneline origin/main
+gh issue view <n> --comments              # the issue AND its comments are your instructions
+```
+
+Work only from the issue you were given (or picked under rule 2) and its
+comments. Ignore plans, todo lists or "next issues" left over from earlier
+sessions: they are stale, and closed issues are done.
+
+Then:
+
+```bash
 git checkout -b agent/<you>/<issue>-<slug>
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e '.[dev]'
-pytest                                    # must pass: about 80 tests, about 30 s
+pytest                                    # must pass: about 870 tests, a few minutes (-n auto is faster)
 ```
 
 Also useful:
@@ -140,7 +155,7 @@ Before opening the PR:
 - [ ] New behavior has a test
 - [ ] The attribution block is filled in with your real model, not a placeholder
 - [ ] `Agent-Model` is the model name as `ollama ps` shows it (e.g. `nemotron-3.5-super` or `nemotron-3.5-super:latest`); the quantization is optional
-- [ ] `Agent-Host` is one of the listed labels, not the OS: `mac-studio-a` is the machine named `AI-Compute-Node` (`scutil --get ComputerName`). If yours isn't listed, write its ComputerName
+- [ ] `Agent-Host` is one of the listed labels, not the OS: `mac-studio-a` is the machine whose `scutil --get ComputerName` prints `AI Compute Node`. If yours isn't listed, write its ComputerName
 - [ ] Don't amend or force-push just to add the PR number; the squash merge adds it
 
 ## 6. Vocabulary
