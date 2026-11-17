@@ -13,9 +13,22 @@
 # LTMS and the LRS publish on 127.0.0.1 only by default. Put a TLS reverse
 # proxy in front before exposing them, or set LTMS_BIND / LRS_BIND in .env.
 # LTMS creates its own schema on start.
+#
+# Every service restarts with the Docker daemon (host reboot, Docker package
+# upgrade) unless you stopped it yourself, and keeps at most 30 MB of container
+# logs (#437). See docs/docker.md, "Host updates and reboots".
+
+x-restart: &restart unless-stopped
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
   db:
+    restart: *restart
+    logging: *logging
     image: postgres:16
     volumes:
       - db-data:/var/lib/postgresql/data
@@ -31,6 +44,8 @@ services:
       start_period: 10s
 
   ltms:
+    restart: *restart
+    logging: *logging
     image: ${LTMS_IMAGE:-ghcr.io/seanrugg/ai_si_ltm:latest}
     build: .
     depends_on:
@@ -73,6 +88,8 @@ services:
   # Optional MQTT broker for swarms. Members connect on the local network,
   # so it listens on all interfaces; authentication is required.
   mqtt:
+    restart: *restart
+    logging: *logging
     image: eclipse-mosquitto:2
     profiles: [mqtt]
     volumes:
@@ -86,6 +103,8 @@ services:
   # Optional xAPI LRS: Yet Analytics SQL LRS, as in its own compose example.
   # Pin LRSQL_IMAGE to a release tag for anything beyond a trial.
   lrs-db:
+    restart: *restart
+    logging: *logging
     image: postgres:16
     profiles: [lrs]
     volumes:
@@ -102,6 +121,8 @@ services:
       start_period: 10s
 
   lrs:
+    restart: *restart
+    logging: *logging
     image: ${LRSQL_IMAGE:-yetanalytics/lrsql:latest}
     profiles: [lrs]
     command: /lrsql/bin/run_postgres.sh

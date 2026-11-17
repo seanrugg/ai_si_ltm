@@ -133,6 +133,56 @@ editing `.env`. `LTMS_PUBLIC_BASE_URL` must match the public host, because
   into the image (AGENTS.md rule 10).
 - Scale and volume tests run on a disposable stack: see [testing-at-scale.md](testing-at-scale.md).
 
+## Host updates and reboots (#437)
+
+Every service in `compose.yaml` has `restart: unless-stopped`. When the Docker
+daemon restarts (a host reboot, or unattended-upgrades installing a new
+`docker-ce` / `containerd`), Docker starts the containers again by itself. A
+container you stopped yourself (`docker compose stop`, or Stop in a hosting
+panel) stays stopped, also across reboots.
+
+On a daemon restart, Docker starts the containers itself and ignores
+`depends_on`, so `ltms` may start before PostgreSQL accepts connections. It
+then exits on its startup migration and Docker restarts it until the database
+is up, usually within seconds.
+
+Container logs are capped at 3 files of 10 MB per service (`json-file`
+driver). `docker compose logs` still works; older lines roll off.
+
+**Applying the change to a running stack:** the restart policy and the log cap
+take effect only when the containers are recreated. After updating
+`compose.yaml`, run `docker compose up -d` (with your profiles, or
+`COMPOSE_PROFILES` in `.env`), or use your panel's redeploy. Check with:
+
+```bash
+docker inspect -f '{{.Name}} {{.HostConfig.RestartPolicy.Name}}' $(docker compose ps -q)
+systemctl is-enabled docker     # must print "enabled", or nothing starts after a reboot
+```
+
+Recommendations:
+
+- **Don't hold Docker back** (`apt-mark hold`) to avoid restarts. That trades a
+  few seconds of downtime for missed security fixes.
+- **Optional, as root:** `"live-restore": true` in `/etc/docker/daemon.json`
+  keeps containers running through most daemon restarts (not a reboot). Apply
+  with `systemctl reload docker`.
+- A reboot is the end-to-end test: afterwards every container should be `Up`
+  with no manual step.
+
+**If the site answers 502 after an update:**
+
+```bash
+docker compose ps -a                                   # Exited? Restarting?
+docker inspect $(docker compose ps -aq) \
+  -f '{{.Name}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} finished={{.State.FinishedAt}}'
+grep -A6 "Start-Date" /var/log/apt/history.log | grep -iE "start-date|docker|containerd" | tail
+df -h
+```
+
+`docker` and `dmesg` need root or the `docker` group. A hosting panel's
+per-site SSH user usually has neither; use the panel's Docker page or a root
+terminal.
+
 ## Upgrades and migrations
 
 Upgrades run automatically on start: the container's entrypoint runs
