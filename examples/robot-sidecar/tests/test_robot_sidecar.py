@@ -372,3 +372,145 @@ def test_an_empty_models_setting_logs_the_warning(caplog):
     with caplog.at_level("WARNING"):
         assert cognition_models({"SIDECAR_COGNITION_MODELS": "m@h"}) == [{"name": "m", "runs_on": "h"}]
     assert caplog.text == ""
+
+
+# -- deadbands and heartbeats (#438 part 1) --------------------------------
+
+class HealthAdapter(FakeAdapter):
+    """An adapter that reports health with deadbands."""
+    health_deadband = {"battery_volts": 0.05, "battery_level": 0, "charging": 0, "on_charger_platform": 0}
+
+
+def _record_id(link, index=0):
+    # FakeLink stamps agent "bot-1" and seq = position + 1 on the append return value,
+    # which the records themselves don't carry.
+    return f"bot-1:{index + 1}"
+
+
+def test_unchanged_group_is_skipped_until_its_heartbeat():
+    sc = Sidecar([], body_seconds=30, now=0, heartbeat_seconds=600)
+    link = FakeLink()
+    wheels = {"sensor": "wheels", "modality": "encoder", "unit": "mm/s",
+              "deadband": {"left": 1.0, "right": 1.0}}
+    for now in range(30, 661, 30):  # windows at 30 s .. 660 s
+        sc.emit(Item("sample", values={"left": 10.0, "right": 10.0}, sensor=wheels), at=now)
+        sc.poll(link, now)
+    assert len(link.records) == 2  # the first window, then the heartbeat at >= 600 s
+    first, hb = link.records
+    assert hb["payload"]["stats"]["unchanged_since"] == _record_id(link, 0)
+    assert hb["payload"]["stats"]["windows_skipped"] == 19  # windows at 60 .. 600 s
+    assert hb["payload"]["stats"]["count"] == 1  # still the normal record, plus the two fields
+
+
+def test_change_beyond_band_signs_within_band_does_not():
+    sc = Sidecar([], body_seconds=30, now=0, heartbeat_seconds=600)
+    link = FakeLink()
+    wheels = {"sensor": "wheels", "modality": "encoder", "unit": "mm/s",
+              "deadband": {"left": 1.0, "right": 1.0}}
+    sc.emit(Item("sample", values={"left": 10.0, "right": 10.0}, sensor=wheels), at=30.0)
+    sc.poll(link, 30)
+    assert len(link.records) == 1
+    sc.emit(Item("sample", values={"left": 10.4, "right": 10.4}, sensor=wheels), at=60.0)  # inside band
+    sc.poll(link, 60)
+    assert len(link.records) == 1  # skipped
+    sc.emit(Item("sample", values={"left": 12.0, "right": 12.0}, sensor=wheels), at=90.0)  # beyond band
+    sc.poll(link, 90)
+    assert len(link.records) == 2
+
+
+def test_spread_over_twice_band_is_a_change_with_steady_mean():
+    sc = Sidecar([], body_seconds=30, now=0, heartbeat_seconds=600)
+    link = FakeLink()
+    wheels = {"sensor": "wheels", "modality": "encoder", "unit": "mm/s",
+              "deadband": {"left": 1.0, "right": 1.0}}
+    sc.emit(Item("sample", values={"left": 10.0}, sensor=wheels), at=30.0)
+    sc.poll(link, 30)
+    assert len(link.records) == 1
+    sc.emit(Item("sample", values={"left": 10.0}, sensor=wheels), at=60.0)
+    sc.emit(Item("sample", values={"left": 10.0}, sensor=wheels), at=61.0)  # mean steady, no spread
+    sc.poll(link, 60)
+    assert len(link.records) == 1  # skipped
+    sc.emit(Item("sample", values={"left": 9.0}, sensor=wheels), at=90.0)
+    sc.emit(Item("sample", values={"left": 11.1}, sensor=wheels), at=91.0)  # mean ~10, spread 2.1 > 2*b
+    sc.poll(link, 90)
+    assert len(link.records) == 2
+
+
+def test_boolean_toggle_inside_a_window_is_a_change():
+    sc = Sidecar([], body_seconds=30, now=0, heartbeat_seconds=600)
+    link = FakeLink()
+    touch = {"sensor": "touch", "modality": "force", "unit": None,
+             "deadband": {"raw": 5.0, "pressed": 0}}
+    sc.emit(Item("sample", values={"raw": 100, "pressed": False}, sensor=touch), at=30.0)
+    sc.poll(link, 30)
+    assert len(link.records) == 1
+    sc.emit(Item("sample", values={"raw": 100, "pressed": True}, sensor=touch), at=60.0)
+    sc.emit(Item("sample", values={"raw": 100, "pressed": False}, sensor=touch), at=61.0)  # toggled
+    sc.poll(link, 60)
+    assert len(link.records) == 2  # the toggle signs although raw is steady
+    sc.emit(Item("sample", values={"raw": 100, "pressed": True}, sensor=touch), at=90.0)
+    sc.emit(Item("sample", values={"raw": 100, "pressed": True}, sensor=touch), at=91.0)  # steady
+    sc.poll(link, 90)
+    assert len(link.records) == 2  # unchanged: skipped
+
+
+def test_channel_without_deadband_signs_any_change():
+    sc = Sidecar([], body_seconds=30, now=0, heartbeat_seconds=600)
+    link = FakeLink()
+    head = {"sensor": "head", "modality": "angle", "unit": "rad"}  # no deadband: band 0
+    sc.emit(Item("sample", values={"value": 0.2}, sensor=head), at=30.0)
+    sc.poll(link, 30)
+    assert len(link.records) == 1
+    sc.emit(Item("sample", values={"value": 0.200001}, sensor=head), at=60.0)  # any change signs
+    sc.poll(link, 60)
+    assert len(link.records) == 2
+
+
+def test_health_deadband_and_flicker():
+    sc = Sidecar([HealthAdapter([])], body_seconds=30, now=0, heartbeat_seconds=600)
+    link = FakeLink()
+    sc.emit(Item("health", values={"battery_volts": 3.9, "charging": False}), at=30.0)
+    sc.poll(link, 30)
+    assert len(link.records) == 1
+    sc.emit(Item("health", values={"battery_volts": 3.93, "charging": False}), at=60.0)  # 0.03 <= 0.05
+    sc.poll(link, 60)
+    assert len(link.records) == 1  # skipped
+    sc.emit(Item("health", values={"battery_volts": 4.0, "charging": False}), at=90.0)  # 0.07 > 0.05
+    sc.poll(link, 90)
+    assert len(link.records) == 2
+    # a flicker always signs, even when nothing changed
+    sc.emit(Item("health", values={"battery_volts": 4.0, "charging": False}), at=120.0)
+    sc.emit(Item("flicker", values={"charging": 1}), at=120.0)
+    sc.poll(link, 120)
+    assert len(link.records) == 3
+    assert link.records[2]["payload"]["stats"] == {"flicker": {"charging": 1}}
+
+
+def test_static_vector_robot_signs_first_window_plus_one_heartbeat_each():
+    from types import SimpleNamespace as NS
+
+    robot = NS(left_wheel_speed_mmps=0.0, right_wheel_speed_mmps=0.0, accel=NS(x=0.0, y=0.0, z=0.0),
+               gyro=NS(x=0.0, y=0.0, z=0.0), head_angle_rad=0.0, lift_height_mm=0.0,
+               touch=NS(last_sensor_reading=NS(raw_touch_value=0, is_being_touched=False)),
+               proximity=NS(last_sensor_reading=NS(distance=NS(distance_mm=0), signal_quality=0.0,
+                                                   unobstructed=True, found_object=False, is_lift_in_fov=False)))
+    v = VectorSDK(body_seconds=1.0)
+    sc = Sidecar([v], body_seconds=30, now=0, heartbeat_seconds=600)
+    link = FakeLink()
+    for now in range(30, 661, 30):  # 10 minutes of 30 s windows, robot static
+        got = []
+        v.on_body(got.append, robot)
+        for i in got:
+            sc.emit(i, at=now)
+        sc.emit(Item("health", values={"battery_volts": 3.9, "battery_level": 70, "charging": False,
+                                       "on_charger_platform": False}), at=now)
+        sc.poll(link, now)
+    # 6 groups + health, each signing at the first window and once per heartbeat; 19 skipped windows between
+    assert len(link.records) == 14
+    assert [r["payload"]["sensor"] for r in link.records if r["payload"]["kind"] == "sensor"] == \
+        ["head", "imu", "lift", "proximity", "touch", "wheels"] * 2
+    heartbeats = [r for r in link.records if "windows_skipped" in r["payload"].get("stats", {})]
+    assert len(heartbeats) == 7  # 6 groups + health
+    for hb in heartbeats:
+        assert hb["payload"]["stats"]["windows_skipped"] == 19
+        assert hb["payload"]["stats"]["unchanged_since"]
