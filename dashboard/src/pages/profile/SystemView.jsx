@@ -18,9 +18,17 @@
 //   skipLtms    don't draw the pyramid (default false); records still travel to ltmsTarget
 //   selected    a touchable id ("planet:rover-1") to ring
 //   height      the canvas height in CSS px (default 420); the width follows the stage
+//   soundEngine the lib/sound.js engine (default: the shared `sound`). Records
+//               pulse as they land on the pyramid; each planet's heartbeat
+//               swells its light, and only one is audible (audibleMember).
+//               VizFrame's Sound toggle and Calm view gate it (#428).
+//
+// Sound lives in this component, not in createSystemMotion/drawSystem, because
+// Geography reuses those two and plays its own sounds.
 import { useEffect, useRef } from "react";
 import { drawGlow, heartbeatSwell, pyramid } from "../../lib/light.js";
 import { createEventCursor } from "../../lib/replay.js";
+import { sound as sharedSound } from "../../lib/sound.js";
 import {
   alongRoute, categoryColor, commPeer, createArrivalFlasher, flaringHubs, isMemberMessage, layoutSystem,
   nodePos, pulseRoute, travelMs,
@@ -66,10 +74,11 @@ function label(ctx, text, x, y, color, alpha, font = '500 12px "DM Sans", sans-s
  * Draw one frame of the system. Pure drawing: everything that moves comes in `look`.
  *   look = {nowMs (wall), tHand (ms), still, alpha, focus, selected, skipLtms, ltms: {x, y},
  *           flights: [{points, color, born, life, lift, self}], ltmsFlash: {color, a} | null,
- *           lit: {nodeKey: 0..1} extra brightness, beats: {member: wallMs}}
+ *           lit: {nodeKey: 0..1} extra brightness, beats: {member: wallMs},
+ *           swells: {member: 0..1} | undefined (the sound engine's heartbeat swell; overrides beats)}
  */
 export function drawSystem(ctx, scene, layout, look) {
-  const { nowMs, tHand, still, alpha = 1, focus, selected, skipLtms, ltms, flights = [], lit = {}, beats = {} } = look;
+  const { nowMs, tHand, still, alpha = 1, focus, selected, skipLtms, ltms, flights = [], lit = {}, beats = {}, swells } = look;
   const A = (a) => Math.max(0, Math.min(1, a * alpha));
   const dim = (member) => (focus && member !== focus ? LIGHT.asleep / LIGHT.lit : 1);
   const flaring = flaringHubs(scene, tHand);
@@ -153,7 +162,7 @@ export function drawSystem(ctx, scene, layout, look) {
     const info = scene.planets[name];
     const color = (ROLES[info.role] ?? ROLES.free).color;
     const d = dim(name);
-    const swell = still ? 0 : heartbeatSwell(nowMs, beats[name]);
+    const swell = still ? 0 : swells ? (swells[name] ?? 0) : heartbeatSwell(nowMs, beats[name]);
     const boost = Math.max(lit[`planet:${name}`] ?? 0, swell);
     const base = info.shown ? LIGHT.lit : LIGHT.trail;
     glow(ctx, p.x, p.y, p.r * (1 + 0.08 * swell) * 1.6, info.elsewhere ? LTMS_CORE : color,
@@ -202,7 +211,12 @@ export function createSystemMotion(scene, { edges = [] } = {}) {
   const steps = {}; // nodeKey → wall ms until which it is a step brighter (Calm view)
   const moonFlash = {}; // moonKey → wall ms of its last firing
   const beats = {};
+  const lastSelf = {}; // member → record time (ms) of its latest self-report up to the hand
   let primed = false;
+  const catchUp = (t) => {
+    for (const k of Object.keys(lastSelf)) delete lastSelf[k];
+    for (const e of cursor.upTo(t)) if (e.category === "self") lastSelf[e.member] = e.t;
+  };
 
   function reset() {
     flights.length = 0;
@@ -213,17 +227,24 @@ export function createSystemMotion(scene, { edges = [] } = {}) {
   return {
     flights,
     beats,
+    lastSelf,
     flasher,
     /**
      * Advance to the hand. `windowMs`: records further back than this behind the
      * hand land without travelling (a seek or the first frame). Returns the
-     * fresh records (for narration).
+     * fresh records (for narration). `onLand(category)` is called when a
+     * record's light lands on the pyramid (not for self-reports, member-to-member
+     * arcs, records landed by a seek, or in Calm view).
      */
-    advance(tHand, nowMs, { animate, layout, ltms, windowMs = 3000 }) {
+    advance(tHand, nowMs, { animate, layout, ltms, windowMs = 3000, onLand }) {
       const { fresh, reset: back } = cursor.advance(tHand);
-      if (back) reset();
+      if (back) {
+        reset();
+        catchUp(tHand);
+      }
       if (!primed) {
         primed = true;
+        catchUp(tHand);
         return [];
       }
       for (const e of fresh) {
@@ -231,7 +252,10 @@ export function createSystemMotion(scene, { edges = [] } = {}) {
         const self = e.category === "self";
         const color = categoryColor(e.category);
         if (route[0].startsWith("moon:")) moonFlash[route[0].slice(5)] = nowMs;
-        if (self) beats[e.member] = nowMs;
+        if (self) {
+          beats[e.member] = nowMs;
+          lastSelf[e.member] = e.t;
+        }
         if (tHand - e.t > windowMs) continue;
         if (!animate) {
           // Reduced motion: no travel; the target takes one brightness step.
@@ -241,9 +265,10 @@ export function createSystemMotion(scene, { edges = [] } = {}) {
         }
         const points = route.map((k) => nodePos(k, layout, ltms)).filter(Boolean);
         if (points.length > 1 && flights.length < MAX_FLIGHTS) {
-          flights.push({ points, color, born: nowMs, life: travelMs(e.transit), lift: 12, self });
+          flights.push({ points, color, category: e.category, born: nowMs, life: travelMs(e.transit), lift: 12, self });
         } else if (points.length <= 1) {
           flasher.arrive(color, nowMs);
+          if (!self) onLand?.(e.category);
         }
         if (isMemberMessage(e) && scene.planets[e.member]) {
           const peer = commPeer(e.member, edges, scene);
@@ -259,7 +284,10 @@ export function createSystemMotion(scene, { edges = [] } = {}) {
         const f = flights[i];
         if (nowMs - f.born >= f.life) {
           flights.splice(i, 1);
-          if (!f.self && !f.arc) flasher.arrive(f.color, nowMs);
+          if (!f.self && !f.arc) {
+            flasher.arrive(f.color, nowMs);
+            onLand?.(f.category);
+          }
         }
       }
       return fresh;
@@ -277,6 +305,39 @@ export function createSystemMotion(scene, { edges = [] } = {}) {
   };
 }
 
+/**
+ * The one member whose heartbeat is audible: the selected planet (or the
+ * planet of a selected moon), else the profile's own member. Hubs' stars are
+ * visual only; on a swarm profile with nothing selected, nobody is audible.
+ */
+export function audibleMember(selected, scene) {
+  if (typeof selected === "string") {
+    if (selected.startsWith("planet:")) return selected.slice(7);
+    if (selected.startsWith("moon:")) return selected.slice(5).split(":")[0];
+  }
+  return scene?.focus ?? null;
+}
+
+/**
+ * Drive every planet's heartbeat through the sound engine for one frame.
+ * Returns {swells: {member: 0..1}, keys: [member]}: draw each planet with its
+ * swell, and forget the keys when the view goes away.
+ */
+export function systemHeartbeats(engine, scene, motion, { tHand, audible }) {
+  const swells = {};
+  const keys = [];
+  for (const name of scene.order) {
+    const last = motion.lastSelf[name];
+    const hb = engine.heartbeat(name, {
+      intervalSec: scene.planets[name]?.heartbeat?.interval_s ?? undefined,
+      sinceLastSec: last == null ? null : (tHand - last) / 1000,
+    }, { audible: name === audible });
+    swells[name] = hb?.swell ?? 0;
+    keys.push(name);
+  }
+  return { swells, keys };
+}
+
 /** The narration for a record: "rover-1 · camera: saw a face". Self-reports say nothing. */
 export function narrationOf(e) {
   if (!e || e.category === "self") return null;
@@ -285,6 +346,7 @@ export function narrationOf(e) {
 
 export default function SystemView({
   scene, frame, edges, cx, cy, size, alpha = 1, ltmsTarget, skipLtms = false, selected, height = 420,
+  soundEngine = sharedSound,
 }) {
   const canvas = useRef(null);
   const props = useRef(null);
@@ -303,6 +365,7 @@ export default function SystemView({
     const raf = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(() => fn(performance.now()), 50);
     const caf = typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : clearTimeout;
     let id = null;
+    const beating = new Set();
     const loop = () => {
       const p = props.current;
       const now = performance.now();
@@ -324,7 +387,15 @@ export default function SystemView({
       const state = p.frame.clock?.getState?.() ?? p.frame;
       const tHand = state.t;
       const speed = state.mode === "live" ? 1 : state.speed || 1;
-      const fresh = motion.advance(tHand, now, { animate: !still, layout, ltms, windowMs: 3000 * speed });
+      const fresh = motion.advance(tHand, now, {
+        animate: !still, layout, ltms, windowMs: 3000 * speed, onLand: (cat) => soundEngine.pulse(cat),
+      });
+      let swells;
+      if (!still) {
+        const hb = systemHeartbeats(soundEngine, scene, motion, { tHand, audible: audibleMember(p.selected, scene) });
+        swells = hb.swells;
+        for (const k of hb.keys) beating.add(k);
+      }
       for (let i = fresh.length - 1; i >= 0; i--) {
         const text = narrationOf(fresh[i]);
         if (text) {
@@ -335,12 +406,16 @@ export default function SystemView({
       drawSystem(ctx, scene, layout, {
         nowMs: now, tHand, still, alpha: p.alpha, focus: scene.focus, selected: p.selected, skipLtms: p.skipLtms,
         ltms, flights: motion.flights, ltmsFlash: motion.flasher.level(now), lit: motion.lit(now), beats: motion.beats,
+        swells,
       });
       id = raf(loop);
     };
     id = raf(loop);
-    return () => caf(id);
-  }, [scene, edges]);
+    return () => {
+      caf(id);
+      for (const k of beating) soundEngine.forget(k); // planets leave with the scene, or on unmount
+    };
+  }, [scene, edges, soundEngine]);
 
   return <canvas ref={canvas} style={{ display: "block", width: "100%", height }} data-testid="system-view" />;
 }

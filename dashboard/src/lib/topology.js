@@ -343,16 +343,9 @@ export function createArrivalFlasher(maxPerSecond = 3, { holdMs = 160, decayMs =
   };
 }
 
-// ---------------------------------------------------------------- touch and sound
+// ---------------------------------------------------------------- touch
 
-const PENTA = [0, 2, 4, 7, 9];
-
-/** The touch note for a pentatonic degree (D major pentatonic from D4). */
-export function noteHz(degree) {
-  const d = Math.max(0, Math.round(degree));
-  const semis = PENTA[d % 5] + 12 * Math.floor(d / 5);
-  return 293.66 * 2 ** (semis / 12);
-}
+// Touch notes come from the shared engine: VizFrame plays sound.note(item.id) (#428).
 
 export function plural(n, one, many = `${one}s`) {
   return `${n} ${n === 1 ? one : many}`;
