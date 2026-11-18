@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ORBIT_TILT, alongRoute, buildScene, commPeer, createArrivalFlasher, ellipsePoint, flaringHubs, isElsewhere,
-  layoutSystem, memberRows, moonsOf, noteHz, pathRows, pulseRoute, sourceRows, touchList, travelMs,
+  layoutSystem, memberRows, moonsOf, pathRows, pulseRoute, sourceRows, touchList, travelMs,
 } from "./topology.js";
 
 const SINCE = "2026-11-13T00:00:00+00:00";
@@ -186,8 +186,6 @@ describe("touch", () => {
     expect(byId.ltms).toContain("Every record ends here");
     expect(touchList(scene(), { skipLtms: true })[0].id).toBe("star:hub-1");
     expect(new Set(list.map((x) => x.id)).size).toBe(list.length);
-    expect(noteHz(0)).toBeCloseTo(293.66, 2);
-    expect(noteHz(5)).toBeCloseTo(587.32, 1);
   });
 
   it("has unique labels with no role suffix", () => {

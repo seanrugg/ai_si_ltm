@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { createSystemMotion, defaultGeometry, drawSystem, narrationOf } from "./SystemView.jsx";
+import {
+  audibleMember, createSystemMotion, defaultGeometry, drawSystem, narrationOf, systemHeartbeats,
+} from "./SystemView.jsx";
 import { buildScene, layoutSystem } from "../../lib/topology.js";
 
 const SINCE = "2026-11-13T00:00:00+00:00";
@@ -84,5 +86,95 @@ describe("system motion", () => {
     }
     expect(calls).toContain("ellipse");
     expect(calls).toContain("fillText");
+  });
+});
+
+/** A fake sound engine: records the calls, plays nothing (#428). */
+function fakeEngine() {
+  const calls = [];
+  return {
+    calls,
+    pulse: (category, opts) => { calls.push(["pulse", category, opts]); return true; },
+    note: (key) => { calls.push(["note", key]); return true; },
+    heartbeat: (key, info, opts) => { calls.push(["heartbeat", key, info, opts]); return { swell: opts?.audible ? 0.5 : 0.25 }; },
+    forget: (key) => { calls.push(["forget", key]); },
+  };
+}
+
+describe("Topology sound (#428)", () => {
+  it("pulses each record's category as its light lands on the pyramid, not self-reports or arcs", () => {
+    const { scene, layout, ltms } = setup();
+    const m = createSystemMotion(scene, { edges });
+    const landed = [];
+    const onLand = (c) => landed.push(c);
+    m.advance(T0, 0, { animate: true, layout, ltms, onLand });
+    m.advance(T0 + 13_000, 100, { animate: true, layout, ltms, windowMs: 60_000, onLand });
+    expect(landed).toEqual([]); // still travelling
+    m.advance(T0 + 13_000, 5000, { animate: true, layout, ltms, onLand });
+    expect(landed.sort()).toEqual(["comm", "sense"]);
+  });
+
+  it("doesn't pulse records landed by a seek or in Calm view", () => {
+    const { scene, layout, ltms } = setup();
+    const landed = [];
+    const onLand = (c) => landed.push(c);
+    const seek = createSystemMotion(scene, { edges });
+    seek.advance(T0, 0, { animate: true, layout, ltms, onLand });
+    seek.advance(T0 + 3600_000, 10, { animate: true, layout, ltms, windowMs: 3000, onLand });
+    seek.advance(T0 + 3600_000, 9000, { animate: true, layout, ltms, onLand });
+    const calm = createSystemMotion(scene, { edges });
+    calm.advance(T0, 0, { animate: false, layout, ltms, onLand });
+    calm.advance(T0 + 13_000, 100, { animate: false, layout, ltms, windowMs: 60_000, onLand });
+    expect(landed).toEqual([]);
+  });
+
+  it("tracks each member's last self-report in record time, also after a seek", () => {
+    const { scene, layout, ltms } = setup();
+    const m = createSystemMotion(scene, { edges });
+    m.advance(T0 + 20_000, 0, { animate: true, layout, ltms }); // primes past the self-report
+    expect(m.lastSelf["rover-1"]).toBe(T0 + 11_000);
+    m.advance(T0 + 5_000, 10, { animate: true, layout, ltms }); // back before it
+    expect(m.lastSelf["rover-1"]).toBeUndefined();
+  });
+
+  it("gives every planet a heartbeat, with one audible: the selected planet, else the profile's member", () => {
+    const { scene, layout, ltms } = setup();
+    const m = createSystemMotion(scene, { edges });
+    m.advance(T0 + 20_000, 0, { animate: true, layout, ltms });
+    const engine = fakeEngine();
+    const audible = audibleMember("planet:rover-2", scene);
+    const { swells, keys } = systemHeartbeats(engine, scene, m, { tHand: T0 + 20_000, audible });
+    const beats = engine.calls.filter((c) => c[0] === "heartbeat");
+    expect(beats.map((c) => c[1]).sort()).toEqual([...scene.order].sort());
+    expect(beats.filter((c) => c[3].audible).map((c) => c[1])).toEqual(["rover-2"]);
+    const r1 = beats.find((c) => c[1] === "rover-1");
+    expect(r1[2].sinceLastSec).toBe(9); // 20 s hand − 11 s self-report
+    expect(swells["rover-2"]).toBe(0.5);
+    expect(keys.sort()).toEqual([...scene.order].sort());
+  });
+
+  it("picks the audible member: planet, a moon's planet, else the focus; hubs never", () => {
+    expect(audibleMember("planet:rover-1", { focus: "x" })).toBe("rover-1");
+    expect(audibleMember("moon:rover-1:camera", { focus: "x" })).toBe("rover-1");
+    expect(audibleMember(null, { focus: "rover-2" })).toBe("rover-2");
+    expect(audibleMember("star:hub-1", { focus: null })).toBe(null);
+    expect(audibleMember(null, { focus: null })).toBe(null);
+  });
+
+  it("draws planets with the engine's swell when given", () => {
+    const { scene, layout, ltms } = setup();
+    const radii = [];
+    const ctx = new Proxy({}, {
+      get: (target, k) => (k in target ? target[k] : (...args) => {
+        if (k === "arc") radii.push(args[2]);
+        return k === "createLinearGradient" || k === "createRadialGradient" ? { addColorStop() {} } : undefined;
+      }),
+      set: (target, k, v) => { target[k] = v; return true; },
+    });
+    drawSystem(ctx, scene, layout, { nowMs: 1000, tHand: T0, still: false, ltms, swells: {} });
+    const flat = radii.slice();
+    radii.length = 0;
+    drawSystem(ctx, scene, layout, { nowMs: 1000, tHand: T0, still: false, ltms, swells: { "rover-1": 1 } });
+    expect(radii).not.toEqual(flat);
   });
 });

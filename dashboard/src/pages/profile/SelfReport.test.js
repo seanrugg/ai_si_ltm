@@ -5,8 +5,9 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 // Profile first: Overview imports from Profile.jsx, so loading Overview first would leave Profile's tab table empty.
 import Profile from "../Profile.jsx";
 import Overview, {
-  BeatDot, agoText, bpmOf, heartbeatFact, membersBeating, pulseOf, pulseText, selfReportNote,
+  BEAT_GROW, BeatDot, agoText, beatScale, bpmOf, heartbeatFact, membersBeating, pulseOf, pulseText, selfReportNote,
 } from "./Overview.jsx";
+import { heartbeatSwell } from "../../lib/light.js";
 import { api } from "../../api/client.js";
 import { COUNT_SELF_REPORT, COUNT_SENSE } from "../../lib/help.js";
 
@@ -96,6 +97,22 @@ describe("the Self-reports tile (#406)", () => {
     expect(dot.dataset.beat).toBe("still");
     expect(dot.style.opacity).toBe("0.35");
   });
+  it("beats with the shared lub-dub envelope from light.js, not a stand-in CSS animation (#428)", () => {
+    const bpm = 48;
+    const period = 60_000 / bpm;
+    for (const dt of [0, 80, 160, 300, 600, 1000]) {
+      const now = 10 * period + dt;
+      expect(beatScale(now, bpm)).toBeCloseTo(1 + BEAT_GROW * heartbeatSwell(now, 10 * period), 9);
+    }
+    expect(Math.max(...[0, 50, 100, 150, 200, 250].map((dt) => beatScale(10 * period + dt, bpm)))).toBeGreaterThan(1);
+    expect(beatScale(1000, null)).toBe(1);
+    render(React.createElement(BeatDot, { pulse: { state: "beating", bpm } }));
+    const dot = document.querySelector("[data-beat]");
+    expect(dot.dataset.beat).toBe("beating");
+    expect(dot.className).not.toMatch(/ltms-beat/);
+    expect(document.querySelector("style")).toBeNull();
+  });
+
   it("is still with prefers-reduced-motion", () => {
     vi.stubGlobal("matchMedia", (q) => ({ matches: q.includes("reduce"), addEventListener() {}, removeEventListener() {} }));
     render(React.createElement(BeatDot, { pulse: pulseOf(new Date(Date.now() - 1000).toISOString(), 30) }));

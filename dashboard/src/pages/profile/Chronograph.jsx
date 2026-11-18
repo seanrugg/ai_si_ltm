@@ -437,9 +437,44 @@ export function heartAlive(heartbeat, hand, pulses) {
   return hand - last < 4 * Math.max(heartbeat?.interval_s ?? 30, 15);
 }
 
+/** Most record time (s) the hand may move in one frame and still sound its pulses; a bigger jump is a seek. */
+export const PASS_MAX_S = 30;
+
+/** The records the hand passed going from `from` to `to` (seconds), self-reports excluded; none on a seek or going back. */
+export function pulsesPassed(pulses, from, to, maxJump = PASS_MAX_S) {
+  if (from == null || !(to > from) || to - from > maxJump) return [];
+  return (pulses ?? []).filter((p) => p[0] > from && p[0] <= to && p[3] !== "self");
+}
+
+/** Seconds from `since` of the latest self-report at or before the hand, or null. */
+export function lastSelfAt(pulses, hand) {
+  let last = null;
+  for (const p of pulses ?? []) {
+    if (p[0] > hand) break;
+    if (p[3] === "self") last = p[0];
+  }
+  return last;
+}
+
+/**
+ * One frame of Chronology sound (#428): pulse every record the hand passed,
+ * and beat the member's heart (audible). Returns the heartbeat's swell (0..1),
+ * which drives the core's swell.
+ */
+export function chronographSound(engine, { data, member, from, to }) {
+  for (const p of pulsesPassed(data?.pulses, from, to)) engine.pulse(p[3]);
+  const last = lastSelfAt(data?.pulses, to);
+  const hb = engine.heartbeat(member, {
+    intervalSec: data?.heartbeat?.interval_s ?? undefined,
+    sinceLastSec: last == null ? null : to - last,
+  }, { audible: true });
+  return hb?.swell ?? 0;
+}
+
 /**
  * Draw the chronograph. `opts`: {data, hand, leapList, animate, leapS, small,
- * sinceMs, nowMs (wall, for the heartbeat)}.
+ * sinceMs, nowMs (wall, for the heartbeat), swell (0..1, the sound engine's
+ * heartbeat; overrides the drawn-only beat)}.
  */
 export function drawChronograph(ctx, W, H, opts) {
   const { data, hand, leapList, animate, leapS, small, sinceMs, nowMs } = opts;
@@ -486,7 +521,7 @@ export function drawChronograph(ctx, W, H, opts) {
 
   // The core: polygon, the dance and its echo web, clipped to the core's circle.
   const vec = stateVector(data, hand);
-  const swell = animate ? heartbeatSwell(nowMs, beatStart(nowMs, data?.heartbeat)) : 0;
+  const swell = !animate ? 0 : opts.swell ?? heartbeatSwell(nowMs, beatStart(nowMs, data?.heartbeat));
   const pts = vec.map((val, i) => polar(cx, cy, nodeAxis(i), nodeRadius(val, core) * (1 + 0.04 * swell)));
   ctx.save();
   ctx.beginPath();
@@ -583,11 +618,17 @@ function getContext(canvas) {
 /**
  * The chronograph on a canvas. Props: data (episodes JSON), hand (seconds from
  * `since`), sinceMs, animate, leapS, small, size (px; default: the parent's
- * width), onLane(laneKey) when a ring is clicked.
+ * width), onLane(laneKey) when a ring is clicked. With `soundEngine` (lib/sound.js)
+ * and `member`, records pulse as the hand passes them and the member's
+ * heartbeat drives the core's swell (#428); without, it is silent (the swarm's
+ * small multiples). VizFrame's Sound toggle and Calm view gate the engine.
  */
-export function Chronograph({ data, hand, sinceMs, animate = true, leapS = LEAP_WALL_S, small = false, size, onLane, leapList }) {
+export function Chronograph({
+  data, hand, sinceMs, animate = true, leapS = LEAP_WALL_S, small = false, size, onLane, leapList, soundEngine, member,
+}) {
   const canvas = useRef(null);
   const props = useRef(null);
+  const passed = useRef(null); // the hand at the last frame that played sound
   props.current = { data, hand, sinceMs, animate, leapS, small, leapList: leapList ?? [] };
 
   const draw = () => {
@@ -603,7 +644,13 @@ export function Chronograph({ data, hand, sinceMs, animate = true, leapS = LEAP_
       c.style.height = `${css}px`;
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawChronograph(ctx, css, css, { ...props.current, nowMs: performance.now() });
+    let swell;
+    const p = props.current;
+    if (soundEngine && member) {
+      if (p.animate) swell = chronographSound(soundEngine, { data: p.data, member, from: passed.current, to: p.hand });
+      passed.current = p.hand;
+    }
+    drawChronograph(ctx, css, css, { ...p, nowMs: performance.now(), swell });
   };
 
   // Redraw on every change of the hand or data; while animating, also every
@@ -618,6 +665,7 @@ export function Chronograph({ data, hand, sinceMs, animate = true, leapS = LEAP_
     return () => cancelAnimationFrame(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [animate, size]);
+  useEffect(() => (soundEngine && member ? () => soundEngine.forget(member) : undefined), [soundEngine, member]);
 
   const onClick = (e) => {
     if (!onLane) return;
@@ -627,38 +675,4 @@ export function Chronograph({ data, hand, sinceMs, animate = true, leapS = LEAP_
     if (k) onLane(k);
   };
   return <canvas ref={canvas} className="mx-auto block" onClick={onClick} width={size ?? 480} height={size ?? 480} />;
-}
-
-// ---------------------------------------------------------------- touch notes
-
-// D major pentatonic (docs/holo-light.md "Sound"): one note per ring, inside out.
-const PENTATONIC = [293.66, 329.63, 369.99, 440, 493.88, 587.33, 659.25];
-let audio = null;
-
-/**
- * A ring's touch note: one short soft sine at the ring's pitch (Touch voice,
- * not quantized). Only when sound is on; a no-op where WebAudio is missing.
- * #402 brings the full sound engine; this is the touch voice only.
- */
-export function playLaneNote(laneKey) {
-  const i = LANES.findIndex((l) => l.key === laneKey);
-  const A = typeof window !== "undefined" ? window.AudioContext || window.webkitAudioContext : null;
-  if (i < 0 || !A) return;
-  try {
-    audio = audio ?? new A();
-    const t0 = audio.currentTime;
-    const o = audio.createOscillator();
-    const gain = audio.createGain();
-    o.type = "sine";
-    o.frequency.value = PENTATONIC[i];
-    gain.gain.setValueAtTime(0, t0);
-    gain.gain.linearRampToValueAtTime(0.03, t0 + 0.04);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.2);
-    o.connect(gain);
-    gain.connect(audio.destination);
-    o.start(t0);
-    o.stop(t0 + 1.25);
-  } catch {
-    // audio unavailable: the narration still says it
-  }
 }

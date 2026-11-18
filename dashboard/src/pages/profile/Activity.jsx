@@ -12,10 +12,11 @@ import { useApi } from "../../api/useApi.js";
 import { COUNT_SELF_REPORT } from "../../lib/help.js";
 import { localTime } from "../../lib/format.js";
 import { createReplayClock, useReplay } from "../../lib/replay.js";
+import { sound } from "../../lib/sound.js";
 import { category } from "../../lib/visual.js";
 import {
   Chronograph, LANES, drawnEpisodes, episodeRows, laneTouchText, leapSeconds, leapsOf, narrationAt,
-  playLaneNote, stateAt, stateRows, zoneName,
+  stateAt, stateRows, zoneName,
 } from "./Chronograph.jsx";
 
 export const STEPS = [
@@ -310,11 +311,15 @@ export function MemberTwin({ data, hand, summary }) {
   );
 }
 
+/** A ring's touch-note key for the shared engine: the same ring always plays the same pitch. */
+export function ringNote(laneKey) {
+  return `ring:${laneKey}`;
+}
+
 function MemberChronology({ name, summary, range, clock }) {
   const win = useWindow(range, summary, clock);
   const { data, error, loading, reload } = useApi("/admin/profile/episodes", { member: name, since: win.since, until: win.until });
   const state = useReplay(clock);
-  const sound = useRef(false);
   const leapList = useMemo(() => (data ? leapsOf(data) : []), [data]);
   const sinceMs = Date.parse(data?.since ?? "");
   const hand = handSeconds(state.t, data);
@@ -322,15 +327,14 @@ function MemberChronology({ name, summary, range, clock }) {
   const empty = data && !data.count;
 
   const touchables = data ? LANES.map((l) => ({
-    id: l.key, label: `${l.name} ring`, narration: laneTouchText(l.key, data, hand),
-    onTouch: () => { if (sound.current) playLaneNote(l.key); },
+    // VizFrame plays the shared touch note, sound.note(note) (#428): each ring its own pitch.
+    id: l.key, label: `${l.name} ring`, narration: laneTouchText(l.key, data, hand), note: ringNote(l.key),
   })) : [];
 
   return (
     <VizFrame title="Chronology" clock={clock}
               narration={empty ? { text: NOTHING_ARRIVED, key: win.since } : narration}
               touchables={touchables}
-              onSoundChange={(on) => { sound.current = on; }}
               legend={{ categories: ["sense"], selfReport: true, extra: <LaneLegend /> }}
               renderTable={(frame) => (data ? <MemberTwin data={data} hand={handSeconds(frame.t, data)} summary={summary} />
                 : <ActivityTrend summary={summary} />)}>
@@ -341,9 +345,10 @@ function MemberChronology({ name, summary, range, clock }) {
           {data && (
             <Chronograph data={data} leapList={leapList} hand={handSeconds(frame.t, data)} sinceMs={sinceMs}
                          animate={frame.animate} leapS={leapSeconds(frame.mode, frame.speed)}
+                         soundEngine={sound} member={name}
                          onLane={(k) => {
                            frame.narrate(laneTouchText(k, data, handSeconds(frame.t, data)));
-                           if (frame.sound) playLaneNote(k);
+                           sound.note(ringNote(k));
                          }} />
           )}
         </div>

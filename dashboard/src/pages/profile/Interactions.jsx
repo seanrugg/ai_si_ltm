@@ -13,7 +13,7 @@ import { CATEGORIES, KINDS, RELAY, ROLES, category, kindOf } from "../../lib/vis
 import { heartbeatBpm } from "../../lib/light.js";
 import { createReplayClock } from "../../lib/replay.js";
 import { relativeTime } from "../../lib/format.js";
-import { buildScene, memberRows, noteHz, pathRows, sourceRows, touchList } from "../../lib/topology.js";
+import { buildScene, memberRows, pathRows, sourceRows, touchList } from "../../lib/topology.js";
 import SystemView from "./SystemView.jsx";
 
 const W = 640;
@@ -257,30 +257,6 @@ function lastSeen(ts) {
   return ts ? relativeTime(ts) : "never";
 }
 
-let audio = null;
-/** One short, soft sine at `hz`: the touch note (sound on only). */
-function playNote(hz) {
-  try {
-    const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return;
-    audio = audio || new AC();
-    const t0 = audio.currentTime;
-    const o = audio.createOscillator();
-    const g = audio.createGain();
-    o.type = "sine";
-    o.frequency.value = hz;
-    g.gain.setValueAtTime(0, t0);
-    g.gain.linearRampToValueAtTime(0.06, t0 + 0.04);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.2);
-    o.connect(g);
-    g.connect(audio.destination);
-    o.start(t0);
-    o.stop(t0 + 1.25);
-  } catch {
-    // no audio: the narration line says the same
-  }
-}
-
 export function TopologyTables({ scene, roster, t }) {
   const paths = pathRows(scene, t);
   const sources = sourceRows(scene);
@@ -309,7 +285,6 @@ export default function Topology({ subject, name, range, members, swarms }) {
   const [params] = useSearchParams();
   const [reloadKey, setReloadKey] = useState(0);
   const [selected, setSelected] = useState(null);
-  const [sound, setSound] = useState({ on: false, calm: false });
   const swarm = swarmFor(subject, name, swarms);
   const roster = useMemo(() => rosterFor(subject, name, swarm, members), [subject, name, swarm, members]);
   const data = useTopologyData({ subject, name, range, swarm, roster, reloadKey });
@@ -338,10 +313,8 @@ export default function Topology({ subject, name, range, members, swarms }) {
     bpm: (p) => (p.heartbeat?.interval_s ? heartbeatBpm(p.heartbeat.interval_s) : null),
   }).map((item) => ({
     ...item,
-    onTouch: () => {
-      setSelected(item.id);
-      if (sound.on && !sound.calm) playNote(noteHz(item.degree));
-    },
+    // VizFrame plays the shared touch note, sound.note(item.note ?? item.id) (#428).
+    onTouch: () => setSelected(item.id),
   }));
   const graph = { data: data.graph, loading: data.loading && !data.graph, error: null, reload: () => setReloadKey((k) => k + 1) };
 
@@ -351,8 +324,6 @@ export default function Topology({ subject, name, range, members, swarms }) {
       <ErrorNote error={data.error} onRetry={() => setReloadKey((k) => k + 1)} />
       {data.since != null && (
         <VizFrame title="Topology" clock={clock} touchables={touchables} defaultCalm={params.get("peer") ? true : undefined}
-                  onSoundChange={(on) => setSound((s) => ({ ...s, on }))}
-                  onCalmChange={(calm) => setSound((s) => ({ ...s, calm }))}
                   renderTable={(frame) => (
                     <>
                       <TopologyTables scene={scene} roster={roster} t={frame.t} />

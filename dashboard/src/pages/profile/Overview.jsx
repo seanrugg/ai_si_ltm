@@ -1,9 +1,10 @@
 // Profile Overview tab: category tiles, self-report heartbeat (#406), activity trend, top peers (issue #192).
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import HelpTip from "../../components/HelpTip.jsx";
 import { COUNT_ACT, COUNT_COMM, COUNT_LEARN, COUNT_SELF_REPORT, COUNT_SENSE } from "../../lib/help.js";
 import { CategoryLine, MemberMark } from "../../components/visual.jsx";
+import { heartbeatSwell } from "../../lib/light.js";
 import { bucketIndex, dayTotal, niceMax, percent, stackDay, wipesOf } from "../../lib/profile.js";
 import { CATEGORIES, NEUTRAL, kindOf } from "../../lib/visual.js";
 import { memberWithRole } from "../Profile.jsx";
@@ -94,21 +95,43 @@ export function prefersReducedMotion() {
     && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-const BEAT_STYLE = `
-@keyframes ltms-lubdub { 0% { transform: scale(1); } 10% { transform: scale(1.08); } 20% { transform: scale(1); }
-  30% { transform: scale(1.05); } 42%, 100% { transform: scale(1); } }
-.ltms-beat { animation: ltms-lubdub var(--beat, 1.25s) ease-out infinite; transform-origin: center; }
-@media (prefers-reduced-motion: reduce) { .ltms-beat { animation: none; } }`;
+/** How much the dot grows at the top of a beat. */
+export const BEAT_GROW = 0.08;
+
+/**
+ * The dot's scale at wall time `nowMs` for a heart at `bpm`: the shared lub-dub
+ * envelope (lib/light.js heartbeatSwell), the same one the views' lights and
+ * the sound engine use (#428, replacing #406's stand-in CSS animation).
+ */
+export function beatScale(nowMs, bpm) {
+  if (!(bpm > 0) || !Number.isFinite(nowMs)) return 1;
+  const period = 60_000 / bpm;
+  const lastBeat = nowMs - (((nowMs % period) + period) % period);
+  return 1 + BEAT_GROW * heartbeatSwell(nowMs, lastBeat);
+}
 
 /** A cat-self dot: lub-dub at the heart rate while beating, still with reduced motion, dimmed when quiet. */
 export function BeatDot({ pulse, size = 10 }) {
   const beating = pulse?.state === "beating" && !prefersReducedMotion();
+  const dot = useRef(null);
+  const bpm = pulse?.bpm;
+  useEffect(() => {
+    const el = dot.current;
+    if (!beating || !el || typeof requestAnimationFrame !== "function") return undefined;
+    let id = requestAnimationFrame(function loop() {
+      el.style.transform = `scale(${beatScale(performance.now(), bpm).toFixed(4)})`;
+      id = requestAnimationFrame(loop);
+    });
+    return () => {
+      cancelAnimationFrame(id);
+      el.style.transform = "";
+    };
+  }, [beating, bpm]);
   return (
-    <span aria-hidden="true" data-beat={beating ? "beating" : "still"}
-          className={`inline-block shrink-0 rounded-full ${beating ? "ltms-beat" : ""}`}
-          style={{ width: size, height: size, background: SELF.color,
-                   opacity: pulse?.state === "quiet" ? 0.35 : 1,
-                   ...(beating ? { "--beat": `${(60 / pulse.bpm).toFixed(3)}s` } : {}) }} />
+    <span ref={dot} aria-hidden="true" data-beat={beating ? "beating" : "still"}
+          className="inline-block shrink-0 rounded-full"
+          style={{ width: size, height: size, background: SELF.color, transformOrigin: "center",
+                   opacity: pulse?.state === "quiet" ? 0.35 : 1 }} />
   );
 }
 
@@ -157,7 +180,6 @@ function Tiles({ subject, summary, member }) {
   return (
     <ul className="mb-6 grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}
         aria-label="Records by category">
-      <style>{BEAT_STYLE}</style>
       {CATEGORIES.map((c) => (
         <li key={c.key} className="panel p-3">
           <div className="flex items-center gap-2 text-sm">

@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import Interactions from "./Interactions.jsx";
 import { api } from "../../api/client.js";
 import { tabOf } from "../../lib/profile.js";
+import { sound } from "../../lib/sound.js";
 
 vi.mock("../../api/client.js", () => ({ api: vi.fn() }));
 beforeEach(() => {
@@ -13,6 +14,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   delete window.matchMedia;
+  vi.restoreAllMocks();
 });
 
 const graph = {
@@ -66,6 +68,16 @@ describe("Topology tab", () => {
     expect(await screen.findByText("z3-r0, a member planet around jetson-hub, beating at 48 bpm.")).toBeDefined();
     const calls = vi.mocked(api).mock.calls.filter(([p]) => p === "/admin/profile/episodes").map(([, o]) => o.params.member);
     expect(calls.sort()).toEqual(["jetson-hub", "z3-r0"]);
+  });
+
+  it("touch plays the shared engine's note for the light (#428)", async () => {
+    mockApi();
+    const note = vi.spyOn(sound, "note");
+    renderTab({ subject: "swarm", name: "echo-base" });
+    const lights = await screen.findByRole("list", { name: "Topology lights" });
+    fireEvent.click(within(lights).getByRole("button", { name: "z3-r0" }));
+    fireEvent.click(within(lights).getByRole("button", { name: "FLTMS" }));
+    expect(note.mock.calls.map(([k]) => k)).toEqual(["planet:z3-r0", "ltms"]);
   });
 
   it("the table twin's counts match /profile/episodes", async () => {
