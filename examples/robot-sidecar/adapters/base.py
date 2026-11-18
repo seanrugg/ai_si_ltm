@@ -29,6 +29,10 @@ class Item:
     - ``sample``: one reading of one sensor group (``sensor`` names it:
       ``{"sensor", "modality", "unit"}``), ``values`` ``{channel: value}``;
       the sidecar signs one sensed record per group per window (#408).
+      ``sensor`` may carry ``"deadband": {channel: number}``: a per-channel
+      change threshold. A channel missing from it (or any channel of an adapter
+      that gives none) uses band 0, so any change signs. The sidecar keeps the
+      deadband out of the signed record.
     - ``health``: the body reporting on itself (battery, charging); folded
       into one ``internal`` self-report per window (min/max/last).
     - ``flicker``: ``{state: n}`` flag flips too short to be an episode,
@@ -69,6 +73,11 @@ class Adapter:
     """Override ``start``: begin reading and call ``emit`` for each item. ``stop`` ends it."""
 
     name = "adapter"
+
+    # Per-channel change thresholds for the health self-report, channel -> band.
+    # Adapters that report health override it; the sidecar merges every adapter's
+    # dict into its own health_deadband. A channel missing from it uses band 0.
+    health_deadband: dict = {}
 
     def start(self, emit: Emit) -> None:
         raise NotImplementedError

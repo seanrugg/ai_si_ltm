@@ -10,9 +10,11 @@ Each window signs:
   `internal,telemetry,body-health`), min/max/last, with `stats.flicker`;
 - one **sensed record per sensor group** (tags `telemetry,body`, never
   `internal`; `kind: sensor` with `sensor`, `modality`, `unit`, `samples`,
-  `stats`): `wheels`, `imu`, `head`, `lift`, `touch`, `proximity`. A group is
-  sent every window even when nothing changed, so a gap means silence, not
-  stillness;
+  `stats`): `wheels`, `imu`, `head`, `lift`, `touch`, `proximity`. Each
+  adapter sets per-channel deadbands; an unchanged group is re-sent once per
+  `BODY_HEARTBEAT_SECONDS` (default 600 s) as a heartbeat carrying
+  `unchanged_since` and `windows_skipped`, so a gap longer than that still
+  means silence;
 - the **pose** record (below).
 
 Status flags become **episodes**: one `episode-start` and one `episode-end`

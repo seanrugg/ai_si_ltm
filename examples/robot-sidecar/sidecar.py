@@ -14,9 +14,10 @@ Each window signs (#408):
 - **one sensed record per sensor group** (``sample`` items: wheels, imu, head,
   lift, touch, proximity, …): ``perception`` tagged ``telemetry,body``, never
   ``internal``, in the docs/sensing.md shape (``kind: sensor``, ``sensor``,
-  ``modality``, ``unit``, ``samples`` ``[{t, v}]``, ``stats``). A group that
-  didn't change is still sent once per window, so a gap means silence, not
-  stillness;
+  ``modality``, ``unit``, ``samples`` ``[{t, v}]``, ``stats``). Each adapter
+  sets per-channel deadbands; an unchanged group is re-sent once per
+  ``BODY_HEARTBEAT_SECONDS`` as a heartbeat carrying ``unchanged_since`` and
+  ``windows_skipped``, so a gap longer than that still means silence;
 - the pose record(s) below.
 
 Records may link to earlier ones: an item's ``refs`` name the ``key`` of an
@@ -45,6 +46,9 @@ variables, plus:
 
   SIDECAR_ADAPTERS      comma-separated: wirepod, vector_sdk
   BODY_SECONDS          (default 30) body-state window
+  BODY_HEARTBEAT_SECONDS (default 600) how long an unchanged group or health
+                        report may go unsent before a heartbeat record re-sends
+                        it with ``unchanged_since`` and ``windows_skipped``
   SIDECAR_COGNITION_MODELS  "name@where,…": the models the robot's AI uses, for the cognition
                         report (offboard) and the wirepod adapter's replies. Empty: a warning
                         at start, and the profile shows "Language models: not reported".
@@ -74,12 +78,14 @@ class BodyWindow:
 
     def __init__(self):
         self.values: dict[str, list[float]] = {}
+        self.bools: set[str] = set()  # keys ever reported as booleans (kept as 0.0/1.0)
         self.samples = 0
 
     def add(self, values: dict) -> None:
         self.samples += 1
         for k, v in values.items():
             if isinstance(v, bool):
+                self.bools.add(k)
                 self.values.setdefault(k, []).append(1.0 if v else 0.0)
             elif isinstance(v, (int, float)):
                 self.values.setdefault(k, []).append(float(v))
@@ -102,18 +108,20 @@ class GroupWindow:
 
     def __init__(self, sensor: dict):
         self.sensor = {"sensor": sensor["sensor"], "modality": sensor.get("modality"), "unit": sensor.get("unit")}
+        self.deadband = {k: float(b) for k, b in (sensor.get("deadband") or {}).items()}
         self.samples: list[tuple[float, dict]] = []
+        self.channels: list[str] = []
 
     def add(self, at: float, values: dict) -> None:
         self.samples.append((at, dict(values)))
 
     def report(self) -> tuple[float, dict]:
         t0 = self.samples[0][0]
-        channels = sorted({k for _, v in self.samples for k in v})
-        single = channels == ["value"]
+        self.channels = sorted({k for _, v in self.samples for k in v})
+        single = self.channels == ["value"]
         samples = [{"t": round(at - t0, 3), "v": v["value"] if single else v} for at, v in self.samples]
         stats: dict = {"count": len(self.samples)}
-        for ch in channels:
+        for ch in self.channels:
             vals = [v[ch] for _, v in self.samples if ch in v]
             if vals and all(isinstance(x, bool) for x in vals):
                 st = {"true": sum(vals)}
@@ -205,9 +213,10 @@ class Sidecar:
     """Collects adapter items (from any thread) and signs them on the member's loop."""
 
     def __init__(self, adapters: Iterable[Adapter], body_seconds: float = 30.0, now: float = 0.0,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time, heartbeat_seconds: float = 600.0):
         self.adapters = list(adapters)
         self.body_seconds = body_seconds
+        self.heartbeat_seconds = heartbeat_seconds
         self.clock = clock  # wall clock, to time each item when the adapter emits it
         self.items: "queue.Queue[tuple[float, Item]]" = queue.Queue()
         self.health = BodyWindow()
@@ -217,6 +226,12 @@ class Sidecar:
         self.next_body = now + body_seconds
         self.signed = 0
         self.ids: dict[str, str] = {}  # item key -> "<agent>:<seq>" of the record signed for it
+        self.health_deadband: dict = {}
+        for a in self.adapters:
+            self.health_deadband.update(getattr(a, "health_deadband", {}))
+        # name (a sensor group, or "health") -> {"stats"/"values", "at", "id", "skipped", "channels"};
+        # the last signed report per group / health, to decide whether a window changed.
+        self.last_signed: dict[str, dict] = {}
 
     def emit(self, item: Item, at: float | None = None) -> None:
         """Queue an item; ``at`` (epoch seconds) defaults to the item's own, else now."""
@@ -277,30 +292,120 @@ class Sidecar:
                     self.flicker[k] = self.flicker.get(k, 0) + int(v)
         if now >= self.next_body:
             self.next_body = now + self.body_seconds
-            n += self._window(link)
+            n += self._window(link, now)
         self.signed += n
         return n
 
-    def _window(self, link) -> int:
+    @staticmethod
+    def _link_id(entry: dict, rec) -> None:
+        if isinstance(rec, dict) and rec.get("agent") and rec.get("seq") is not None:
+            entry["id"] = f"{rec['agent']}:{rec['seq']}"
+
+    def _group_unchanged(self, stats: dict, last_stats: dict, deadband: dict, channels: list) -> bool:
+        """True when every channel is within its deadband of the last signed report."""
+        single = channels == ["value"]
+        for ch in channels:
+            if not single and ch not in stats:
+                return False  # channel dropped out: changed
+            b = deadband.get(ch, 0)
+            st = stats if single else stats[ch]
+            lst = last_stats if single else last_stats[ch]
+            if "true" in st:  # boolean channel
+                if (st["true"] > 0) != (lst["true"] > 0):
+                    return False
+                if not (st["true"] == 0 or st["true"] == stats["count"]):
+                    return False  # toggled inside the window
+            else:
+                if abs(st["mean"] - lst["mean"]) > b:
+                    return False
+                if st["max"] - st["min"] > 2 * b:
+                    return False
+        return True
+
+    def _group_should_sign(self, name: str, stats: dict, deadband: dict, channels: list,
+                           now: float) -> bool:
+        """Decide whether this window's group report gets signed; remembers the decision."""
+        last = self.last_signed.get(name)
+        if last is None or set(channels) != set(last["channels"]) \
+                or not self._group_unchanged(stats, last["stats"], deadband, channels):
+            self.last_signed[name] = {"stats": stats, "at": now, "id": None, "skipped": 0,
+                                      "channels": list(channels)}
+            return True
+        if now - last["at"] < self.heartbeat_seconds:
+            last["skipped"] += 1
+            return False  # unchanged, too soon since the last sign: silence
+        # unchanged for a heartbeat interval: sign a heartbeat record
+        stats["unchanged_since"] = last["id"]
+        stats["windows_skipped"] = last["skipped"]
+        self.last_signed[name] = {"stats": stats, "at": now, "id": None, "skipped": 0,
+                                  "channels": list(channels)}
+        return True
+
+    def _health_unchanged(self, values: dict, last_values: dict) -> bool:
+        """True when every health value is within its deadband of the last signed report."""
+        for k, st in values.items():
+            b = self.health_deadband.get(k, 0)
+            lst = last_values[k]
+            if k in self.health.bools:  # 0.0/1.0: same "any true", no toggle inside the window
+                if (st["max"] > 0) != (lst["max"] > 0):
+                    return False
+                if st["min"] != st["max"]:
+                    return False  # toggled inside the window
+            else:
+                if abs(st["last"] - lst["last"]) > b:
+                    return False
+                if st["max"] - st["min"] > 2 * b:
+                    return False
+        return True
+
+    def _health_should_sign(self, health: dict, now: float) -> bool:
+        """Decide whether this window's health report gets signed; remembers the decision."""
+        values = health["values"]
+        last = self.last_signed.get("health")
+        if last is None or set(values) != set(last["values"]) \
+                or not self._health_unchanged(values, last["values"]):
+            self.last_signed["health"] = {"values": values, "at": now, "id": None, "skipped": 0}
+            return True
+        if now - last["at"] < self.heartbeat_seconds:
+            last["skipped"] += 1
+            return False
+        health.setdefault("stats", {})["unchanged_since"] = last["id"]
+        health["stats"]["windows_skipped"] = last["skipped"]
+        self.last_signed["health"] = {"values": values, "at": now, "id": None, "skipped": 0}
+        return True
+
+    def _window(self, link, now) -> int:
         n = 0
         for t0, payload in self.pose.report():
             link.append("perception", summary=f"pose in {payload['frame']}"[:280], tags=["telemetry", "pose"],
                         payload=payload, ts=iso_ts(t0))
             n += 1
         for name in sorted(self.groups):
-            t0, payload = self.groups[name].report()
-            link.append("perception", summary=f"{name} readings"[:280], tags=["telemetry", "body"],
-                        payload=payload, ts=iso_ts(t0))
-            n += 1
+            group = self.groups.pop(name)
+            t0, payload = group.report()
+            if self._group_should_sign(name, payload["stats"], group.deadband, group.channels, now):
+                rec = link.append("perception", summary=f"{name} readings"[:280], tags=["telemetry", "body"],
+                                  payload=payload, ts=iso_ts(t0))
+                self._link_id(self.last_signed[name], rec)
+                n += 1
         self.groups = {}
         health = self.health.report("body-health")
         if health is not None or self.flicker:
             health = health or {"kind": "body-health", "samples": 0, "values": {}}
+            sign = False
             if self.flicker:
+                # a flicker is a change: always signs, even when nothing else did
                 health["stats"] = {"flicker": dict(sorted(self.flicker.items()))}
-            link.append("perception", summary="body health", tags=["internal", "telemetry", "body-health"],
-                        payload=health)
-            n += 1
+                self.last_signed["health"] = {"values": health["values"], "at": now, "id": None,
+                                              "skipped": 0}
+                sign = True
+            else:
+                sign = self._health_should_sign(health, now)
+            if sign:
+                rec = link.append("perception", summary="body health",
+                                  tags=["internal", "telemetry", "body-health"], payload=health)
+                self._link_id(self.last_signed["health"], rec)
+                n += 1
         self.flicker = {}
         return n
 
@@ -353,7 +458,8 @@ def main() -> None:
     env = os.environ
     models = cognition_models(env)
     adapters = build_adapters(env)
-    sidecar = Sidecar(adapters, float(env.get("BODY_SECONDS", "30")), time.monotonic())
+    sidecar = Sidecar(adapters, float(env.get("BODY_SECONDS", "30")), time.monotonic(),
+                      heartbeat_seconds=float(env.get("BODY_HEARTBEAT_SECONDS", "600")))
     if env.get("LTMS_SERVER") and env.get("LTMS_KEY_PATH"):
         client = LTMSClient(env["LTMS_SERVER"], key_path=env["LTMS_KEY_PATH"])
         # The robot's AI runs off board (in the bridge), so the profile shows it as Hybrid (#185).

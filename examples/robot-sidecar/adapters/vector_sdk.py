@@ -197,6 +197,20 @@ GROUPS = {
     "proximity": ("range", "mm"),
 }
 
+# group -> {channel: deadband}; a channel missing here (or a whole group) uses
+# band 0, so any change signs. Starting values from #438; Sean can tune them
+# against real data.
+DEADBANDS = {
+    "wheels": {"left": 1.0, "right": 1.0},
+    "imu": {"accel_x": 50.0, "accel_y": 50.0, "accel_z": 50.0,
+            "gyro_x": 0.02, "gyro_y": 0.02, "gyro_z": 0.02},
+    "head": {"value": 0.02},
+    "lift": {"value": 1.0},
+    "touch": {"raw": 5.0, "pressed": 0},
+    "proximity": {"distance": 10.0, "signal_quality": 0.05, "unobstructed": 0,
+                  "found_object": 0, "lift_in_fov": 0},
+}
+
 
 def sensor_values(robot) -> dict[str, dict]:
     """``{group: {channel: value}}`` from an ``anki_vector.Robot`` (attributes only; no calls).
@@ -310,6 +324,9 @@ def robot_specs(robot, sdk_version: str | None = None) -> dict:
 
 class VectorSDK(Adapter):
     name = "vector_sdk"
+    # Per-channel thresholds for the body-health self-report (#438 part 1).
+    health_deadband = {"battery_volts": 0.05, "battery_level": 0, "charging": 0,
+                       "on_charger_platform": 0}
 
     def __init__(self, serial: str | None = None, body_seconds: float = 1.0, face_gap_seconds: float = 10.0,
                  battery_seconds: float = 30.0, flag_seconds: float = 0.1, debounce_seconds: float = DEBOUNCE_SECONDS):
@@ -378,7 +395,9 @@ class VectorSDK(Adapter):
             emit(Item("body", values=pose))
         for group, values in sensor_values(robot).items():
             modality, unit = GROUPS[group]
-            emit(Item("sample", values=values, sensor={"sensor": group, "modality": modality, "unit": unit}))
+            emit(Item("sample", values=values,
+                      sensor={"sensor": group, "modality": modality, "unit": unit,
+                              "deadband": DEADBANDS.get(group, {})}))
 
     def on_connected(self, robot) -> None:
         """Report the spec sheet once per connection, if the sidecar asked for it."""
