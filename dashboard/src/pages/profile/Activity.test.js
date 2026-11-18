@@ -48,10 +48,11 @@ describe("What it read", () => {
 import { fireEvent, waitFor } from "@testing-library/react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, vi } from "vitest";
-import Activity, { memberChronologyPath, rangeWindow, swarmRows } from "./Activity.jsx";
+import Activity, { memberChronologyPath, rangeWindow, ringNote, swarmRows } from "./Activity.jsx";
 import { EPISODES } from "./episodes.fixture.js";
 import { api } from "../../api/client.js";
 import { TABS, tabOf } from "../../lib/profile.js";
+import { sound } from "../../lib/sound.js";
 
 vi.mock("../../api/client.js", () => ({ api: vi.fn() }));
 
@@ -112,6 +113,19 @@ describe("Chronology tab", () => {
     fireEvent.click(ring);
     await waitFor(() => expect(document.querySelector(".viz-narrate").textContent)
       .toBe("Power · charger — on charger · 2 episodes this range"), { timeout: 3000 });
+  });
+
+  it("touching a ring plays the shared engine's note, its own pitch per ring (#428)", async () => {
+    const note = vi.spyOn(sound, "note");
+    try {
+      showTab({ subject: "member", name: "rover-1" });
+      fireEvent.click(await screen.findByRole("button", { name: "Power ring" }));
+      fireEvent.click(screen.getByRole("button", { name: "Mind ring" }));
+      expect(note.mock.calls.map(([k]) => k)).toEqual([ringNote("power"), ringNote("mind")]);
+      expect(ringNote("power")).toBe("ring:power");
+    } finally {
+      note.mockRestore();
+    }
   });
 
   it("shows the table twin in Calm view, matching the episodes", async () => {

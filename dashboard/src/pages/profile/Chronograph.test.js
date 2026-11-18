@@ -3,6 +3,7 @@ import {
   ECHO_ALPHA, EDGE, LANES, LEAP_WALL_S, NODE_LANES, angleAt, clockTicks, danceAt, drawChronograph,
   episodeArcs, episodeRows, geometry, laneAtPoint, laneTouchText, leapPoint, leapSeconds, leapsOf,
   narrationAt, nodeAxis, nodeRadius, polar, stateRows, stateVector, tickStep,
+  PASS_MAX_S, chronographSound, lastSelfAt, pulsesPassed,
 } from "./Chronograph.jsx";
 import { CAT_SELF, LTMS_CORE, MIND, category } from "../../lib/visual.js";
 
@@ -196,5 +197,66 @@ describe("drawing", () => {
     expect(calls.some(([p]) => p === "clip")).toBe(true);
     expect(calls.filter(([p]) => p === "fillText").length).toBeGreaterThan(LANES.length);
     expect(CAT_SELF).toBeDefined();
+  });
+});
+
+/** A fake sound engine: records the calls, plays nothing (#428). */
+function fakeEngine(swell = 0.6) {
+  const calls = [];
+  return {
+    calls,
+    pulse: (category, opts) => { calls.push(["pulse", category, opts]); return true; },
+    heartbeat: (key, info, opts) => { calls.push(["heartbeat", key, info, opts]); return { swell }; },
+    note: (key) => { calls.push(["note", key]); return true; },
+    forget: (key) => { calls.push(["forget", key]); },
+  };
+}
+
+describe("Chronology sound (#428)", () => {
+  it("passes the records between two hands, without self-reports", () => {
+    expect(pulsesPassed(EPISODES.pulses, 200, 1000, Infinity).map((p) => p[0])).toEqual([300, 1000]);
+    expect(pulsesPassed(EPISODES.pulses, 290, 300).map((p) => p[0])).toEqual([300]);
+    expect(pulsesPassed(EPISODES.pulses, 95, 105)).toEqual([]); // only a self-report
+  });
+
+  it("passes nothing on the first frame, going back, standing still or a seek", () => {
+    expect(pulsesPassed(EPISODES.pulses, null, 1000)).toEqual([]);
+    expect(pulsesPassed(EPISODES.pulses, 1000, 200)).toEqual([]);
+    expect(pulsesPassed(EPISODES.pulses, 300, 300)).toEqual([]);
+    expect(pulsesPassed(EPISODES.pulses, 0, PASS_MAX_S + 1000)).toEqual([]);
+  });
+
+  it("finds the latest self-report at the hand", () => {
+    expect(lastSelfAt(EPISODES.pulses, 50)).toBe(null);
+    expect(lastSelfAt(EPISODES.pulses, 1000)).toBe(100);
+    expect(lastSelfAt(EPISODES.pulses, 1800)).toBe(1790);
+  });
+
+  it("pulses each passed record's category and beats the member's heart, audibly", () => {
+    const engine = fakeEngine();
+    const swell = chronographSound(engine, { data: EPISODES, member: "rover-1", from: 290, to: 305 });
+    expect(engine.calls.filter((c) => c[0] === "pulse").map((c) => c[1])).toEqual(["act"]);
+    const hb = engine.calls.find((c) => c[0] === "heartbeat");
+    expect(hb[1]).toBe("rover-1");
+    expect(hb[2]).toEqual({ intervalSec: EPISODES.heartbeat?.interval_s ?? undefined, sinceLastSec: 205 });
+    expect(hb[3]).toEqual({ audible: true });
+    expect(swell).toBe(0.6);
+  });
+
+  it("the engine's swell drives the core; still frames don't swell", () => {
+    const radii = (opts) => {
+      const out = [];
+      const ctx = new Proxy({}, {
+        get: (target, k) => (k in target ? target[k] : (...args) => {
+          out.push([k, ...args.filter((a) => typeof a === "number")]);
+          return k === "createRadialGradient" || k === "createLinearGradient" ? { addColorStop() {} } : undefined;
+        }),
+        set: (target, k, v) => { target[k] = v; return true; },
+      });
+      drawChronograph(ctx, 480, 480, { data: EPISODES, hand: 1000, leapList: [], sinceMs: SINCE, nowMs: 0, ...opts });
+      return out;
+    };
+    expect(radii({ animate: true, swell: 1 })).not.toEqual(radii({ animate: true, swell: 0 }));
+    expect(radii({ animate: false, swell: 1 })).toEqual(radii({ animate: false, swell: 0 }));
   });
 });
