@@ -3,6 +3,7 @@ from server.models.audit import AuditLog
 from server.models.auth import AdminSession, AdminUser, AuthChallenge, Token
 from server.models.base import Base
 from server.models.enrollment_request import EnrollmentSwarmRequest
+from server.models.integrity import IntegrityCheckpoint, IntegrityRun
 from server.models.invite import Invite
 from server.models.directive import Directive
 from server.models.dataset import CatalogIntegration, Dataset, DatasetItem, DatasetRead, DatasetUpload, DatasetVersion
@@ -31,6 +32,8 @@ __all__ = [
     "DeclaredLocation",
     "Directive",
     "EnrollmentSwarmRequest",
+    "IntegrityCheckpoint",
+    "IntegrityRun",
     "Invite",
     "LrsEndpoint",
     "McpToken",

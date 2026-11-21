@@ -87,15 +87,15 @@ def is_silent(row: dict, now: datetime) -> bool:
 # --- integrity ------------------------------------------------------------------
 
 async def integrity_summary(session: AsyncSession, state, now: datetime) -> dict:
-    """The last full chain check, refreshed when older than INTEGRITY_MAX_AGE."""
+    """The last chain check, refreshed (incrementally, #439) when older than INTEGRITY_MAX_AGE."""
     cached = getattr(state, "integrity_summary", None)
     if cached is None or now - cached["checked_at"] > INTEGRITY_MAX_AGE:
-        cached = remember_integrity(state, await integrity.verify_all(session), now)
+        cached = remember_integrity(state, await integrity.check_all(session), now)
     return cached
 
 
 def remember_integrity(state, reports: list[dict], now: datetime | None = None) -> dict:
-    """Keep a full check's result for Overview (also called by the Integrity page)."""
+    """Keep a check's result for Overview (also called by the Integrity page and a full run)."""
     summary = {"checked_at": now or _now(),
                "broken": sorted(r["member"] for r in reports if r.get("status") == "broken")}
     state.integrity_summary = summary
