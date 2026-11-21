@@ -13,6 +13,7 @@ from server.tests.test_charter import _age_enrollment, _publish, _quiet, V1
 from server.tests.test_datasets_read import _dataset, data_dir  # noqa: F401
 from server.tests.test_directive_acks import Link, _wire, fleet_key_file  # noqa: F401
 from server.tests.test_fleet_health import _beats
+from server.tests.test_integrity_incremental import run_full_check
 from server.tests.test_swarms import Home
 
 
@@ -163,7 +164,8 @@ def test_integrity_break_appears(app, mesh, admin, db_exec):
         db_exec(text("DROP TRIGGER trg_records_no_update"))
     db_exec(text("UPDATE records SET outcome = 'failed' WHERE seq = 2"))
     assert "integrity" not in _by_key(_view(admin))  # the cached check is under an hour old
-    admin.get("/api/admin/integrity")  # a full check on the Integrity page refreshes it
+    # An edit behind an existing checkpoint needs a full check (#439), which refreshes it.
+    assert run_full_check(admin)["status"] == "done"
     item = _by_key(_view(admin))["integrity"]
     assert item["count"] == 1 and "z3-r0" in item["title"] and item["link"] == "/integrity"
 

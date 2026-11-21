@@ -73,6 +73,22 @@ CREATE TABLE directives (
 
 CREATE INDEX idx_directives_issued_at ON directives (issued_at);
 
+CREATE TABLE integrity_runs (
+	id UUID NOT NULL, 
+	mode VARCHAR(12) NOT NULL, 
+	status VARCHAR(12) NOT NULL, 
+	started_by VARCHAR(200), 
+	started_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	updated_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	finished_at TIMESTAMP WITH TIME ZONE, 
+	members_total INTEGER NOT NULL, 
+	members_done INTEGER NOT NULL, 
+	records_done BIGINT NOT NULL, 
+	broken INTEGER NOT NULL, 
+	error TEXT, 
+	PRIMARY KEY (id)
+);
+
 CREATE TABLE lrs_endpoints (
 	id UUID NOT NULL, 
 	name VARCHAR(64) NOT NULL, 
@@ -228,6 +244,25 @@ CREATE TABLE datasets (
 	CONSTRAINT ck_datasets_status CHECK (status IN ('pending', 'approved', 'retired')), 
 	UNIQUE (name), 
 	FOREIGN KEY(integration_id) REFERENCES catalog_integrations (id)
+);
+
+CREATE TABLE integrity_checkpoints (
+	member_id UUID NOT NULL, 
+	last_verified_seq BIGINT NOT NULL, 
+	last_verified_hash VARCHAR(64) NOT NULL, 
+	records BIGINT NOT NULL, 
+	payloads_present BIGINT NOT NULL, 
+	payloads_purged BIGINT NOT NULL, 
+	deleted BIGINT NOT NULL, 
+	key_hash VARCHAR(64) NOT NULL, 
+	verified_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	status VARCHAR(12) NOT NULL, 
+	mode VARCHAR(12) NOT NULL, 
+	error JSONB, 
+	head_seq BIGINT, 
+	checked_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	PRIMARY KEY (member_id), 
+	FOREIGN KEY(member_id) REFERENCES members (id) ON DELETE CASCADE
 );
 
 CREATE TABLE member_addresses (

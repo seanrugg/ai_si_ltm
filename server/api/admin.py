@@ -19,7 +19,7 @@ from server.api.schemas import (AdminLogin, ApproveRequest, BulkMembersRequest,
                                 EnrollmentPolicyUpdate, InviteCreate, McpSettingsUpdate,
                                 McpTokenCreate, PermissionsRequest, ReasonRequest,
                                 SwarmMode)
-from server.models import (AuditLog, EnrollmentSwarmRequest, Member, McpToken, Record, RecordPayload,
+from server.models import (AuditLog, EnrollmentSwarmRequest, IntegrityRun, Member, McpToken, Record, RecordPayload,
                            RecordProvenance, RuntimeSetting, Swarm, SwarmMember)
 from server.services import auth as auth_service
 from server.services import conversation as conversation_service, enrollment, integrity, lrs as lrs_service, mcp_access, policy_lifecycle, recall, runtime_settings, swarms
@@ -1234,17 +1234,43 @@ async def admin_policies(
 
 @router.get("/admin/integrity")
 async def integrity_view(request: Request, member: str | None = None, admin: AdminAuth = ADMIN) -> dict:
+    """Incremental check (#439): only records after each member's checkpoint."""
     async with transaction(request) as session:
         if member:
             m = await session.scalar(select(Member).where(Member.name == member))
             if m is None:
                 raise ServiceError(404, "not_found", "member not found")
-            return {"members": [await integrity.verify_member(session, m)]}
-        reports = await integrity.verify_all(session)
-        from server.services import attention  # Overview reuses this check (#380)
+            return {"members": [await integrity.check_member(session, m)],
+                    "full": integrity.run_to_dict(await integrity.latest_run(session))}
+        reports = await integrity.check_all(session)
+        full = integrity.run_to_dict(await integrity.latest_run(session))
+    from server.services import attention  # Overview reuses this check (#380)
 
-        attention.remember_integrity(request.app.state, reports)
-        return {"members": reports}
+    attention.remember_integrity(request.app.state, reports)
+    return {"members": reports, "full": full}
+
+
+@router.get("/admin/integrity/full")
+async def integrity_full_status(request: Request, admin: AdminAuth = ADMIN) -> dict:
+    """The latest full check run and its progress (#439)."""
+    async with transaction(request) as session:
+        return {"run": integrity.run_to_dict(await integrity.latest_run(session))}
+
+
+@router.post("/admin/integrity/full", status_code=202)
+async def integrity_full_start(request: Request, admin: AdminAuth = ADMIN) -> dict:
+    """Start a full re-verification of every chain as a background job (#439)."""
+    async with transaction(request) as session:
+        run = await integrity.start_full_run(session, started_by=admin.username)
+        session.add(AuditLog(actor=f"admin:{admin.username}", action="integrity_full_check",
+                             detail={"run": str(run.id)}))
+        run_id = run.id
+    from server.services import attention
+
+    state = request.app.state
+    integrity.launch_full(state, run_id, on_done=lambda reports: attention.remember_integrity(state, reports))
+    async with transaction(request) as session:
+        return {"run": integrity.run_to_dict(await session.get(IntegrityRun, run_id))}
 
 
 @router.get("/admin/recall-log")

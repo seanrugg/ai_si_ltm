@@ -13,6 +13,7 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models import AdminSession, AuditLog, AuthChallenge, Record, RecordPayload, Token
+from server.services import integrity
 
 KEEP_TAG = "keep"  # records with this tag are never purged
 KEEP_AUDIT_ACTIONS = ("memory_wipe",)  # audit rows prune_audit_log never deletes
@@ -38,6 +39,7 @@ async def purge_payloads(session: AsyncSession, rules, now: datetime | None = No
             ids = ids.where(Record.type == rule.type)
         if rule.tag is not None:
             ids = ids.where(_json_list_contains(session, Record.tags, rule.tag))
+        await integrity.note_payloads_purged(session, ids)  # keep checkpoint counts right (#439)
         result = await session.execute(delete(RecordPayload).where(RecordPayload.record_id.in_(ids)))
         count = result.rowcount or 0
         if count:
