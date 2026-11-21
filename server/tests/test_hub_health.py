@@ -82,6 +82,28 @@ def test_window_report_and_throttle_alert(jetson, tmp_path):
     assert m.poll(330 + hh.ALERT_GAP_S)[1] is None
 
 
+def test_default_window_is_six_hours_and_alerts_dont_wait(jetson, tmp_path):
+    """#391: four summaries a day by default; a throttle alert still goes out at once."""
+    cfg = load_config({"LTMS_SERVER": "https://ltms.example.org", "LTMS_KEY_PATH": "k",
+                       "HUB_OUTBOX_PATH": str(tmp_path / "o.db")})
+    assert cfg.health_seconds == 21600 and cfg.health_sample_seconds == 30
+    m = make_health_monitor(cfg, 0, root=jetson)
+    assert m.poll(0) == (None, None)  # baseline sample
+    assert m.poll(30) == (None, None)
+    _w(jetson, "sys/class/hwmon/hwmon3/oc3_event_cnt", "8\n")
+    report, alert = m.poll(60)  # one minute into a six-hour window
+    assert report is None and alert["summary"] == "throttle: oc3 +1"
+    _w(jetson, "sys/class/thermal/thermal_zone1/temp", "86000\n")
+    report, alert = m.poll(60 + hh.ALERT_GAP_S)  # a hot zone later in the window: also at once
+    assert report is None and alert["summary"] == "throttle: gpu 86 C"
+    assert m.poll(21600 - 30)[0] is None
+    report, _ = m.poll(21600)
+    assert report["sensor"] == "jetson-health" and report["throttled"] is True
+    assert report["temp_c"]["gpu"]["max"] == 86.0
+    assert load_config({"LTMS_SERVER": "https://ltms.example.org", "LTMS_KEY_PATH": "k",
+                        "HUB_OUTBOX_PATH": str(tmp_path / "o.db"), "HUB_HEALTH_SECONDS": "300"}).health_seconds == 300
+
+
 def test_speak_says_what_was_recorded():
     s = {"cpu_pct": 12.4, "gpu_load_pct": 3, "ram_used_mib": 3800, "ram_total_mib": 7619, "disk_used_pct": 61.2,
          "temp_c": {"cpu": 48.5, "gpu": 51.2}, "power_mode": "25W", "oc_events": {"oc3": 7},
@@ -105,7 +127,7 @@ def test_latest_cli(tmp_path, capsys):
 def test_config_and_signing(jetson, tmp_path):
     base = {"LTMS_SERVER": "https://ltms.example.org", "LTMS_KEY_PATH": "k", "HUB_OUTBOX_PATH": str(tmp_path / "o.db")}
     cfg = load_config(base)
-    assert cfg.health == "auto" and cfg.health_seconds == 300 and cfg.health_state_path == str(tmp_path / "hub-health.json")
+    assert cfg.health == "auto" and cfg.health_seconds == 21600 and cfg.health_state_path == str(tmp_path / "hub-health.json")
     assert make_health_monitor(cfg, 0, root=str(tmp_path / "not-a-jetson")) is None
     assert make_health_monitor(cfg, 0, root=jetson) is not None
     assert make_health_monitor(load_config({**base, "HUB_HEALTH": "0"}), 0, root=jetson) is None
