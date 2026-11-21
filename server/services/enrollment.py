@@ -12,6 +12,7 @@ the swarm's ``open_permissions``). Free agents (no swarm) always use approval.
 from __future__ import annotations
 
 import hashlib
+import math
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -122,6 +123,33 @@ async def set_proxied_by(session: AsyncSession, member_id, *, admin: str, proxie
     old, m.proxied_by = m.proxied_by, new
     session.add(AuditLog(member_id=m.id, actor=f"admin:{admin}", action="member_proxied",
                          detail={"old": old, "new": new}))
+    await session.flush()
+    return m
+
+
+# Upper bound for a per-member ingest override, records/s. Far above any robot;
+# it only stops a typo (an extra few zeros) from switching the limit off.
+MAX_INGEST_RATE = 10_000
+
+
+async def set_ingest_rate(session: AsyncSession, member_id, *, admin: str, ingest_rate) -> Member:
+    """Admin sets or clears a member's ingest rate limit in records/s (#438). Audited.
+
+    ``None`` means the configured ``LTMS_INGEST_RATE`` applies. Otherwise a
+    positive number up to ``MAX_INGEST_RATE``; zero is refused (revoke the
+    ``contribute`` permission to stop a member writing).
+    """
+    if ingest_rate is not None:
+        if isinstance(ingest_rate, bool) or not isinstance(ingest_rate, (int, float)) \
+                or not math.isfinite(ingest_rate) or not 0 < ingest_rate <= MAX_INGEST_RATE:
+            raise ServiceError(422, "bad_ingest_rate",
+                               f"ingest_rate is a number of records per second, above 0 and at most "
+                               f"{MAX_INGEST_RATE}, or null for the configured rate")
+        ingest_rate = float(ingest_rate)
+    m = await get_member(session, member_id)
+    old, m.ingest_rate = m.ingest_rate, ingest_rate
+    session.add(AuditLog(member_id=m.id, actor=f"admin:{admin}", action="member_ingest_rate",
+                         detail={"old": old, "new": ingest_rate}))
     await session.flush()
     return m
 
@@ -442,6 +470,7 @@ def member_to_dict(m: Member) -> dict:
         "cognition": cognition.resolve(m),
         "intended": m.intended,
         "proxied_by": m.proxied_by,
+        "ingest_rate": m.ingest_rate,
         "enrolled_at": m.enrolled_at.isoformat() if m.enrolled_at else None,
         "revoked_at": m.revoked_at.isoformat() if m.revoked_at else None,
         "last_seen_at": m.last_seen_at.isoformat() if m.last_seen_at else None,

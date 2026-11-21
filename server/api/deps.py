@@ -1,8 +1,10 @@
 """Request plumbing: transactions, auth dependencies, rate limits."""
 from __future__ import annotations
 
+import math
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from fastapi import Depends, Header, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,6 +60,10 @@ class MemberAuth:
     member_id: object
     name: str
     permissions: list[str]
+    # Per-member ingest rate limit in records/s (#438). None means the global
+    # LTMS_INGEST_RATE applies; a positive number overrides it for this member's
+    # writes only.
+    ingest_rate: float | None = None
 
 
 async def current_member(request: Request, authorization: str | None = Header(default=None)) -> MemberAuth:
@@ -66,18 +72,50 @@ async def current_member(request: Request, authorization: str | None = Header(de
     raw = authorization.split(" ", 1)[1].strip()
     async with transaction(request) as session:
         member, perms = await auth_service.member_from_token(session, raw)
-        return MemberAuth(member.id, member.name, perms)
+        return MemberAuth(member.id, member.name, perms, member.ingest_rate)
 
 
 def require(permission: str, *alternatives: str):
+    """Check a permission. Recall is rate-limited here, one token per request;
+    ingest is limited per record in the route (``enforce_ingest_rate``), once
+    the batch size is known."""
     async def dep(request: Request, auth: MemberAuth = Depends(current_member)) -> MemberAuth:
         if not any(p in auth.permissions for p in (permission, *alternatives)):
             raise ServiceError(403, "forbidden", f"requires the {permission!r} permission")
-        limiter = request.app.state.limiters["ingest" if permission == "contribute" else "recall"]
-        if not limiter.allow(str(auth.member_id)):
-            raise ServiceError(429, "rate_limited", "too many requests; slow down")
+        if permission != "contribute":
+            limiter = request.app.state.limiters["recall"]
+            key = str(auth.member_id)
+            if not limiter.allow(key):
+                raise _rate_limited(limiter.retry_after(key))
         return auth
     return dep
+
+
+def _rate_limited(retry_after: float) -> ServiceError:
+    headers = {"Retry-After": str(max(1, math.ceil(retry_after)))} if math.isfinite(retry_after) else {}
+    return ServiceError(429, "rate_limited", "too many requests; slow down", headers=headers)
+
+
+def enforce_ingest_rate(request: Request, auth: MemberAuth, records: int) -> None:
+    """Charge ``records`` tokens to the submitting member's ingest bucket (#438).
+
+    The member's own ``ingest_rate`` (records/s) overrides the configured
+    ``LTMS_INGEST_RATE``. Batches may borrow past the bucket (see
+    ``RateLimiter``), so a full batch is never refused forever; the member then
+    waits until the debt is repaid. A refusal is a 429 with ``Retry-After`` in
+    whole seconds and is noted in ``app.state.ingest_refused`` for the admin
+    member list. A hub relaying for its swarm is charged for every record it
+    relays.
+    """
+    limiter = request.app.state.limiters["ingest"]
+    key = str(auth.member_id)
+    cost = max(records, 1)
+    if limiter.allow(key, cost=cost, rate_override=auth.ingest_rate, borrow=True):
+        return
+    refused = getattr(request.app.state, "ingest_refused", None)
+    if refused is not None:
+        refused[key] = datetime.now(timezone.utc)
+    raise _rate_limited(limiter.retry_after(key, cost=cost, rate_override=auth.ingest_rate, borrow=True))
 
 
 @dataclass

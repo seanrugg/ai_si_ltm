@@ -11,6 +11,7 @@ import { localTime, plural, relativeTime } from "../lib/format.js";
 import { describeChange, HUB_WARNING, membershipChange } from "../lib/membership.js";
 import { KINDS, kindOf } from "../lib/visual.js";
 import ProxiedBadge from "../components/ProxiedBadge.jsx";
+import RateLimitBadge from "../components/RateLimitBadge.jsx";
 
 const PERMISSIONS = [
   { id: "contribute", help: "Write records under its own name" },
@@ -357,6 +358,7 @@ function MemberRow({ m, swarm, swarms, location, inherited, estimate, geo, unpla
           <Link to={`/?agent=${encodeURIComponent(m.name)}`} className="text-xs text-paper-muted underline hover:text-paper"
                 aria-label={`Timeline of ${m.name}`}>Timeline</Link>
           <ProxiedBadge proxiedBy={m.proxied_by} />
+          <RateLimitBadge rate={m.ingest_rate} refusedAt={m.ingest_refused_at} />
         </span>
         <span><StatusBadge status={m.status} /></span>
         <span className="text-sm text-paper-muted">

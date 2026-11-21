@@ -11,13 +11,15 @@ from server.services.ingest import IngestRejected
 
 
 def _err(status: int, code: str, message: str, **extra) -> JSONResponse:
-    return JSONResponse(status_code=status, content={"error": {"code": code, "message": message, **extra}})
+    headers = extra.pop("headers", None)
+    return JSONResponse(status_code=status, content={"error": {"code": code, "message": message, **extra}},
+                        headers=headers or None)
 
 
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(ServiceError)
     async def _service(_: Request, exc: ServiceError):
-        return _err(exc.status, exc.code, exc.message)
+        return _err(exc.status, exc.code, exc.message, headers=exc.headers)
 
     @app.exception_handler(IngestRejected)
     async def _ingest(_: Request, exc: IngestRejected):

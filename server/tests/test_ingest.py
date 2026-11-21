@@ -1,4 +1,5 @@
 """Ingest: chain rules, batch policy, idempotent retries, append-only storage."""
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -6,7 +7,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from ltms_contract import GENESIS_HASH, build_record
-from server.models import Record, RecordPayload
+from server.models import Member, Record, RecordPayload
 
 
 def post(member, records):
@@ -132,6 +133,78 @@ def test_records_table_is_append_only(mesh, db_exec):
     # Payloads, by design, can be deleted (retention).
     db_exec(delete(RecordPayload))
     assert db_exec(select(Record.summary)).scalar() == "original"
+
+
+class _Clock:
+    """A frozen ``time.monotonic`` for the rate limiter, so counts are exact."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    c = _Clock()
+    monkeypatch.setattr("server.security.ratelimit.time", c)
+    return c
+
+
+def _chain(member, agent: str, n: int, start_seq: int = 1, prev: str = GENESIS_HASH) -> list[dict]:
+    recs = []
+    for seq in range(start_seq, start_seq + n):
+        rec = build_record(member.key, agent=agent, seq=seq, prev_hash=prev, type="event")
+        recs.append(rec)
+        prev = rec["hash"]
+    return recs
+
+
+def _set_rate(db_exec, member, rate):
+    db_exec(update(Member).where(Member.id == uuid.UUID(member.member_id)).values(ingest_rate=rate))
+
+
+def test_override_triggers_429_with_retry_after_header(mesh, db_exec, clock):
+    """A per-member ingest override caps writes at its burst and a 429 carries a
+    Retry-After header in whole seconds (issue #438 part 2)."""
+    z3 = mesh.member("z3-r0")
+    _set_rate(db_exec, z3, 10)
+    recs = _chain(z3, "z3-r0", 12)
+    codes = [post(z3, [rec]).status_code for rec in recs[:10]]
+    assert codes == [200] * 10
+    r = post(z3, [recs[10]])
+    assert r.status_code == 429
+    assert r.json()["error"]["code"] == "rate_limited"
+    assert r.headers["Retry-After"] == "1"  # one token at 10/s is 0.1 s, rounded up
+    clock.now += 0.1
+    assert post(z3, [recs[10]]).status_code == 200
+
+
+def test_ingest_is_charged_per_record_not_per_request(mesh, db_exec, clock):
+    """A batch costs one token per record. A batch bigger than the bucket is
+    admitted on a full bucket and then repaid, never refused forever (#438)."""
+    z3 = mesh.member("z3-r0")
+    _set_rate(db_exec, z3, 5)
+    recs = _chain(z3, "z3-r0", 21)
+    assert post(z3, recs[:20]).status_code == 200   # bucket 5 -> -15
+    r = post(z3, [recs[20]])
+    assert r.status_code == 429
+    assert r.headers["Retry-After"] == "4"            # 16 tokens at 5/s = 3.2 s
+    clock.now += 3.2
+    assert post(z3, [recs[20]]).status_code == 200
+
+
+def test_members_without_override_use_the_configured_rate(mesh, db_exec, clock):
+    """A limited member does not affect others; no override means the global rate."""
+    z3 = mesh.member("z3-r0")
+    other = mesh.member("vector")
+    _set_rate(db_exec, z3, 1)
+    z3_recs = _chain(z3, "z3-r0", 2)
+    assert post(z3, [z3_recs[0]]).status_code == 200
+    assert post(z3, [z3_recs[1]]).status_code == 429
+    # The test config's global rate is 1000/s: a full batch goes straight in.
+    assert post(other, _chain(other, "vector", 100)).status_code == 200
 
 
 def test_thought_records_are_accepted_and_filterable(mesh):

@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, CheckConstraint, Integer, LargeBinary, String, Text, Uuid
+from sqlalchemy import BigInteger, CheckConstraint, Float, Integer, LargeBinary, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from server.models.base import Base, JSONType, UTCDateTime, utcnow
@@ -64,6 +64,10 @@ class Member(Base):
     # Proxied members (#311): set when this member's key is held by a sidecar on a
     # bridge host rather than by the device itself, e.g. "sidecar on <host>".
     proxied_by: Mapped[str | None] = mapped_column(String(128))
+    # Per-member ingest rate limit (records per second, issue #438 part 2). None
+    # means the member uses the global config LTMS_INGEST_RATE; a number overrides
+    # it for this member's writes only. Recall limits are unchanged.
+    ingest_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Admin ping (#356): a request for a heartbeat, picked up by the member or its hub.
     ping_requested_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     ping_requested_by: Mapped[str | None] = mapped_column(String(128))

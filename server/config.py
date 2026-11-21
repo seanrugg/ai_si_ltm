@@ -90,6 +90,9 @@ class ServerConfig(BaseSettings):
     cookie_secure: bool = True
 
     # Limits
+    # Global per-member ingest rate (records per second) across all members
+    # unless overridden per member. The default of 10 (~600 records/min) is the
+    # target for one robot on the fleet. Env: LTMS_INGEST_RATE.
     ingest_rate: float = 10
     recall_rate: float = 5
     max_batch: int = 100

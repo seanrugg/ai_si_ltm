@@ -135,6 +135,7 @@ CREATE TABLE members (
 	cognition_observed JSONB, 
 	intended JSONB, 
 	proxied_by VARCHAR(128), 
+	ingest_rate FLOAT, 
 	ping_requested_at TIMESTAMP WITH TIME ZONE, 
 	ping_requested_by VARCHAR(128), 
 	ping_delivered_at TIMESTAMP WITH TIME ZONE, 
