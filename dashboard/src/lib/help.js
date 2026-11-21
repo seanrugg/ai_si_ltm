@@ -8,6 +8,7 @@ export const LRS_SCOPE = "Which records this LRS receives. A blank Types field s
 export const RETENTION_RULES =
   "Deletes payloads past their age at the nightly run. Headers stay, so chains still verify.";
 export const RETENTION_FOREVER = "Nothing expires. Plan storage accordingly.";
+export const EXPORT_DATES = "From and To are days in your browser's time zone: From starts at midnight, To runs to the end of its day. The file's first line lists the same range in UTC, so it says exactly what it covers.";
 export const EXPORT_FORMAT =
   "JSONL is a complete copy that can be verified with the members' keys. CSV opens in a spreadsheet but can't be verified.";
 export const SWARM_MOVE =

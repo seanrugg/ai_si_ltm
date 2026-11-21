@@ -18,6 +18,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -67,6 +68,27 @@ def _parse_time(name: str, value: str | None) -> datetime | None:
     except ValueError:
         raise ServiceError(422, "bad_filter", f"{name} must be an ISO timestamp") from None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+_NAME_PART = re.compile(r"[^A-Za-z0-9_-]+")
+_LOCAL_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def export_filename(f: ExportFilter, fmt: str, exported_at: datetime, local_date: str | None = None) -> str:
+    """``ltms-export[-<member>][-<swarm>]-<date>.<fmt>`` (#394).
+
+    ``local_date`` is the admin's own calendar date (YYYY-MM-DD) as the
+    dashboard sees it; the server doesn't know the admin's zone. Without one,
+    or with a malformed one, the UTC date of the export is used.
+    """
+    parts = ["ltms-export"]
+    for name in (f.agent, f.swarm):
+        clean = _NAME_PART.sub("-", name or "").strip("-")[:64]
+        if clean:
+            parts.append(clean)
+    date = local_date if local_date and _LOCAL_DATE.fullmatch(local_date) else f"{exported_at:%Y-%m-%d}"
+    parts.append(date)
+    return f"{'-'.join(parts)}.{fmt}"
 
 
 def parse_filter(*, fmt: str, agent: str | None, swarm: str | None, type_: str | None,
