@@ -42,7 +42,7 @@ class HubConfig:
     swarm_topic_id: str | None = None  # SWARM_TOPIC_ID (preferred; else looked up from LTMS, #293)
     legacy_name: str | None = None     # SWARM_LEGACY_NAME (migration: also serve <name>/+/...)
     health: str = "auto"               # HUB_HEALTH: auto (on for a Jetson) | 1 | 0 (#349)
-    health_seconds: float = 300.0      # HUB_HEALTH_SECONDS: one health self-report per window
+    health_seconds: float = 21600.0    # HUB_HEALTH_SECONDS: one health summary per window (6 h; alerts are immediate)
     health_sample_seconds: float = 30.0  # HUB_HEALTH_SAMPLE_SECONDS: how often to read the machine
     health_services: str = ""          # HUB_HEALTH_SERVICES: name=http(s)://url or name=systemd:unit, comma-separated
     health_state_path: str = "hub-health.json"  # HUB_HEALTH_STATE: newest sample, readable by local programs
@@ -114,7 +114,7 @@ def load_config(env: Mapping[str, str]) -> HubConfig:
         raise ValueError("HUB_HEALTH must be auto, 1 or 0")
     health = {"on": "1", "true": "1", "off": "0", "false": "0"}.get(health, health)
     health_times = {}
-    for setting, default in (("HUB_HEALTH_SECONDS", "300"), ("HUB_HEALTH_SAMPLE_SECONDS", "30")):
+    for setting, default in (("HUB_HEALTH_SECONDS", "21600"), ("HUB_HEALTH_SAMPLE_SECONDS", "30")):
         try:
             health_times[setting] = float(env.get(setting, default))
         except (TypeError, ValueError):

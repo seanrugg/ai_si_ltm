@@ -8,8 +8,14 @@ name. It's read-only, needs no root, and uses only the standard library.
 
 | When | Record | Tags |
 |---|---|---|
-| every `HUB_HEALTH_SECONDS` (300) | `perception`, payload `{"sensor": "jetson-health", ...}` with min/max/last over the window | `telemetry, internal, health` |
-| an `oc*` counter rises, or a zone reaches 85 °C | `event` `throttle: oc3 +2`, at most one per 5 minutes | `internal, health, throttle` |
+| every `HUB_HEALTH_SECONDS` (21600, 6 h) | `perception`, payload `{"sensor": "jetson-health", ...}` with min/max/last over the window | `telemetry, internal, health` |
+| an `oc*` counter rises, or a zone reaches 85 °C | `event` `throttle: oc3 +2`, sent at once (at most one per 5 minutes) | `internal, health, throttle` |
+
+The window report is a summary: the machine is still read every
+`HUB_HEALTH_SAMPLE_SECONDS`, and a throttle alert goes out as soon as a sample
+shows one, whatever the window. So the summary can be infrequent: four a day by
+default, rather than a routine report every few minutes (#391). A window that
+saw an alert reports `"throttled": true`.
 
 Both are self-reports (see [sensing.md](sensing.md)): they describe the hub,
 not the world, so profile counts keep them apart from sensing. The member
@@ -26,7 +32,7 @@ A counter that drops (a reboot) is a reset, not an event.
 | Setting | Default | |
 |---|---|---|
 | `HUB_HEALTH` | `auto` | on for a Jetson (`/etc/nv_tegra_release`), `1` always, `0` never |
-| `HUB_HEALTH_SECONDS` | `300` | one health record per window |
+| `HUB_HEALTH_SECONDS` | `21600` (6 h) | one health summary per window; alerts don't wait for it |
 | `HUB_HEALTH_SAMPLE_SECONDS` | `30` | how often the machine is read |
 | `HUB_HEALTH_SERVICES` | empty | `name=http(s)://url` (online if it answers) or `name=systemd:unit` |
 | `HUB_HEALTH_STATE` | `hub-health.json` beside the outbox | newest reading, world-readable |
