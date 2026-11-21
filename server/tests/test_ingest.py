@@ -6,7 +6,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from ltms_contract import GENESIS_HASH, build_record
-from server.models import Record, RecordPayload
+from server.models import Member, Record, RecordPayload
 
 
 def post(member, records):
@@ -132,6 +132,35 @@ def test_records_table_is_append_only(mesh, db_exec):
     # Payloads, by design, can be deleted (retention).
     db_exec(delete(RecordPayload))
     assert db_exec(select(Record.summary)).scalar() == "original"
+
+
+def test_override_triggers_429_with_retry_after_header(mesh, db_exec):
+    """A per-member ingest override caps writes at its burst and a 429 carries a
+    Retry-After header in seconds (issue #438 part 2)."""
+    z3 = mesh.member("z3-r0")
+    db_exec(update(Member).where(Member.id == z3.member_id).values(ingest_rate=10))
+    # burst == 10 at 10/s: the limiter (checked in ``require`` before any
+    # chain validation) accepts the first ten, then 429s. Each record is
+    # chain-valid so we are rate-limiting, not rejecting a bad chain.
+    accepted = 0
+    rejected = 0
+    last_resp = None
+    for seq in range(1, 21):
+        prev = GENESIS_HASH if seq == 1 else ("0" * 64)
+        rec = build_record(z3.key, agent="z3-r0", seq=seq, prev_hash=prev, type="event")
+        last_resp = post(z3, [rec])
+        if last_resp.status_code == 200:
+            accepted += 1
+        elif last_resp.status_code == 429:
+            rejected += 1
+    assert accepted == 10, accepted
+    assert rejected == 10, rejected
+    # 429 body is the uniform error; Retry-After is an int (seconds) >= 1.
+    assert last_resp.json()["error"]["code"] == "rate_limited"
+    assert last_resp.status_code == 429
+    retry = int(last_resp.headers["Retry-After"])
+    assert retry >= 1
+    assert retry <= 10
 
 
 def test_thought_records_are_accepted_and_filterable(mesh):

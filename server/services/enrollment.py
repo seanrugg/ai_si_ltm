@@ -442,6 +442,7 @@ def member_to_dict(m: Member) -> dict:
         "cognition": cognition.resolve(m),
         "intended": m.intended,
         "proxied_by": m.proxied_by,
+        "ingest_rate": m.ingest_rate,
         "enrolled_at": m.enrolled_at.isoformat() if m.enrolled_at else None,
         "revoked_at": m.revoked_at.isoformat() if m.revoked_at else None,
         "last_seen_at": m.last_seen_at.isoformat() if m.last_seen_at else None,

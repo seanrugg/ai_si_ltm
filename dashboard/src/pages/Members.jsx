@@ -357,6 +357,12 @@ function MemberRow({ m, swarm, swarms, location, inherited, estimate, geo, unpla
           <Link to={`/?agent=${encodeURIComponent(m.name)}`} className="text-xs text-paper-muted underline hover:text-paper"
                 aria-label={`Timeline of ${m.name}`}>Timeline</Link>
           <ProxiedBadge proxiedBy={m.proxied_by} />
+          {m.ingest_rate != null && m.ingest_rate !== 0 && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-led/60 px-2 py-0.5 text-xs text-led"
+                  title={`This member is limited to ${m.ingest_rate} records/second (issue #438 part 2)`}>
+              Rate limit {m.ingest_rate}/s
+            </span>
+          )}
         </span>
         <span><StatusBadge status={m.status} /></span>
         <span className="text-sm text-paper-muted">

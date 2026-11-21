@@ -279,6 +279,22 @@ describe("proxied members (#311)", () => {
   });
 });
 
+describe("per-member ingest rate limits (#438 part 2)", () => {
+  it("badges a member whose ingest_rate overrides the global default", () => {
+    allMembers = [
+      { id: 11, name: "vector", status: "active", kind: "robot", permissions: ["contribute"], last_ack_seq: 0,
+        last_seen_at: null, ingest_rate: 2 },
+      { id: 12, name: "plain", status: "active", kind: "robot", permissions: ["contribute"], last_ack_seq: 0,
+        last_seen_at: null },
+    ];
+    const { container } = renderMembers();
+    expect(screen.getAllByText("Rate limit 2/s").length).toBe(1);
+    expect(container.textContent).toContain("This member is limited to 2 records/second");
+    // A member without the override shows no badge.
+    expect(screen.getAllByTitle(/^This member is limited to/).length).toBe(1);
+  });
+});
+
 describe("locations on the member rows (#399)", () => {
   const net = { source: "network", label: "Example City, Example Country", room: null, lat: 1, lon: 2, accuracy_km: 20,
     ip: "203.0.113.7", ip_seen_at: "2026-11-14T10:00:00Z", via_hub: "hub-1" };

@@ -1,6 +1,7 @@
 """Request plumbing: transactions, auth dependencies, rate limits."""
 from __future__ import annotations
 
+import math
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
@@ -58,6 +59,9 @@ class MemberAuth:
     member_id: object
     name: str
     permissions: list[str]
+    # Per-member ingest rate limit in records/s. None means the global config
+    # rate applies; a number overrides it for this member's writes only.
+    ingest_rate: float | None = None
 
 
 async def current_member(request: Request, authorization: str | None = Header(default=None)) -> MemberAuth:
@@ -66,7 +70,7 @@ async def current_member(request: Request, authorization: str | None = Header(de
     raw = authorization.split(" ", 1)[1].strip()
     async with transaction(request) as session:
         member, perms = await auth_service.member_from_token(session, raw)
-        return MemberAuth(member.id, member.name, perms)
+        return MemberAuth(member.id, member.name, perms, member.ingest_rate)
 
 
 def require(permission: str, *alternatives: str):
@@ -74,8 +78,18 @@ def require(permission: str, *alternatives: str):
         if not any(p in auth.permissions for p in (permission, *alternatives)):
             raise ServiceError(403, "forbidden", f"requires the {permission!r} permission")
         limiter = request.app.state.limiters["ingest" if permission == "contribute" else "recall"]
-        if not limiter.allow(str(auth.member_id)):
-            raise ServiceError(429, "rate_limited", "too many requests; slow down")
+        # A per-member ingest override wins over the global config rate (and is
+        # applied to that key only). The ingest limiter's key is the member id.
+        key = str(auth.member_id)
+        rate = None if permission != "contribute" else auth.ingest_rate
+        if not limiter.allow(key, rate_override=rate):
+            retry_after = limiter.retry_after(key, rate_override=rate)
+            raise ServiceError(
+                429,
+                "rate_limited",
+                "too many requests; slow down",
+                headers={"Retry-After": str(math.ceil(retry_after))},
+            )
         return auth
     return dep
 
