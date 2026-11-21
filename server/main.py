@@ -110,6 +110,8 @@ def create_app(config: ServerConfig | None = None, *, create_tables: bool = True
         "challenge": RateLimiter(30, per=60),
         "admin_login": RateLimiter(10, per=60),
     }
+    # member id -> when its ingest was last refused (#438), for the admin member list.
+    app.state.ingest_refused = {}
 
     @app.middleware("http")
     async def _request_id(request: Request, call_next):

@@ -7,7 +7,9 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select
 
-from server.api.deps import MemberAuth, client_ip, current_member, request_id, require, transaction
+from server.api.deps import (
+    MemberAuth, client_ip, current_member, enforce_ingest_rate, request_id, require, transaction,
+)
 from server.api.schemas import RecordBatch
 from server.models import AuditLog, Member
 from server.services import charter, cognition, network, recall, swarm_identity, swarms
@@ -25,6 +27,7 @@ async def post_records(
     cfg = request.app.state.config
     if len(body.records) > cfg.max_batch:
         raise ServiceError(413, "batch_too_large", f"at most {cfg.max_batch} records per request")
+    enforce_ingest_rate(request, auth, len(body.records))
     async with transaction(request) as session:
         result = await ingest_batch(
             session,

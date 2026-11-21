@@ -280,18 +280,28 @@ describe("proxied members (#311)", () => {
 });
 
 describe("per-member ingest rate limits (#438 part 2)", () => {
+  const base = { status: "active", kind: "robot", permissions: ["contribute"], last_ack_seq: 0, last_seen_at: null };
+
   it("badges a member whose ingest_rate overrides the global default", () => {
     allMembers = [
-      { id: 11, name: "vector", status: "active", kind: "robot", permissions: ["contribute"], last_ack_seq: 0,
-        last_seen_at: null, ingest_rate: 2 },
-      { id: 12, name: "plain", status: "active", kind: "robot", permissions: ["contribute"], last_ack_seq: 0,
-        last_seen_at: null },
+      { ...base, id: 11, name: "vector", ingest_rate: 2 },
+      { ...base, id: 12, name: "plain" },
     ];
-    const { container } = renderMembers();
-    expect(screen.getAllByText("Rate limit 2/s").length).toBe(1);
-    expect(container.textContent).toContain("This member is limited to 2 records/second");
-    // A member without the override shows no badge.
-    expect(screen.getAllByTitle(/^This member is limited to/).length).toBe(1);
+    renderMembers();
+    expect(screen.getAllByText("Limit 2/s").length).toBe(1);
+    // The explanation is a title for pointer users and text for screen readers.
+    expect(screen.getAllByTitle(/^Limited to 2 records per second/).length).toBe(1);
+    expect(screen.queryByText("Rate limited")).toBeNull();
+  });
+
+  it("shows Rate limited only for a recent refusal", () => {
+    allMembers = [
+      { ...base, id: 13, name: "busy", ingest_refused_at: new Date(Date.now() - 60 * 1000).toISOString() },
+      { ...base, id: 14, name: "calm", ingest_refused_at: new Date(Date.now() - 60 * 60 * 1000).toISOString() },
+    ];
+    renderMembers();
+    expect(screen.getAllByText("Rate limited").length).toBe(1);
+    expect(screen.getAllByTitle(/slowed this member's writes/).length).toBe(1);
   });
 });
 

@@ -1,7 +1,6 @@
 """Unit tests for ``server.security.ratelimit.RateLimiter``.
 
 The limiter is time-controlled via the ``now=`` argument — no ``sleep`` is used.
-``ratelimit.py`` itself is not changed.
 """
 from __future__ import annotations
 
@@ -140,3 +139,41 @@ def test_override_retry_after_tracks_the_override_rate():
     assert lim.allow("k", rate_override=1, now=now) is False  # empty at 1/s
     # One token at 1/s refills in 1.0 s.
     assert lim.retry_after("k", now=now, rate_override=1) == pytest.approx(1.0)
+
+
+def test_borrow_admits_a_batch_bigger_than_the_bucket_then_repays():
+    lim = RateLimiter(rate=10, burst=10)
+    now = START
+    assert lim.allow("k", cost=25, now=now) is False             # without borrow: never
+    assert lim.retry_after("k", cost=25, now=now) == float("inf")
+    assert lim.allow("k", cost=25, now=now, borrow=True) is True  # 10 -> -15
+    assert lim.allow("k", now=now, borrow=True) is False
+    # 16 tokens needed at 10/s.
+    assert lim.retry_after("k", now=now, borrow=True) == pytest.approx(1.6)
+    assert lim.allow("k", now=now + 1.6, borrow=True) is True
+
+
+def test_borrow_waits_for_a_full_bucket_before_a_big_batch():
+    lim = RateLimiter(rate=10, burst=10)
+    now = START
+    assert lim.allow("k", cost=5, now=now, borrow=True) is True   # 10 -> 5
+    assert lim.allow("k", cost=50, now=now, borrow=True) is False  # needs the full 10
+    assert lim.retry_after("k", cost=50, now=now, borrow=True) == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize("override", [0, -3])
+def test_non_positive_override_uses_the_configured_rate(override):
+    lim = RateLimiter(rate=10, burst=2)
+    now = START
+    assert lim.allow("k", now=now, rate_override=override) is True
+    assert lim.allow("k", now=now, rate_override=override) is True
+    assert lim.allow("k", now=now, rate_override=override) is False
+    assert lim.retry_after("k", now=now, rate_override=override) == pytest.approx(0.1)
+
+
+def test_retry_after_with_zero_configured_rate_is_infinite():
+    lim = RateLimiter(rate=0, burst=1)
+    now = START
+    assert lim.allow("k", now=now) is True
+    assert lim.allow("k", now=now) is False
+    assert lim.retry_after("k", now=now) == float("inf")

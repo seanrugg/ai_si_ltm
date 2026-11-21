@@ -212,7 +212,13 @@ async def list_members(request: Request, status: str | None = None, free_agent: 
         if free_agent:
             stmt = stmt.where(Member.id.not_in(
                 select(SwarmMember.member_id).where(SwarmMember.left_at.is_(None))))
-        members = [enrollment.member_to_dict(m) for m in await session.scalars(stmt)]
+        refused = getattr(request.app.state, "ingest_refused", {})
+        members = []
+        for m in await session.scalars(stmt):
+            d = enrollment.member_to_dict(m)
+            at = refused.get(str(m.id))  # in-process, so it resets when the server restarts (#438)
+            d["ingest_refused_at"] = at.isoformat() if at else None
+            members.append(d)
         return {"members": members}
 
 
@@ -334,6 +340,20 @@ async def set_proxied(member_id: str, request: Request, body: dict, admin: Admin
     async with transaction(request) as session:
         m = await enrollment.set_proxied_by(session, _uuid(member_id), admin=admin.username,
                                             proxied_by=body["proxied_by"])
+        return enrollment.member_to_dict(m)
+
+
+@router.patch("/admin/members/{member_id}/ingest-rate")
+async def set_ingest_rate(member_id: str, request: Request, body: dict, admin: AdminAuth = ADMIN) -> dict:
+    """Set or clear a member's ingest rate limit (#438): ``{"ingest_rate": <records/s> | null}``.
+
+    ``null`` returns the member to the configured ``LTMS_INGEST_RATE``.
+    """
+    if "ingest_rate" not in body:
+        raise ServiceError(422, "bad_ingest_rate", "body needs ingest_rate: a positive number or null")
+    async with transaction(request) as session:
+        m = await enrollment.set_ingest_rate(session, _uuid(member_id), admin=admin.username,
+                                             ingest_rate=body["ingest_rate"])
         return enrollment.member_to_dict(m)
 
 
