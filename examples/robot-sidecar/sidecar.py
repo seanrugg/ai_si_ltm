@@ -17,7 +17,9 @@ Each window signs (#408):
   ``modality``, ``unit``, ``samples`` ``[{t, v}]``, ``stats``). Each adapter
   sets per-channel deadbands; an unchanged group is re-sent once per
   ``BODY_HEARTBEAT_SECONDS`` as a heartbeat carrying ``unchanged_since`` and
-  ``windows_skipped``, so a gap longer than that still means silence;
+  ``windows_skipped``, so a gap longer than that still means silence. While an
+  adapter says the body is resting (Vector: on the charger), the interval is
+  ``BODY_REST_HEARTBEAT_SECONDS`` instead; changes still sign at once (#449);
 - the pose record(s) below.
 
 Records may link to earlier ones: an item's ``refs`` name the ``key`` of an
@@ -49,6 +51,8 @@ variables, plus:
   BODY_HEARTBEAT_SECONDS (default 600) how long an unchanged group or health
                         report may go unsent before a heartbeat record re-sends
                         it with ``unchanged_since`` and ``windows_skipped``
+  BODY_REST_HEARTBEAT_SECONDS (default 1800) the same, while any adapter's
+                        ``resting()`` is true (Vector: on the charger, #449)
   SIDECAR_COGNITION_MODELS  "name@where,…": the models the robot's AI uses, for the cognition
                         report (offboard) and the wirepod adapter's replies. Empty: a warning
                         at start, and the profile shows "Language models: not reported".
@@ -213,10 +217,12 @@ class Sidecar:
     """Collects adapter items (from any thread) and signs them on the member's loop."""
 
     def __init__(self, adapters: Iterable[Adapter], body_seconds: float = 30.0, now: float = 0.0,
-                 clock: Callable[[], float] = time.time, heartbeat_seconds: float = 600.0):
+                 clock: Callable[[], float] = time.time, heartbeat_seconds: float = 600.0,
+                 rest_heartbeat_seconds: float = 1800.0):
         self.adapters = list(adapters)
         self.body_seconds = body_seconds
         self.heartbeat_seconds = heartbeat_seconds
+        self.rest_heartbeat_seconds = rest_heartbeat_seconds
         self.clock = clock  # wall clock, to time each item when the adapter emits it
         self.items: "queue.Queue[tuple[float, Item]]" = queue.Queue()
         self.health = BodyWindow()
@@ -301,6 +307,16 @@ class Sidecar:
         if isinstance(rec, dict) and rec.get("agent") and rec.get("seq") is not None:
             entry["id"] = f"{rec['agent']}:{rec['seq']}"
 
+    def _heartbeat_seconds(self) -> float:
+        """The heartbeat interval now: the rest interval while any adapter says the body is resting (#449)."""
+        for a in self.adapters:
+            try:
+                if a.resting():
+                    return self.rest_heartbeat_seconds
+            except Exception:  # noqa: BLE001 - an adapter's bug must not stop signing
+                logging.debug("sidecar: %s.resting() failed", getattr(a, "name", a), exc_info=True)
+        return self.heartbeat_seconds
+
     def _group_unchanged(self, stats: dict, last_stats: dict, deadband: dict, channels: list) -> bool:
         """True when every channel is within its deadband of the last signed report."""
         single = channels == ["value"]
@@ -331,7 +347,7 @@ class Sidecar:
             self.last_signed[name] = {"stats": stats, "at": now, "id": None, "skipped": 0,
                                       "channels": list(channels)}
             return True
-        if now - last["at"] < self.heartbeat_seconds:
+        if now - last["at"] < self._heartbeat_seconds():
             last["skipped"] += 1
             return False  # unchanged, too soon since the last sign: silence
         # unchanged for a heartbeat interval: sign a heartbeat record
@@ -366,7 +382,7 @@ class Sidecar:
                 or not self._health_unchanged(values, last["values"]):
             self.last_signed["health"] = {"values": values, "at": now, "id": None, "skipped": 0}
             return True
-        if now - last["at"] < self.heartbeat_seconds:
+        if now - last["at"] < self._heartbeat_seconds():
             last["skipped"] += 1
             return False
         health.setdefault("stats", {})["unchanged_since"] = last["id"]
@@ -459,7 +475,8 @@ def main() -> None:
     models = cognition_models(env)
     adapters = build_adapters(env)
     sidecar = Sidecar(adapters, float(env.get("BODY_SECONDS", "30")), time.monotonic(),
-                      heartbeat_seconds=float(env.get("BODY_HEARTBEAT_SECONDS", "600")))
+                      heartbeat_seconds=float(env.get("BODY_HEARTBEAT_SECONDS", "600")),
+                      rest_heartbeat_seconds=float(env.get("BODY_REST_HEARTBEAT_SECONDS", "1800")))
     if env.get("LTMS_SERVER") and env.get("LTMS_KEY_PATH"):
         client = LTMSClient(env["LTMS_SERVER"], key_path=env["LTMS_KEY_PATH"])
         # The robot's AI runs off board (in the bridge), so the profile shows it as Hybrid (#185).

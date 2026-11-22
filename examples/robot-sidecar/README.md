@@ -14,7 +14,9 @@ Each window signs:
   adapter sets per-channel deadbands; an unchanged group is re-sent once per
   `BODY_HEARTBEAT_SECONDS` (default 600 s) as a heartbeat carrying
   `unchanged_since` and `windows_skipped`, so a gap longer than that still
-  means silence;
+  means silence. While the robot is resting (Vector: on the charger), the
+  heartbeat is `BODY_REST_HEARTBEAT_SECONDS` (default 1800 s) instead; changes
+  still sign at once (#449);
 - the **pose** record (below).
 
 Status flags become **episodes**: one `episode-start` and one `episode-end`
