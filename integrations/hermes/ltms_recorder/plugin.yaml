@@ -1,13 +1,17 @@
 name: ltms_recorder
-version: 0.1.0
+version: 0.2.0
 description: >-
   Records Hermes sessions and every tool call (with the raw result) as signed
-  LTMS/FLTMS records, so a fleet can see what the agent actually did.
+  LTMS/FLTMS records, so a fleet can see what the agent actually did, plus one
+  daily usage rollup of bounded counters (never content).
 author: LTMS project
 provides_hooks:
   - on_session_start
   - post_tool_call
   - on_session_end
+  - post_api_request
+  - api_request_error
+  - post_compaction
 requires_env:
   - name: LTMS_SERVER
     description: LTMS base URL, e.g. https://ltms.example.org
@@ -44,3 +48,10 @@ config_schema:
     type: integer
     default: 20
     description: Send as soon as this many records are waiting.
+  rollup:
+    type: boolean
+    default: true
+    description: >-
+      Send one daily usage rollup: session, tool-call, error-class, model-route
+      and token counters for each UTC day. Never prompts, arguments, results,
+      paths, setting values or error text. false turns it off entirely.
