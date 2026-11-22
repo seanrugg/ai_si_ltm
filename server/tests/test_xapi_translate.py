@@ -282,3 +282,142 @@ def test_statementref_does_not_change_the_statement_id():
     without = _decision({"because": "robot-1:41"}, None)
     assert with_ref["id"] == without["id"] == str(uuid.uuid5(uuid.UUID(
         "19413c7a-d33c-5129-b99b-07d709cef285"), "b" * 64))
+
+
+# ---------------------------------------------------------------- mapping v2 (#472, AIAAP 0.12.0)
+from server.xapi.translate import NAMESPACE, harness_kind, iso_duration_ms  # noqa: E402
+
+AI = "https://w3id.org/xapi-ai"
+X = AI + "/extensions/"
+V2_BASE = "https://ltms.example.org"
+
+
+def _v2_rec(rtype, tags, seq=7, **extra):
+    rec = {"agent": "agent-1", "ts": "2026-11-22T21:49:02.871Z", "prev_hash": "a" * 64, "payload_hash": "b" * 64,
+           "sig": "c" * 128, "received_at": "2026-11-22T21:49:03.118000+00:00", "agent_kind": "agent",
+           "seq": seq, "type": rtype, "hash": f"{seq:064d}", "tags": tags, "header_raw": '{"x":1}'}
+    rec.update(extra)
+    return rec
+
+
+TOOL_PAYLOAD = {"tool_name": "mcp__vector__vector_say", "ok": True, "duration_ms": 1000, "session_id": "s1",
+                "task_id": "t1", "model": "nemotron-3-nano-64k", "record_mode": "full",
+                "args": {"text": "Hello"}, "result_raw": '{"status": "ok"}', "result_truncated": False}
+ROLLUP_PAYLOAD = {"rollup_schema": 1, "date": "2026-11-21",
+                  "sessions": {"started": 1, "completed": 1, "interrupted": 0},
+                  "tool_calls": {"mcp__vector__vector_say": {"ok": 0, "error": 1}}, "tool_errors": {"timeout": 1},
+                  "model_routes": {"custom/nemotron-3-nano-64k": {"calls": 1, "input_tokens": 900,
+                                                                  "output_tokens": 80, "api_seconds": 3.2}},
+                  "api_errors": {"network": 1}, "compactions": 0,
+                  "machine": {"arch": "aarch64", "os": "linux", "ram_gb": 8, "hermes_version": "0.23.3",
+                              "plugin_version": "0.2.0"}}
+
+
+def _tool_stmt(payload=TOOL_PAYLOAD, **kw):
+    rec = _v2_rec("action", ["hermes", "tool-call"], summary="mcp__vector__vector_say ok (1000 ms)",
+                  outcome="success", peers=["vector-1"])
+    return rec, record_to_statement(rec, base=V2_BASE, payload=payload, **kw)
+
+
+def test_tool_call_becomes_invoked_tool():
+    rec, st = _tool_stmt()
+    assert st["id"] == str(uuid.uuid5(NAMESPACE, rec["hash"]))  # same id as v1
+    assert st["verb"]["id"] == AI + "/verbs/invoked-tool"
+    assert st["object"] == {"objectType": "Activity", "id": V2_BASE + "/tools/mcp__vector__vector_say",
+                            "definition": {"type": AI + "/activity-type/tool",
+                                           "name": {"en": "mcp__vector__vector_say"}}}
+    ca = st["context"]["contextActivities"]
+    assert ca["other"] == [{"objectType": "Activity", "id": V2_BASE + "/records/agent-1/7",
+                            "definition": {"type": AI + "/activity-type/record",
+                                           "name": {"en": "mcp__vector__vector_say ok (1000 ms)"}}}]
+    assert ca["category"][0]["id"] == AI + "/profile/0.12.0"
+    assert st["result"]["success"] is True
+    assert st["result"]["duration"] == "PT1S"
+    assert st["result"]["response"] == '{"status": "ok"}'
+    rx = st["result"]["extensions"]
+    assert rx[X + "latency-ms"] == 1000 and rx[X + "tool-result-truncated"] is False
+    assert rx[X + "outcome"] == "success"
+    ext = st["context"]["extensions"]
+    assert ext[X + "tool-name"] == "mcp__vector__vector_say"
+    assert ext[X + "tool-parameters"] == {"text": "Hello"}
+    assert ext[X + "session-id"] == "s1" and ext[X + "model-id"] == "nemotron-3-nano-64k"
+    assert ext[X + "harness"] == {"name": "hermes", "plugin": "ltms_recorder"}
+    assert ext[X + "holocron/mapping-version"] == "2"
+    for k in ("seq", "hash", "prev-hash", "payload-hash", "signature", "record-type", "received-at", "header",
+              "payload"):
+        assert X + "holocron/" + k in ext
+    assert ext[X + "holocron/payload"] == TOOL_PAYLOAD  # the signed payload still verifies
+    assert st["context"]["contextAgents"][0]["agent"]["account"]["name"] == "vector-1"
+
+
+def test_summary_mode_tool_call_has_no_parameters_or_response():
+    payload = {k: v for k, v in TOOL_PAYLOAD.items() if k not in ("args", "result_raw", "result_truncated")}
+    _, st = _tool_stmt(payload=dict(payload, record_mode="summary", duration_ms=1250, ok=False))
+    assert st["verb"]["id"] == AI + "/verbs/invoked-tool"
+    assert "response" not in st["result"] and st["result"]["duration"] == "PT1.25S"
+    assert X + "tool-parameters" not in st["context"]["extensions"]
+    assert X + "tool-result-truncated" not in st["result"]["extensions"]
+
+
+def test_truncation_flags():
+    _, st = _tool_stmt(payload=dict(TOOL_PAYLOAD, args="{\"text\": \"Hel", args_truncated=True,
+                                     result_truncated=True))
+    assert st["context"]["extensions"][X + "tool-parameters-truncated"] is True
+    assert st["result"]["extensions"][X + "tool-result-truncated"] is True
+
+
+def test_purged_tool_call_falls_back_to_v1():
+    rec, st = _tool_stmt(payload=None)
+    assert st["verb"]["id"] == AI + "/verbs/performed"
+    assert st["context"]["extensions"][X + "holocron/mapping-version"] == "1"
+    assert st["context"]["extensions"][X + "holocron/payload-purged"] is True
+
+
+def test_agent_rollup_becomes_reported_usage_not_sensed():
+    rec = _v2_rec("perception", ["telemetry", "internal", "agent-rollup"], seq=9,
+                  summary="daily rollup 2026-11-21: 1 sessions, 1 tool calls, 1 errors")
+    st = record_to_statement(rec, base=V2_BASE, payload=ROLLUP_PAYLOAD)
+    assert st["verb"]["id"] == AI + "/verbs/reported-usage"
+    assert st["object"]["id"] == V2_BASE + "/usage/agent-1/2026-11-21"
+    assert st["object"]["definition"]["type"] == AI + "/activity-type/usage-report"
+    usage = st["result"]["extensions"][X + "usage"]
+    assert usage["usage_schema"] == 1 and "date" not in usage and "rollup_schema" not in usage
+    assert usage["machine"]["harness_version"] == "0.23.3" and "hermes_version" not in usage["machine"]
+    assert usage["tool_errors"] == {"timeout": 1}
+    assert X + "telemetry" not in st["result"]["extensions"]
+    assert "response" not in st["result"]
+    ext = st["context"]["extensions"]
+    assert ext[X + "usage-period"] == "2026-11-21"
+    assert ext[X + "harness"] == {"name": "hermes", "plugin": "ltms_recorder", "version": "0.2.0"}
+    assert ext[X + "holocron/payload"] == ROLLUP_PAYLOAD
+    cats = [c["id"] for c in st["context"]["contextActivities"]["category"]]
+    assert cats[0] == AI + "/profile/0.12.0" and GLOSSARY + "sensor" not in cats
+
+
+def test_other_telemetry_is_still_sensed_v1():
+    rec = _v2_rec("perception", ["telemetry", "internal"])
+    st = record_to_statement(rec, base=V2_BASE, payload={"kind": "health", "cpu": 3})
+    assert st["verb"]["id"] == AI + "/verbs/sensed"
+    assert st["context"]["extensions"][X + "holocron/mapping-version"] == "1"
+
+
+def test_harness_kind_and_duration_helpers():
+    assert harness_kind({"type": "action", "tags": ["tool-call"]}, {"tool_name": ""}) is None
+    assert harness_kind({"type": "decision", "tags": ["tool-call"]}, TOOL_PAYLOAD) is None
+    assert harness_kind({"type": "perception", "tags": ["agent-rollup"]}, {"no": "date"}) is None
+    assert iso_duration_ms(0) == "PT0S" and iso_duration_ms(12) == "PT0.012S"
+    assert iso_duration_ms(None) is None and iso_duration_ms(True) is None and iso_duration_ms(-1) is None
+
+
+def test_v2_statements_use_only_aiaap_0_12_0_terms():
+    """Every w3id IRI in a v2 statement is defined in the published AIAAP profile (when available)."""
+    import re
+    profile_path = Path(__file__).resolve().parents[3] / "xapi-ai" / "ai_agent_actions_profile.json"
+    if not profile_path.exists():
+        pytest.skip("xapi-ai checkout not next to this repo")
+    profile = json.loads(profile_path.read_text())
+    defined = {c["id"] for c in profile["concepts"]} | {v["id"] for v in profile["versions"]}
+    rec = _v2_rec("perception", ["telemetry", "internal", "agent-rollup"], seq=9)
+    for st in (_tool_stmt()[1], record_to_statement(rec, base=V2_BASE, payload=ROLLUP_PAYLOAD)):
+        used = set(re.findall(r"https://w3id\.org/xapi-ai/[^\"']+", json.dumps(st)))
+        assert used <= defined, used - defined

@@ -1,4 +1,5 @@
-"""Holocron record -> xAPI statement translator (AIAAP 0.10.1, mapping v1).
+"""Holocron record -> xAPI statement translator (AIAAP 0.10.1, mapping v1;
+AIAAP 0.12.0, mapping v2 for agent tool calls and usage reports, #472).
 
 A pure function: no I/O, no database, no network. The LRS forwarder (#61)
 calls it to turn one LTMS record into one xAPI statement.
@@ -24,6 +25,16 @@ READ_SOURCES = ("served", "reported")
 NAMESPACE = uuid.UUID("19413c7a-d33c-5129-b99b-07d709cef285")
 
 VALID_XAPI_VERSIONS = ("2.0.0", "1.0.3")
+
+# Mapping version 2 (#472, AIAAP 0.12.0 agent harness module): two record kinds
+# get their own statement shape; every other record maps exactly as in v1.
+# Statement ids keep the v1 NAMESPACE: a StatementRef is built from the cause's
+# hash alone, so a tool call must keep the id any other record would give it.
+MAPPING_VERSION_2 = "2"
+PROFILE_VERSION_HARNESS = AI + "/profile/0.12.0"
+INVOKED_TOOL = (AI + "/verbs/invoked-tool", "invoked tool")
+REPORTED_USAGE = (AI + "/verbs/reported-usage", "reported usage")
+HARNESS_TAGS = {"hermes": {"name": "hermes", "plugin": "ltms_recorder"}}
 
 GLOSSARY = "https://id.i2idl.org/concepts/"
 SKOS_CONCEPT = "http://www.w3.org/2004/02/skos/core#Concept"
@@ -70,6 +81,112 @@ def _is_sensed(rec: dict) -> bool:
     return rec.get("type") == "perception" and "telemetry" in (rec.get("tags") or [])
 
 
+def harness_kind(rec: dict, payload) -> str | None:
+    """``"tool-call"``, ``"usage"`` or None (mapping v1).
+
+    Mapping v2 applies only when the payload has what the shape needs, so a
+    purged payload falls back to the v1 statement instead of failing.
+    """
+    tags = rec.get("tags") or []
+    if not isinstance(payload, dict):
+        return None
+    if rec.get("type") == "action" and "tool-call" in tags and isinstance(payload.get("tool_name"), str) \
+            and payload["tool_name"]:
+        return "tool-call"
+    if rec.get("type") == "perception" and "agent-rollup" in tags and isinstance(payload.get("date"), str):
+        return "usage"
+    return None
+
+
+def _harness(rec: dict, payload: dict) -> dict | None:
+    """The harness that recorded it: from a tag (tool calls), or from the rollup's machine facts."""
+    machine = payload.get("machine") if isinstance(payload.get("machine"), dict) else {}
+    names = [t for t in rec.get("tags") or [] if t in HARNESS_TAGS]
+    if not names and "hermes_version" in machine:
+        names = ["hermes"]  # a Hermes rollup (#470) is tagged telemetry,internal,agent-rollup only
+    if not names:
+        return None
+    harness = dict(HARNESS_TAGS[names[0]])
+    version = machine.get("plugin_version")
+    if isinstance(version, str) and version:
+        harness["version"] = version
+    return harness
+
+
+def iso_duration_ms(ms) -> str | None:
+    """Milliseconds -> ISO 8601 duration (``1250`` -> ``PT1.25S``)."""
+    if isinstance(ms, bool) or not isinstance(ms, (int, float)) or ms < 0:
+        return None
+    seconds = round(ms / 1000, 3)
+    text = f"{seconds:.3f}".rstrip("0").rstrip(".")
+    return f"PT{text}S"
+
+
+def usage_counters(payload: dict) -> dict:
+    """The rollup payload (#470) as the AIAAP 0.12.0 ``usage`` extension: generic field names, no date."""
+    usage = {k: v for k, v in payload.items() if k not in ("date", "rollup_schema")}
+    usage = {"usage_schema": payload.get("rollup_schema", 1), **usage}
+    machine = usage.get("machine")
+    if isinstance(machine, dict) and "hermes_version" in machine:
+        machine = dict(machine)
+        machine["harness_version"] = machine.pop("hermes_version")
+        usage["machine"] = machine
+    return usage
+
+
+def _apply_v2(statement: dict, rec: dict, payload: dict, kind: str, base: str) -> None:
+    """Reshape a v1 statement for mapping v2. Provenance extensions are kept as they are."""
+    record_activity = statement["object"]
+    context = statement["context"]
+    ext = context["extensions"]
+    ext[EXT + "holocron/mapping-version"] = MAPPING_VERSION_2
+    context["contextActivities"]["category"][0]["id"] = PROFILE_VERSION_HARNESS
+    context["contextActivities"].setdefault("other", []).append(record_activity)
+    harness = _harness(rec, payload)
+    if harness:
+        ext[EXT + "harness"] = harness
+    result = statement.setdefault("result", {})
+    result_ext = result.setdefault("extensions", {})
+
+    if kind == "tool-call":
+        name = payload["tool_name"]
+        statement["verb"] = {"id": INVOKED_TOOL[0], "display": {"en": INVOKED_TOOL[1]}}
+        statement["object"] = _activity(base, f"/tools/{quote(name, safe='')}", AI + "/activity-type/tool", name)
+        ext[EXT + "tool-name"] = name
+        if "args" in payload:
+            ext[EXT + "tool-parameters"] = payload["args"]
+            if payload.get("args_truncated"):
+                ext[EXT + "tool-parameters-truncated"] = True
+        for key, field in (("session_id", "session-id"), ("model", "model-id")):
+            if isinstance(payload.get(key), str) and payload[key]:
+                ext[EXT + field] = payload[key]
+        duration = iso_duration_ms(payload.get("duration_ms"))
+        if duration:
+            result["duration"] = duration
+            result_ext[EXT + "latency-ms"] = payload["duration_ms"]
+        if isinstance(payload.get("result_raw"), str):
+            result["response"] = payload["result_raw"]
+            result_ext[EXT + "tool-result-truncated"] = bool(payload.get("result_truncated"))
+    else:
+        date = payload["date"]
+        statement["verb"] = {"id": REPORTED_USAGE[0], "display": {"en": REPORTED_USAGE[1]}}
+        statement["object"] = _activity(base, f"/usage/{rec['agent']}/{quote(date, safe='')}",
+                                        AI + "/activity-type/usage-report", rec.get("summary"))
+        ext[EXT + "usage-period"] = date
+        result_ext.pop(EXT + "telemetry", None)  # a usage report is not sensor data
+        result_ext[EXT + "usage"] = usage_counters(payload)
+        # The signed payload stays available, so the payload hash still verifies.
+        ext[EXT + "holocron/payload"] = payload
+        categories = context["contextActivities"]["category"]
+        context["contextActivities"]["category"] = [
+            c for c in categories if c["id"] != GLOSSARY + SENSED_CONCEPT]
+
+    if not result_ext:
+        result.pop("extensions", None)
+    if not result:
+        statement.pop("result", None)
+
+
 def _account_agent(base: str, name: str) -> dict:
     return {"objectType": "Agent", "account": {"homePage": base, "name": name}}
 
@@ -112,6 +229,7 @@ def record_to_statement(
         raise ValueError(f"unknown record type: {rtype!r}")
 
     base = base.rstrip("/")
+    kind = harness_kind(rec, payload)
     verb_iri, verb_display = SENSED if _is_sensed(rec) else VERBS[rtype]
 
     statement = {
@@ -248,6 +366,8 @@ def record_to_statement(
     if result:
         statement["result"] = result
 
+    if kind is not None:
+        _apply_v2(statement, rec, payload, kind, base)
     return statement
 
 
