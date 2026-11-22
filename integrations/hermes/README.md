@@ -18,6 +18,7 @@ The model never sees the member's key.
 | Each tool call | `action` "`<tool>` ok\|error (`<ms>` ms)" | `hermes,tool-call` | `tool_name`, `ok`, `duration_ms`, `session_id`, `task_id`, `model`, `record_mode`; in `full` mode also `args` (redacted) and `result_raw` |
 | Session ends | `event` "Hermes session completed: N tool calls, M errors" | `hermes,session` | the counts, `completed`, `interrupted` |
 
+- **`outcome`.** Each tool-call record also sets the contract's `outcome` header to `success` or `failed` (from `ok`). LTMS's xAPI translator turns that into `result.success` on the LRS statement. The tool-call details (tool name, arguments, result, timing) travel in the payload, which the translator copies into a `holocron/payload` extension.
 - **`ok`** is a best guess. Hermes has no separate error flag, so a result counts as an error when it is a JSON object with a truthy `error`, `success: false`, `ok: false` or `isError: true`, or text that starts with `Error`.
 - **`peers`.** When a tool name matches a `peer_map` prefix, the record's `peers` names the member the tool acted on, so the action also appears with that robot.
 - **Limits.**

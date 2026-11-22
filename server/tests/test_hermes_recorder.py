@@ -67,6 +67,7 @@ def test_session_and_tool_calls_become_verified_chained_records(agent, tmp_path)
     status = recs[1]
     assert status["payload"]["result_raw"] == '{"battery_level": 3, "is_charging": false}'
     assert status["payload"]["ok"] is True and status["payload"]["session_id"] == "s1"
+    assert status["outcome"] == "success"
     assert recs[3]["payload"]["tool_calls"] == 2 and recs[3]["payload"]["tool_errors"] == 0
     assert json.loads((tmp_path / "head.json").read_text())["seq"] == 4
 
@@ -104,6 +105,13 @@ def test_redaction_is_nested_and_case_insensitive(agent):
     recorded = _records(agent)[1]["payload"]["args"]
     assert recorded["api_key"] == "[redacted]" and recorded["nested"]["Token"] == "[redacted]"
     assert "x" not in json.dumps(recorded["api_key"]) and recorded["nested"]["keep"] == "z"
+
+
+def test_failed_tool_call_sets_outcome_failed(agent):
+    rec = Recorder(agent)
+    _session(rec, calls=(("tool", {}, '{"error": "not found"}'),))
+    call = _records(agent)[1]
+    assert call["outcome"] == "failed" and call["payload"]["ok"] is False
 
 
 def test_summary_mode_drops_content_and_off_mode_records_sessions_only(mesh):

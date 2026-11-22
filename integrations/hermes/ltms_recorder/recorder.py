@@ -211,7 +211,9 @@ def tool_call_record(
         payload.pop("result_raw", None)
         payload["dropped_for_size"] = True
 
-    header: dict[str, Any] = {"tags": list(TOOL_TAGS)}
+    # ``outcome`` is the contract's header field for an action's result; LTMS's
+    # xAPI translator turns it into ``result.success`` on the statement.
+    header: dict[str, Any] = {"tags": list(TOOL_TAGS), "outcome": "success" if ok else "failed"}
     peers = peers_for(tool_name, settings["peer_map"])
     if peers:
         header["peers"] = peers
