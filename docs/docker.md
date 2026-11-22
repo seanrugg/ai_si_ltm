@@ -44,6 +44,22 @@ docker compose exec ltms python -m server.manage set-admin-password
 
 </details>
 
+## Settings
+
+With Compose, `.env` next to `compose.yaml` is the one settings file. Every
+LTMS setting you put there reaches the `ltms` container, and only LTMS
+settings do: other services' values in `.env` (the LRS admin password, for
+example) stay out of it. After editing `.env`, run `docker compose up -d`,
+which recreates `ltms` with the new values.
+
+[configuration.md](configuration.md) lists every setting with its default.
+Settings → System status shows "Deployment: Docker" and where the settings
+live. (The systemd service deployment uses `/etc/ltms/ltms.env` instead.)
+
+`compose.yaml` passes the settings by name: the list is generated from
+`server/config.py` by `python -m scripts.dump_settings`, and a test fails
+when a new setting is missing from it.
+
 ## Database schema
 
 LTMS creates its own schema on start, so there is no separate schema command

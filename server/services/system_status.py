@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import os
 import re
 import shutil
 from datetime import datetime, timezone
@@ -185,6 +186,35 @@ def database_kind(cfg) -> str:
         return "unknown"
 
 
+# Where each deployment keeps its settings (#390); docs/configuration.md has the list.
+DEPLOYMENTS = {
+    "docker": {"label": "Docker", "settings_file": ".env next to compose.yaml",
+               "apply": "docker compose up -d"},
+    "service": {"label": "systemd service", "settings_file": "/etc/ltms/ltms.env",
+                "apply": "restart the service"},
+    "other": {"label": "other", "settings_file": "this process's environment variables",
+              "apply": "restart LTMS"},
+}
+
+
+def deployment_mode(cfg, *, root: str = "/", environ=None) -> str:
+    """``docker``, ``service`` or ``other``: LTMS_DEPLOYMENT when it names one, else detected."""
+    environ = os.environ if environ is None else environ
+    mode = (getattr(cfg, "deployment", "") or "").strip().lower()
+    if mode in ("docker", "service"):
+        return mode
+    if os.path.exists(os.path.join(root, ".dockerenv")):
+        return "docker"
+    if environ.get("INVOCATION_ID"):  # set by systemd for every unit it starts
+        return "service"
+    return "other"
+
+
+def deployment(cfg) -> dict:
+    mode = deployment_mode(cfg)
+    return {"mode": mode, **DEPLOYMENTS[mode]}
+
+
 def server(state, cfg) -> dict:
     started = getattr(state, "started_at", None)
     now = _now()
@@ -195,6 +225,7 @@ def server(state, cfg) -> dict:
         "uptime_seconds": int((now - started).total_seconds()) if started else None,
         "database": database_kind(cfg),
         "data_dir": _disk(cfg.data_dir),
+        "deployment": deployment(cfg),
     }
 
 
@@ -308,6 +339,7 @@ def diagnostics(out: dict) -> str:
         f"version: {s['version']}" + (f" ({s['commit']})" if s["commit"] else ""),
         f"started: {s['started_at'] or 'unknown'}; uptime seconds: {s['uptime_seconds']}",
         f"database: {s['database']}",
+        f"deployment: {s['deployment']['mode']} (settings: {s['deployment']['settings_file']})",
         f"data dir free: {_gb(s['data_dir']['free_bytes'])} of {_gb(s['data_dir']['total_bytes'])}",
         "migrations: " + (f"{db['current'] or 'none'} (code head {db['head']})" if db["managed"]
                           else f"not managed by Alembic (code head {db['head']})")

@@ -225,6 +225,11 @@ class ServerConfig(BaseSettings):
     # hourly scheduler job. Env: LTMS_PENDING_ENROLLMENT_TTL_DAYS.
     pending_enrollment_ttl_days: int = 14
 
+    # How this server is deployed (#390): "docker" (the image sets it) or
+    # "service" (systemd). Empty means detect it. Settings -> System status
+    # shows it, so admins know which file holds the settings. Env: LTMS_DEPLOYMENT.
+    deployment: str = ""
+
     @property
     def resolved_database_url(self) -> str:
         if self.database_url:

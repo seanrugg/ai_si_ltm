@@ -92,6 +92,10 @@ function Body({ data }) {
           ["Uptime", uptimeText(s.uptime_seconds)],
           ["Database", s.database],
           ["Data directory free", `${gb(s.data_dir.free_bytes)} of ${gb(s.data_dir.total_bytes)}`],
+          ...(s.deployment ? [
+            ["Deployment", s.deployment.label],
+            ["Settings", <>{s.deployment.settings_file}; then {s.deployment.apply}. Every setting: <code>docs/configuration.md</code></>],
+          ] : []),
         ]} />
       </Section>
 
