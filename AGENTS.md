@@ -50,6 +50,9 @@ else disagree, this file wins (except for direct instructions from Sean).
    swarm name or device name. Make it configuration, and use neutral
    placeholders in examples and docs (`hub.local`, `ltms.example.org`,
    `<your-swarm>`, `/opt/ltms`). Device-specific code goes behind an adapter.
+   **Deployment notes must say which path they apply to** (Docker Compose:
+   `.env` next to `compose.yaml`; systemd: `/etc/ltms/ltms.env`). Never write
+   a settings file path without it. See `docs/configuration.md`.
 11. **One issue per session.** After you open the PR for your issue, stop and
    report, even if more issues were named or Sean said "continue development".
    End with: "Session limit reached; start a new session for #N." A long session
@@ -95,6 +98,7 @@ Also useful:
 
 ```bash
 python -m scripts.dump_schema             # after any change in server/models/
+python -m scripts.dump_settings           # after any change in server/config.py (docs, compose.yaml, env examples)
 python -m server.manage show-config
 LTMS_DATABASE_URL=sqlite+aiosqlite:///./dev.db LTMS_ADMIN_PASSWORD=dev-password-123 \
   LTMS_COOKIE_SECURE=false uvicorn server.main:app --port 8080

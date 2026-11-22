@@ -15,7 +15,9 @@ beforeEach(() => {
   sys = {
     generated_at: iso(0),
     server: { version: "0.9.0", commit: "abc123def456", started_at: iso(7200), uptime_seconds: 7200,
-              database: "postgresql", data_dir: { free_bytes: 12.3e9, total_bytes: 50e9 } },
+              database: "postgresql", data_dir: { free_bytes: 12.3e9, total_bytes: 50e9 },
+              deployment: { mode: "docker", label: "Docker", settings_file: ".env next to compose.yaml",
+                            apply: "docker compose up -d" } },
     database: { kind: "postgresql", managed: true, current: "0041", head: "0042", pending: true,
                 warning: "migrations pending: database at 0041, code needs 0042" },
     jobs: { scheduler_running: true, errors: 1, jobs: [
@@ -48,6 +50,8 @@ describe("System status page (#383)", () => {
       .toEqual(["Server", "Database", "Background jobs", "Keys", "Integrations", "Diagnostics"]);
     expect(within(section("Server")).getByText("12.3 GB of 50.0 GB")).toBeTruthy();
     expect(within(section("Server")).getByText("(abc123def456)")).toBeTruthy();
+    expect(within(section("Server")).getByText("Docker")).toBeTruthy();
+    expect(section("Server").textContent).toContain(".env next to compose.yaml; then docker compose up -d.");
   });
 
   it("warns when migrations are pending, and not otherwise", () => {

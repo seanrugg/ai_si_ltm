@@ -3,6 +3,8 @@
 # Multi-stage image: build the dashboard with Node, then run the Python app.
 # Configuration comes entirely from environment variables at run time; no
 # secrets, hostnames or site values are baked in (see AGENTS.md rule 10).
+# With Compose, every LTMS setting in .env reaches the container; the full
+# list is docs/configuration.md (#390).
 #
 # Build:
 #   docker build -t ltms:dev .
@@ -36,6 +38,8 @@ ENV PYTHONUNBUFFERED=1
 # Which proxy addresses uvicorn trusts for X-Forwarded-For (client IPs, rate limits).
 # Set it to your reverse proxy's address as seen from the container.
 ENV FORWARDED_ALLOW_IPS=127.0.0.1
+# Settings -> System status shows this, so admins know where settings live (#390).
+ENV LTMS_DEPLOYMENT=docker
 
 COPY --from=dashboard /app/dashboard/dist /app/dashboard/dist
 COPY . .
