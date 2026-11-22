@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
-import { AdminSessions, formatValue, groupSettings, validateSessionForm } from "./Settings.jsx";
+import { AdminSessions, formatValue, groupSettings, settingsWhere, validateSessionForm } from "./Settings.jsx";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 
@@ -21,6 +21,15 @@ describe("settings page helpers", () => {
     expect(formatValue("enroll_rate_per_ip", 5)).toBe("5 per hour");
     expect(formatValue("cookie_secure", true)).toBe("On");
     expect(formatValue("dashboard_dir", "")).toBe("Not set");
+    expect(formatValue("deployment", "docker")).toBe("Docker");
+    expect(formatValue("deployment", "service")).toBe("systemd service");
+  });
+  it("names the settings file for this deployment, not always the systemd one", () => {
+    expect(settingsWhere("docker")).toBe(
+      "This server runs as a Docker deployment: settings change in .env next to compose.yaml; then run docker compose up -d.");
+    expect(settingsWhere("service")).toContain("settings change in /etc/ltms/ltms.env; then restart the service.");
+    expect(settingsWhere("docker")).not.toContain("/etc/ltms");
+    expect(settingsWhere(undefined)).toContain("with Docker Compose, .env next to compose.yaml");
   });
   it("puts every key in exactly one group, unknown keys in Other", () => {
     const settings = { db_host: "x", token_ttl_seconds: 1, max_batch: 1, retention_audit_days: 1, brand_new: 1 };
