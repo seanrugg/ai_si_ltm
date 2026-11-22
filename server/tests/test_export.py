@@ -5,6 +5,7 @@ import csv
 import hashlib
 import io
 import json
+import re
 
 from sqlalchemy import delete, select
 
@@ -153,3 +154,27 @@ def test_bad_requests_and_auth(admin, http):
         r = admin.get("/api/admin/export", params={"format": "jsonl", **params} if "format" not in params else params)
         assert r.status_code == 422, params
     assert http.get("/api/admin/export").status_code == 401
+
+
+def test_file_name_has_member_swarm_and_local_date(admin, mesh):
+    """#394: named after the filter and the admin's own date, not the UTC day."""
+    _seed(mesh, admin)
+
+    def name(**params):
+        r = admin.get("/api/admin/export", params={"format": "jsonl", **params})
+        assert r.status_code == 200, r.text
+        return r.headers["content-disposition"].split('filename="')[1].rstrip('"')
+
+    assert name(agent="z3-r0", local_date="2026-11-13") == "ltms-export-z3-r0-2026-11-13.jsonl"
+    assert name(local_date="2026-11-13", format="csv") == "ltms-export-2026-11-13.csv"
+    utc = name(agent="z3-r0", local_date="13/11/2026")  # malformed: the UTC date of the export instead
+    assert re.fullmatch(r"ltms-export-z3-r0-\d{4}-\d{2}-\d{2}\.jsonl", utc)
+    head, _ = _jsonl(admin, agent="z3-r0", since="2026-11-13T05:00:00Z", local_date="2026-11-13")
+    assert head["filters"]["since"] == "2026-11-13T05:00:00+00:00"  # the file still says what it covers, in UTC
+
+
+def test_file_name_parts_are_sanitized():
+    from datetime import datetime, timezone
+    f = export_service.ExportFilter(agent='a"b/../c', swarm="echo base")
+    at = datetime(2026, 11, 14, 2, 0, tzinfo=timezone.utc)
+    assert export_service.export_filename(f, "csv", at) == "ltms-export-a-b-c-echo-base-2026-11-14.csv"

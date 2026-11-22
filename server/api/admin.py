@@ -1484,8 +1484,12 @@ async def export_records(
     request: Request, admin: AdminAuth = ADMIN,
     format: str = "jsonl", agent: str | None = None, swarm: str | None = None,
     type: str | None = None, since: str | None = None, until: str | None = None,
+    local_date: str | None = None,
 ) -> StreamingResponse:
-    """Download records as JSONL (complete and verifiable) or CSV (issue #153)."""
+    """Download records as JSONL (complete and verifiable) or CSV (issue #153).
+
+    ``local_date`` (YYYY-MM-DD, the admin's own date) only names the file (#394).
+    """
     f = export_service.parse_filter(fmt=format, agent=agent, swarm=swarm, type_=type, since=since, until=until)
     exported_at = datetime.now(timezone.utc)
     async with transaction(request) as session:  # audit before streaming; filters only, never content
@@ -1494,7 +1498,7 @@ async def export_records(
     maker = request.app.state.sessionmaker
     body = (export_service.stream_jsonl(maker, f, exported_at) if format == "jsonl"
             else export_service.stream_csv(maker, f))
-    filename = f"ltms-export-{exported_at:%Y%m%d}.{format}"
+    filename = export_service.export_filename(f, format, exported_at, local_date)
     return StreamingResponse(body, media_type=export_service.FORMATS[format],
                              headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
