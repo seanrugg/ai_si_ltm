@@ -259,7 +259,8 @@ def test_create_with_owner_and_purpose(http, admin):
 
 
 def test_create_owner_purpose_over_limit_422(admin):
-    assert admin.post("/api/admin/mcp/tokens", json={"name": "lim", "scope": {}}).status_code == 200
+    # #445: a token needs a record type, so the setup token names one.
+    assert admin.post("/api/admin/mcp/tokens", json={"name": "lim", "scope": {"types": ["event"]}}).status_code == 200
     r = admin.post("/api/admin/mcp/tokens", json={
         "name": "lim", "owner": "x" * 129, "purpose": "y" * 501,
     })
@@ -365,3 +366,50 @@ def test_stale_flag(db_url):
             await engine.dispose()
 
     asyncio.run(go())
+
+
+# --------------------------------------------------------------------------- #
+# #445: record types required, delete revoked/expired tokens, use is recorded
+# --------------------------------------------------------------------------- #
+def test_create_without_record_types_is_refused(admin):
+    for scope in ({}, {"types": []}, {"swarms": ["echo-base"], "payloads": True}, None):
+        r = admin.post("/api/admin/mcp/tokens", json={"name": "t", "scope": scope})
+        assert r.status_code == 422, (scope, r.text)
+        assert r.json()["error"] == {"code": "bad_scope", "message": "a token needs at least one record type"}
+    every = ["action", "communication", "decision", "event", "lesson", "perception", "policy", "system", "thought"]
+    r = admin.post("/api/admin/mcp/tokens", json={"name": "all", "scope": {"types": every}})
+    assert r.status_code == 200, r.text
+    listed = admin.get("/api/admin/mcp/tokens").json()["tokens"][0]
+    assert listed["scope"]["types"] == every and listed["reads_nothing"] is False and listed["state"] == "active"
+
+
+def test_delete_only_revoked_or_expired_and_audited(admin, db_exec):
+    tid = admin.post("/api/admin/mcp/tokens", json={"name": "old", "scope": {"types": ["event"]}}).json()["id"]
+    r = admin.delete(f"/api/admin/mcp/tokens/{tid}")
+    assert r.status_code == 409 and r.json()["error"]["code"] == "token_active"
+    assert admin.post(f"/api/admin/mcp/tokens/{tid}/revoke").status_code == 200
+    assert admin.get("/api/admin/mcp/tokens").json()["tokens"][0]["state"] == "revoked"
+    assert admin.post(f"/api/admin/mcp/tokens/{tid}/revoke").status_code == 200  # again: no second audit row
+    assert admin.delete(f"/api/admin/mcp/tokens/{tid}").status_code == 200
+    assert admin.get("/api/admin/mcp/tokens").json()["tokens"] == []
+    assert admin.delete(f"/api/admin/mcp/tokens/{tid}").status_code == 404
+    log = admin.get("/api/admin/recall-log", params={"action": "all"}).json()["entries"]
+    actions = [e["action"] for e in log if e["action"].startswith("mcp_token_")]
+    assert actions.count("mcp_token_revoke") == 1 and actions.count("mcp_token_delete") == 1
+    deleted = next(e for e in log if e["action"] == "mcp_token_delete")
+    assert deleted["detail"]["name"] == "old" and deleted["detail"]["revoked"] is True
+
+    # An expired token (never revoked) can be deleted too.
+    past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    eid = admin.post("/api/admin/mcp/tokens", json={"name": "gone", "scope": {"types": ["event"]},
+                                                  "expires_at": past}).json()["id"]
+    assert admin.get("/api/admin/mcp/tokens").json()["tokens"][0]["state"] == "expired"
+    assert admin.delete(f"/api/admin/mcp/tokens/{eid}").status_code == 200
+
+
+def test_old_typeless_tokens_are_flagged(admin, db_exec):
+    async def make(session):
+        await mcp_access.create(session, name="empty", scope={"swarms": ["echo-base"]}, expires_at=None,
+                                actor="admin:test")
+    db_exec(make)  # made before #445 required types
+    assert admin.get("/api/admin/mcp/tokens").json()["tokens"][0]["reads_nothing"] is True

@@ -52,9 +52,27 @@ export function rateLimitedText(summary) {
 }
 
 function tokenStatus(token) {
+  if (token.state) return token.state;
   if (token.revoked_at) return "revoked";
   if (token.expires_at && new Date(token.expires_at) <= new Date()) return "expired";
   return "active";
+}
+
+/** Active tokens first; revoked and expired ones go in a collapsed list (#445). */
+export function splitTokens(tokens) {
+  const active = [];
+  const inactive = [];
+  for (const t of tokens || []) (tokenStatus(t) === "active" ? active : inactive).push(t);
+  return { active, inactive };
+}
+
+/** Why a token form can't be sent yet, or null (#445: a token needs a record type). */
+export function tokenFormProblem(form) {
+  if (!form.name.trim()) return "Give the token a name.";
+  if (!splitList(form.types).length) {
+    return "Choose at least one record type: a token with none can read nothing.";
+  }
+  return null;
 }
 
 function copyToClipboard(text) {
@@ -101,6 +119,8 @@ export default function Access() {
   const [revokeInput, setRevokeInput] = useState("");
   const [revokeBusy, setRevokeBusy] = useState(false);
   const [revokeError, setRevokeError] = useState(null);
+  const [deleting, setDeleting] = useState(null); // {id, name} of a revoked/expired token to delete (#445)
+  const [showInactive, setShowInactive] = useState(false);
 
   // MCP settings form state.
   const [settingsMode, setSettingsMode] = useState(data?.mode ?? "off");
@@ -243,7 +263,8 @@ export default function Access() {
       if (values.length) scope[key] = values;
     }
     const body = { name: form.name.trim(), scope, expires_at: form.expires || null, owner: form.owner.trim() || null, purpose: form.purpose.trim() || null };
-    if (!body.name) { setFormError(new Error("Give the token a name")); return; }
+    const problem = tokenFormProblem(form);
+    if (problem) { setFormError(new Error(problem)); return; }
     setBusy(true);
     try {
       const created = await api("/admin/mcp/tokens", { method: "POST", body });
@@ -253,6 +274,21 @@ export default function Access() {
       setFormError(err);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function doDelete() {
+    if (!deleting) return;
+    setRevokeBusy(true);
+    setRevokeError(null);
+    try {
+      await api(`/admin/mcp/tokens/${deleting.id}`, { method: "DELETE" });
+      setDeleting(null);
+      reload();
+    } catch (err) {
+      setRevokeError(err);
+    } finally {
+      setRevokeBusy(false);
     }
   }
 
@@ -281,6 +317,88 @@ export default function Access() {
   if (loading && !data) return <Loading what="Loading MCP access" />;
   if (error) return <ErrorNote error={error} onRetry={reload} />;
   const locked = Boolean(data.locked);
+
+  // One token card; active tokens can be revoked, revoked and expired ones deleted (#445).
+  const renderToken = (token) => (
+            <li key={token.id} className="mb-3 border rounded-md border-ink-line bg-ink p-4"
+                aria-labelledby={`token-${token.id}-h`}>
+              <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
+                <div>
+                  <h2 id={`token-${token.id}-h`} className="text-lg font-bold">{token.name}</h2>
+                  <p className="text-sm text-paper-muted">{scopeSummary(token.scope)}</p>
+                  {token.reads_nothing && tokenStatus(token) === "active" && (
+                    <p className="text-sm font-bold text-warn">
+                      Reads nothing: this token names no record types. Revoke it and create one that does.
+                    </p>
+                  )}
+                  {token.owner && <p className="text-sm text-paper-muted">Owner: {token.owner}</p>}
+                  {token.purpose && <p className="text-sm text-paper-muted">Purpose: {token.purpose}</p>}
+                </div>
+                <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+                  <dt className="text-paper-muted">Status</dt>
+                  <dd><StatusBadge status={tokenStatus(token)} /></dd>
+                  <dt className="text-paper-muted">Uses</dt>
+                  <dd>{token.use_count ?? 0}</dd>
+                  <dt className="text-paper-muted">Stale</dt>
+                  <dd>{token.stale ? "Yes" : "No"}</dd>
+                  <dt className="text-paper-muted">Created</dt>
+                  <dd><span title={localTime(token.created_at)}>{localTime(token.created_at) || "—"}</span></dd>
+                  <dt className="text-paper-muted">Expires</dt>
+                  <dd>{token.expires_at ? (
+                    <span title={localTime(token.expires_at)}>{localTime(token.expires_at)}</span>
+                  ) : "never"}</dd>
+                  <dt className="text-paper-muted">Last used</dt>
+                  <dd>{token.last_used_at ? (
+                    <span title={localTime(token.last_used_at)}>{localTime(token.last_used_at)}</span>
+                  ) : "never"}</dd>
+                </dl>
+              </div>
+              <ErrorNote error={revokeError} />
+              {tokenStatus(token) !== "active" ? (
+                deleting && deleting.id === token.id ? (
+                  <div className="mt-3 rounded-md border border-bad/40 bg-bad/5 p-3 text-sm">
+                    <p>Delete {token.name}? It already can&apos;t read anything; its creation and revocation stay in the audit log.</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <button className="btn btn-danger h-11" type="button" disabled={revokeBusy} onClick={doDelete}>
+                        Delete {token.name}
+                      </button>
+                      <button className="btn h-11" type="button" onClick={() => setDeleting(null)}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button className="btn btn-danger h-11" type="button"
+                            onClick={() => { setRevokeError(null); setDeleting({ id: token.id, name: token.name }); }}>
+                      Delete
+                    </button>
+                  </div>
+                )
+              ) : revoking && revoking.id === token.id ? (
+                <div className="mt-3 rounded-md border border-bad/40 bg-bad/5 p-3 text-sm">
+                  <p>
+                    Revoking a token stops it working immediately. This can't be undone. Type the
+                    token's name to confirm.
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <input className="field h-11 w-48" value={revokeInput}
+                           onChange={(e) => setRevokeInput(e.target.value)}
+                           placeholder={token.name} aria-label={`Confirm revoke ${token.name}`} />
+                    <button className="btn btn-danger h-11" disabled={revokeBusy || revokeInput !== token.name}
+                            onClick={doRevoke}>
+                      Revoke {token.name}
+                    </button>
+                    <button className="btn h-11" type="button" onClick={cancelRevoke}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button className="btn btn-danger h-11" type="button" onClick={() => revokeToken(token.id, token.name)}>
+                    Revoke
+                  </button>
+                </div>
+              )}
+            </li>
+  );
 
   return (
     <>
@@ -542,10 +660,10 @@ export default function Access() {
               <input className="field h-11 w-48" value={form.purpose}
                      onChange={(e) => setForm((f) => ({ ...f, purpose: e.target.value }))}
                      placeholder="Daily read of robot outcomes" id={`${fid}-purpose`} />
-              <label htmlFor={`${fid}-types`} className="block text-sm text-paper-muted">Record types</label>
+              <label htmlFor={`${fid}-types`} className="block text-sm text-paper-muted">Record types (required)</label>
               <input className="field h-11 w-40" value={form.types}
                      onChange={(e) => setForm((f) => ({ ...f, types: e.target.value }))}
-                     placeholder="event, thought" id={`${fid}-types`} />
+                     placeholder="event, thought" id={`${fid}-types`} required aria-required="true" />
               <label htmlFor={`${fid}-agents`} className="block text-sm text-paper-muted">Members</label>
               <input className="field h-11 w-40" value={form.agents}
                      onChange={(e) => setForm((f) => ({ ...f, agents: e.target.value }))}
@@ -572,8 +690,8 @@ export default function Access() {
               <button className="btn h-11" type="button" disabled={busy} onClick={() => setMode(null)}>Cancel</button>
             </form>
             <p className="mt-2 text-xs text-paper-muted">
-              Comma-separated values per field. Empty fields are not restricted. A token can read
-              records its scope covers; without <b>recall</b> it can only read what its scope allows.
+              Comma-separated values per field. Record types are required: a token reads only the types
+              it names. Empty Members or Swarms fields mean all members or all swarms.
             </p>
           </section>
         )}
@@ -600,63 +718,21 @@ export default function Access() {
           </EmptyState>
         )}
         <ul className="panel" aria-label="MCP read tokens">
-          {data.tokens.map((token) => (
-            <li key={token.id} className="mb-3 border rounded-md border-ink-line bg-ink p-4"
-                aria-labelledby={`token-${token.id}-h`}>
-              <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
-                <div>
-                  <h2 id={`token-${token.id}-h`} className="text-lg font-bold">{token.name}</h2>
-                  <p className="text-sm text-paper-muted">{scopeSummary(token.scope)}</p>
-                  {token.owner && <p className="text-sm text-paper-muted">Owner: {token.owner}</p>}
-                  {token.purpose && <p className="text-sm text-paper-muted">Purpose: {token.purpose}</p>}
-                </div>
-                <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-                  <dt className="text-paper-muted">Status</dt>
-                  <dd><StatusBadge status={tokenStatus(token)} /></dd>
-                  <dt className="text-paper-muted">Uses</dt>
-                  <dd>{token.use_count ?? 0}</dd>
-                  <dt className="text-paper-muted">Stale</dt>
-                  <dd>{token.stale ? "Yes" : "No"}</dd>
-                  <dt className="text-paper-muted">Created</dt>
-                  <dd><span title={localTime(token.created_at)}>{localTime(token.created_at) || "—"}</span></dd>
-                  <dt className="text-paper-muted">Expires</dt>
-                  <dd>{token.expires_at ? (
-                    <span title={localTime(token.expires_at)}>{localTime(token.expires_at)}</span>
-                  ) : "never"}</dd>
-                  <dt className="text-paper-muted">Last used</dt>
-                  <dd>{token.last_used_at ? (
-                    <span title={localTime(token.last_used_at)}>{localTime(token.last_used_at)}</span>
-                  ) : "never"}</dd>
-                </dl>
-              </div>
-              <ErrorNote error={revokeError} />
-              {revoking && revoking.id === token.id ? (
-                <div className="mt-3 rounded-md border border-bad/40 bg-bad/5 p-3 text-sm">
-                  <p>
-                    Revoking a token stops it working immediately. This can't be undone. Type the
-                    token's name to confirm.
-                  </p>
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <input className="field h-11 w-48" value={revokeInput}
-                           onChange={(e) => setRevokeInput(e.target.value)}
-                           placeholder={token.name} aria-label={`Confirm revoke ${token.name}`} />
-                    <button className="btn btn-danger h-11" disabled={revokeBusy || revokeInput !== token.name}
-                            onClick={doRevoke}>
-                      Revoke {token.name}
-                    </button>
-                    <button className="btn h-11" type="button" onClick={cancelRevoke}>Cancel</button>
-                  </div>
-                </div>
-              ) : (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button className="btn btn-danger h-11" type="button" onClick={() => revokeToken(token.id, token.name)}>
-                    Revoke
-                  </button>
-                </div>
-              )}
-            </li>
-          ))}
+          {splitTokens(data.tokens).active.map((token) => renderToken(token))}
         </ul>
+        {splitTokens(data.tokens).inactive.length > 0 && (
+          <div className="mt-4">
+            <button type="button" className="btn" aria-expanded={showInactive} aria-controls={`${fid}-inactive`}
+                    onClick={() => setShowInactive((v) => !v)}>
+              {showInactive ? "Hide" : "Show"} revoked and expired ({splitTokens(data.tokens).inactive.length})
+            </button>
+            {showInactive && (
+              <ul className="panel mt-3" id={`${fid}-inactive`} aria-label="Revoked and expired tokens">
+                {splitTokens(data.tokens).inactive.map((token) => renderToken(token))}
+              </ul>
+            )}
+          </div>
+        )}
 
         <div className="mt-4 flex gap-2">
           <button className="btn btn-primary h-11" type="button" disabled={busy || mode === "new"}

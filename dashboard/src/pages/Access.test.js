@@ -1,10 +1,13 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import React from "react";
 import { MemoryRouter } from "react-router-dom";
 
 afterEach(() => cleanup());
-import { limitsText, rateLimitedText, settingsFormFrom, default as Access } from "./Access.jsx";
+import { limitsText, rateLimitedText, settingsFormFrom, splitTokens, tokenFormProblem, default as Access } from "./Access.jsx";
+import { api } from "../api/client.js";
+
+vi.mock("../api/client.js", () => ({ api: vi.fn(async () => ({})) }));
 
 const mcpData = {
   mode: "off",
@@ -27,6 +30,8 @@ vi.mock("../api/useApi.js", () => ({
 }));
 
 beforeEach(() => {
+  mcpData.tokens = [];
+  vi.mocked(api).mockClear();
   policyData = {
     policy: "manual",
     source: "dashboard",
@@ -111,5 +116,53 @@ describe("MCP rate limits (#443)", () => {
     expect(rateLimitedText({ total: 130, by_reason: { per_caller: 100, open_budget: 30 } }))
       .toBe("130 (per caller: 100, shared open limit: 30)");
     expect(rateLimitedText(undefined)).toBeNull();
+  });
+});
+
+const tok = (id, name, extra = {}) => ({
+  id, name, scope: { types: ["event"] }, use_count: 0, stale: false, created_at: "2026-11-01T00:00:00Z",
+  expires_at: null, revoked_at: null, last_used_at: null, state: "active", reads_nothing: false, ...extra,
+});
+
+describe("MCP tokens (#445)", () => {
+  it("splits active tokens from revoked and expired ones", () => {
+    const { active, inactive } = splitTokens([tok("1", "a"), tok("2", "b", { state: "revoked" }),
+      tok("3", "c", { state: "expired" })]);
+    expect(active.map((t) => t.name)).toEqual(["a"]);
+    expect(inactive.map((t) => t.name)).toEqual(["b", "c"]);
+  });
+
+  it("won't send a token without a record type", () => {
+    const form = { name: "reader", types: "", agents: "", swarms: "echo-base" };
+    expect(tokenFormProblem(form)).toMatch(/at least one record type/);
+    expect(tokenFormProblem({ ...form, types: " , " })).toMatch(/at least one record type/);
+    expect(tokenFormProblem({ ...form, types: "event" })).toBeNull();
+    expect(tokenFormProblem({ ...form, name: " ", types: "event" })).toMatch(/name/);
+  });
+
+  it("shows active tokens; revoked and expired are collapsed, with Delete and no Revoke", async () => {
+    mcpData.tokens = [tok("1", "live"), tok("2", "old", { state: "revoked", revoked_at: "2026-11-02T00:00:00Z" }),
+      tok("3", "lapsed", { state: "expired", expires_at: "2026-11-03T00:00:00Z" })];
+    renderAccess();
+    const list = screen.getByRole("list", { name: "MCP read tokens" });
+    expect(within(list).getByText("live")).toBeTruthy();
+    expect(within(list).queryByText("old")).toBeNull();
+    expect(within(list).getByRole("button", { name: "Revoke" })).toBeTruthy();
+    const toggle = screen.getByRole("button", { name: "Show revoked and expired (2)" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    const past = screen.getByRole("list", { name: "Revoked and expired tokens" });
+    expect(within(past).queryByRole("button", { name: "Revoke" })).toBeNull();
+    const deletes = within(past).getAllByRole("button", { name: "Delete" });
+    expect(deletes).toHaveLength(2);
+    fireEvent.click(deletes[0]);
+    fireEvent.click(within(past).getByRole("button", { name: "Delete old" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/admin/mcp/tokens/2", { method: "DELETE" }));
+  });
+
+  it("flags an active token that reads nothing", () => {
+    mcpData.tokens = [tok("1", "empty", { scope: { swarms: ["echo-base"], payloads: true }, reads_nothing: true })];
+    renderAccess();
+    expect(screen.getByText(/Reads nothing: this token names no record types/)).toBeTruthy();
   });
 });

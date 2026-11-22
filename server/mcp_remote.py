@@ -178,7 +178,7 @@ def create_mcp_server(cfg: ServerConfig, sessionmaker) -> MCPServer:
         """
         headers = ctx.headers if ctx else None
         token = _bearer_token(headers)
-        scope = await mcp_access.resolve(session, cfg, token)
+        scope = await mcp_access.resolve(session, cfg, token, count_use=False)
         if scope is None:
             raise MCPError(403, "access denied", "MCP read access denied")
         if token:
@@ -198,6 +198,11 @@ def create_mcp_server(cfg: ServerConfig, sessionmaker) -> MCPServer:
                         f"Open read access on this FLTMS instance is busy (shared limit of {cfg.mcp_open_budget} "
                         f"calls/min reached). Retry in {wait} s, or ask the fleet admin for a read token.",
                         "Ask the fleet admin for a read token: token callers don't share the open limit.")
+        if token:
+            # Count the use and commit it now (#445): the tools' sessions never
+            # commit, so this used to be rolled back. A refused call isn't counted.
+            await mcp_access.record_use(session, token)
+            await session.commit()
         return scope, token
 
     def _retry_seconds(bucket_limiter: RateLimiter, bucket: str) -> int:
