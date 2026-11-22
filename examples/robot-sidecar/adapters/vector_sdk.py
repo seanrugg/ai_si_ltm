@@ -200,14 +200,22 @@ GROUPS = {
 # group -> {channel: deadband}; a channel missing here (or a whole group) uses
 # band 0, so any change signs. Starting values from #438; Sean can tune them
 # against real data.
+#
+# float("inf") means "recorded, never a reason to send": the channel is still
+# in every record that is sent (samples and stats) and in heartbeats, but its
+# drift alone never signs one. From Vector's docked data on 18 Nov 2026 (#448):
+# touch `raw` (the capacitive analog value) and proximity `signal_quality`
+# drift constantly at rest, which signed a touch record nearly every window and
+# a proximity record in ~83% of them. `pressed`, the proximity booleans and
+# distance moves over 25 mm are what mean something; touches also make episodes.
 DEADBANDS = {
     "wheels": {"left": 1.0, "right": 1.0},
     "imu": {"accel_x": 50.0, "accel_y": 50.0, "accel_z": 50.0,
             "gyro_x": 0.02, "gyro_y": 0.02, "gyro_z": 0.02},
     "head": {"value": 0.02},
     "lift": {"value": 1.0},
-    "touch": {"raw": 5.0, "pressed": 0},
-    "proximity": {"distance": 10.0, "signal_quality": 0.05, "unobstructed": 0,
+    "touch": {"raw": float("inf"), "pressed": 0},
+    "proximity": {"distance": 25.0, "signal_quality": float("inf"), "unobstructed": 0,
                   "found_object": 0, "lift_in_fov": 0},
 }
 

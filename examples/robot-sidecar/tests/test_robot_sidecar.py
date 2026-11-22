@@ -514,3 +514,51 @@ def test_static_vector_robot_signs_first_window_plus_one_heartbeat_each():
     for hb in heartbeats:
         assert hb["payload"]["stats"]["windows_skipped"] == 19
         assert hb["payload"]["stats"]["unchanged_since"]
+
+
+# -- Vector's docked noise (#448) ---------------------------------------------
+
+def _vector_group(name):
+    from adapters.vector_sdk import DEADBANDS, GROUPS
+    modality, unit = GROUPS[name]
+    return {"sensor": name, "modality": modality, "unit": unit, "deadband": DEADBANDS[name]}
+
+
+def test_touch_raw_drift_alone_never_signs_but_pressed_does():
+    sc = Sidecar([], body_seconds=30, now=0, heartbeat_seconds=600)
+    link = FakeLink()
+    touch = _vector_group("touch")
+    for i, now in enumerate(range(30, 601, 30)):  # raw drifts by hundreds, pressed steady
+        sc.emit(Item("sample", values={"raw": 4000 + 300 * (i % 3), "pressed": False}, sensor=touch), at=now)
+        sc.emit(Item("sample", values={"raw": 4500 - 200 * (i % 2), "pressed": False}, sensor=touch), at=now + 1)
+        sc.poll(link, now)
+    assert len(link.records) == 1  # only the first window, until the heartbeat
+    assert link.records[0]["payload"]["stats"]["raw"]["max"] >= 4000  # raw is still recorded
+    sc.emit(Item("sample", values={"raw": 4100, "pressed": False}, sensor=touch), at=630)
+    sc.poll(link, 630)
+    assert len(link.records) == 2 and link.records[1]["payload"]["stats"]["unchanged_since"]  # the heartbeat
+    sc.emit(Item("sample", values={"raw": 4100, "pressed": True}, sensor=touch), at=660)  # a press
+    sc.poll(link, 660)
+    assert len(link.records) == 3 and "unchanged_since" not in link.records[2]["payload"]["stats"]
+
+
+def test_proximity_signs_on_distance_over_25_mm_or_a_boolean_not_on_signal_quality():
+    sc = Sidecar([], body_seconds=30, now=0, heartbeat_seconds=600)
+    link = FakeLink()
+    prox = _vector_group("proximity")
+    base = {"distance": 200.0, "signal_quality": 0.10, "unobstructed": True, "found_object": False,
+            "lift_in_fov": False}
+
+    def window(now, **change):
+        sc.emit(Item("sample", values={**base, **change}, sensor=prox), at=now)
+        sc.poll(link, now)
+        return len(link.records)
+
+    assert window(30) == 1
+    assert window(60, signal_quality=0.9) == 1  # quality drifting: skipped
+    assert window(90, signal_quality=0.01) == 1
+    assert window(120, distance=220.0) == 1  # 20 mm: inside the 25 mm band
+    assert window(150, distance=230.0) == 2  # 30 mm: signs
+    base["distance"] = 230.0
+    assert window(180) == 2
+    assert window(210, unobstructed=False) == 3  # a boolean flip signs
