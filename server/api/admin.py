@@ -1414,8 +1414,9 @@ async def mcp_settings(request: Request, admin: AdminAuth = ADMIN) -> dict:
 async def put_mcp_settings(request: Request, body: McpSettingsUpdate, admin: AdminAuth = ADMIN) -> dict:
     """Update the dashboard-stored MCP read mode and open scope.
 
-    Widening public access (switching to open, or adding types or swarms to the
-    open scope while mode is open) requires ``confirm: "open"``, otherwise 422
+    Widening public access (switching to open, adding types or swarms to the
+    open scope while mode is open, or turning on open payloads, #447) requires
+    ``confirm: "open"``, otherwise 422
     ``confirm_required``. When the server is locked the environment is
     authoritative and writes return 409 ``locked``.
     """
@@ -1447,8 +1448,8 @@ async def put_mcp_settings(request: Request, body: McpSettingsUpdate, admin: Adm
     ):
         raise ServiceError(422, "bad_scope", "open_scope.swarms entries must be swarm names (1-64 characters) or null")
     open_scope.setdefault("swarms", None)
-    # Payloads are never part of the open scope.
-    open_scope.pop("payloads", None)
+    # Open payloads (#447): absent = false; anything but a boolean is refused.
+    runtime_settings.check_open_payloads(open_scope)
 
     async with transaction(request) as session:
         current = await runtime_settings.resolve_mcp_access(session, cfg)
@@ -1461,6 +1462,9 @@ async def put_mcp_settings(request: Request, body: McpSettingsUpdate, admin: Adm
                 new_types = set(new.get("open_scope", {}).get("types") or [])
                 if new_types - cur_types:
                     return True
+                if (runtime_settings.open_payloads(new.get("open_scope"))
+                        and not (cur["mode"] == "open" and runtime_settings.open_payloads(cur.get("open_scope")))):
+                    return True  # turning on payloads for anyone is a widening too (#447)
                 cur_swarms = cur.get("open_scope", {}).get("swarms")
                 new_swarms = new.get("open_scope", {}).get("swarms")
                 if cur_swarms is not None and new_swarms is None:

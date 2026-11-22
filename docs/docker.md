@@ -137,7 +137,16 @@ LTMS_MCP_OPEN_SCOPE={"types":["thought","decision","lesson","policy"],"swarms":n
 
 `token` needs a read token from the dashboard's Access page. `open` needs no
 token and grants only `LTMS_MCP_OPEN_SCOPE` (an empty or missing `types`
-list sees nothing; payloads are never included). `"swarms": null` means every
+list sees nothing). Open reads are headers only unless the open scope has
+`"payloads": true`, set in `.env` or with **Include payloads** on the Access
+page (#447).
+
+**Warning:** with open payloads on, anyone who can reach this server reads
+full record contents (sensor readings, message text) for the open scope's types
+and swarms, with no token. Every dashboard page shows a banner while it's on.
+Turn it on only as long as you need it, for example while tuning a robot's
+data, and prefer a read token with payloads and an expiry when the client can
+send one. `"swarms": null` means every
 swarm; a list such as `["<your-swarm>", null]` limits it (`null` in the list
 means free agents). The Access page shows the current mode; changing it means
 editing `.env`. `LTMS_PUBLIC_BASE_URL` must match the public host, because

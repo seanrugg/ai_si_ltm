@@ -12,7 +12,7 @@ from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models import LrsEndpoint, Member, Swarm, SwarmMember
-from server.services import charter, directives
+from server.services import charter, directives, runtime_settings
 
 
 async def _any(session: AsyncSession, stmt) -> bool:
@@ -47,4 +47,11 @@ async def status(session: AsyncSession, cfg, *, directives_seen: datetime | None
         "directive_declines": await directives.declines_since(session, directives_seen),
         "lrs_failing": int(lrs_failing),
         "setup": await setup(session),
+        # Open MCP access currently returns payloads to anyone (#447): the shell shows a banner.
+        "open_payloads": await _open_payloads(session, cfg),
     }
+
+
+async def _open_payloads(session: AsyncSession, cfg) -> bool:
+    access = await runtime_settings.resolve_mcp_access(session, cfg)
+    return access["mode"] == "open" and runtime_settings.open_payloads(access["open_scope"])
