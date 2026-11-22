@@ -153,8 +153,17 @@ class ServerConfig(BaseSettings):
 
     # The read scope granted when mode is "open" and no token is presented.
     # JSON, e.g. {"types":["thought","lesson"],"swarms":["alpha"]}. Defaults are
-    # closed: an empty "types" list sees nothing. Env: LTMS_MCP_OPEN_SCOPE.
+    # closed: an empty "types" list sees nothing. "payloads": true also returns
+    # full record contents to anyone (#447; default false, headers only).
+    # Env: LTMS_MCP_OPEN_SCOPE.
     mcp_open_scope: dict = {"types": [], "swarms": None}
+
+    @field_validator("mcp_open_scope")
+    @classmethod
+    def _check_open_scope_payloads(cls, v: dict) -> dict:
+        if "payloads" in v and not isinstance(v["payloads"], bool):
+            raise ValueError("mcp_open_scope.payloads must be true or false")
+        return v
 
     # Tool calls per minute for all tokenless (open-mode) MCP callers combined
     # (#443), on top of each caller's own 60/min. Token callers don't count

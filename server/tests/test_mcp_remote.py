@@ -474,3 +474,42 @@ def test_rate_limited_token_calls_are_not_counted(db_url):
             ok += 1
     assert ok >= mcp_remote.CALLER_LIMIT
     assert admin.get("/api/admin/mcp/tokens").json()["tokens"][0]["use_count"] == ok
+
+
+def test_open_payloads_return_payloads_only_when_on(db_url):
+    """#447: an open (no-token) request gets payloads when the open scope says so."""
+    for payloads, expect in ((True, True), (False, False), (None, False)):
+        scope = {"types": ["event"]}
+        if payloads is not None:
+            scope["payloads"] = payloads
+        http, admin, _app = _make_app(db_url, mcp_read_mode="open", mcp_open_scope=scope)
+        mesh = Mesh(http, admin)
+        agent = mesh.member(f"agent-{str(payloads).lower()}")
+        agent.append("event", summary="with details", payload={"cm": 12})
+        agent.append("thought", summary="outside the open types", payload={"secret": 1})
+        agent.flush()
+        _initialize(http)
+        records = _extract_result(_rpc(http, "tools/call", {"name": "search_records", "arguments": {}}))
+        # On Postgres the three passes share one database, so look at this pass's member only.
+        records = [r for r in records if r["agent"] == agent.name]
+        assert [r["summary"] for r in records] == ["with details"], payloads
+        assert ("payload" in records[0]) is expect, (payloads, records[0])
+        if expect:
+            assert records[0]["payload"] == {"cm": 12}
+            one = _extract_result(_rpc(http, "tools/call", {"name": "get_record",
+                                                            "arguments": {"agent": agent.name, "seq": 1}}))
+            assert one["payload"] == {"cm": 12}
+        http.__exit__(None, None, None)
+
+
+def test_token_requests_unaffected_by_open_payloads(db_url):
+    http, admin, _app = _make_app(db_url, mcp_read_mode="open",
+                                  mcp_open_scope={"types": ["event"], "payloads": True})
+    plaintext = admin.post("/api/admin/mcp/tokens", json={"name": "headers", "scope": {"types": ["event"]}}).json()["token"]
+    mesh = Mesh(http, admin)
+    agent = mesh.member("agent-t")
+    agent.append("event", summary="e", payload={"cm": 1})
+    agent.flush()
+    _initialize(http)
+    records = _extract_result(_rpc(http, "tools/call", {"name": "search_records", "arguments": {}}, token=plaintext))
+    assert records and "payload" not in records[0]  # the token's own scope (no payloads) applies

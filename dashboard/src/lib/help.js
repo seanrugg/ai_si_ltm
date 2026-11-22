@@ -114,3 +114,4 @@ export const TOKEN_MEMBERS = "Limit the token to these members' records. Leave e
 export const TOKEN_SWARMS = "Limit the token to records from these swarms; Free agents means members in no swarm. Leave empty for every swarm.";
 export const TOKEN_PAYLOADS = "Payloads are full record contents (sensor readings, message text). Without them the token reads headers only: summary, time, type, chain.";
 export const TOKEN_EXPIRES = "The token stops working at the start of this day. Never means it works until revoked. Tokens with payloads should expire.";
+export const OPEN_PAYLOADS = "Off: open callers read headers only (summary, time, type). On: they also read full record contents for the types and swarms above, with no token. Turn it off when you're done.";

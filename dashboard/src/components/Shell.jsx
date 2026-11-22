@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 import { useAdmin } from "../App.jsx";
 import { api } from "../api/client.js";
 import { THEMES, getTheme, setTheme } from "../lib/theme.js";
@@ -166,6 +166,18 @@ function ThemeSelect() {
   );
 }
 
+/** While open MCP access returns payloads to anyone (#447), every page says so. No countdown. */
+export function OpenPayloadsBanner({ on }) {
+  if (!on) return null;
+  return (
+    <div role="status" className="mb-4 flex flex-wrap items-center gap-x-2 rounded-md border border-warn/60 bg-warn/10 px-3 py-2 text-sm">
+      <strong>Open MCP access includes payloads</strong>
+      <span aria-hidden="true">·</span>
+      <Link to="/access" className="underline">Turn off</Link>
+    </div>
+  );
+}
+
 export default function Shell({ children }) {
   const { username, logout } = useAdmin();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -195,7 +207,10 @@ export default function Shell({ children }) {
           </div>
         </div>
       </aside>
-      <main className="min-w-0 px-4 py-6 md:px-8">{children}</main>
+      <main className="min-w-0 px-4 py-6 md:px-8">
+        <OpenPayloadsBanner on={status?.open_payloads === true} />
+        {children}
+      </main>
     </div>
   );
 }

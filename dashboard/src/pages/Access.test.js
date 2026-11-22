@@ -4,7 +4,7 @@ import React from "react";
 import { MemoryRouter } from "react-router-dom";
 
 afterEach(() => cleanup());
-import { limitsText, rateLimitedText, settingsFormFrom, splitTokens, tokenFormProblem, default as Access } from "./Access.jsx";
+import { limitsText, modeLabels, rateLimitedText, settingsFormFrom, splitTokens, tokenFormProblem, default as Access } from "./Access.jsx";
 import { api } from "../api/client.js";
 
 vi.mock("../api/client.js", () => ({ api: vi.fn(async () => ({})) }));
@@ -31,6 +31,8 @@ vi.mock("../api/useApi.js", () => ({
 
 beforeEach(() => {
   mcpData.tokens = [];
+  mcpData.mode = "off";
+  mcpData.open_scope = { types: [], swarms: null };
   vi.mocked(api).mockClear();
   policyData = {
     policy: "manual",
@@ -186,5 +188,42 @@ describe("New token form on the Access page (#446)", () => {
       name: "reader", scope: { types: ["lesson"] }, expires_at: null, owner: null, purpose: null } }));
     await waitFor(() => expect(reload).toHaveBeenCalled());
     expect(await screen.findByLabelText("New token value")).toBeTruthy();
+  });
+});
+
+describe("open payloads (#447)", () => {
+  it("the Open radio's text follows the setting", () => {
+    expect(modeLabels(false).open[1]).toBe("Anyone can read the open scope (headers only).");
+    expect(modeLabels(true).open[1]).toBe("Anyone can read the open scope (headers and payloads).");
+    expect(settingsFormFrom({ mode: "open", open_scope: { types: ["event"], payloads: true } }).payloads).toBe(true);
+    expect(settingsFormFrom({ mode: "open", open_scope: { types: ["event"] } }).payloads).toBe(false);
+  });
+
+  it("the checkbox appears only in Open mode", () => {
+    renderAccess();
+    expect(screen.queryByRole("checkbox", { name: "Include payloads" })).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: /Open/ }));
+    expect(screen.getByRole("checkbox", { name: "Include payloads" }).checked).toBe(false);
+  });
+
+  it("ticking it warns, changes the wording, and saving sends open_scope.payloads with the confirm", async () => {
+    mcpData.mode = "open";
+    mcpData.open_scope = { types: ["event"], swarms: null };
+    renderAccess();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Include payloads" }));
+    expect(screen.getByText(/Anyone who can reach this server can read full record contents/)).toBeTruthy();
+    expect(screen.getByText("Open scope (headers and payloads)")).toBeTruthy();
+    expect(screen.getByText("Anyone can read the open scope (headers and payloads).")).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: /payloads included/ }));  // turning it on is a widening
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/admin/mcp/settings", { method: "PUT", body: {
+      mode: "open", open_scope: { types: ["event"], swarms: null, payloads: true }, confirm: "open" } }));
+  });
+
+  it("starts ticked when the server has it on", () => {
+    mcpData.mode = "open";
+    mcpData.open_scope = { types: ["event"], swarms: null, payloads: true };
+    renderAccess();
+    expect(screen.getByRole("checkbox", { name: "Include payloads" }).checked).toBe(true);
   });
 });
