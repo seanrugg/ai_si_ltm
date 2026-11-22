@@ -490,6 +490,8 @@ def test_open_payloads_return_payloads_only_when_on(db_url):
         agent.flush()
         _initialize(http)
         records = _extract_result(_rpc(http, "tools/call", {"name": "search_records", "arguments": {}}))
+        # On Postgres the three passes share one database, so look at this pass's member only.
+        records = [r for r in records if r["agent"] == agent.name]
         assert [r["summary"] for r in records] == ["with details"], payloads
         assert ("payload" in records[0]) is expect, (payloads, records[0])
         if expect:
