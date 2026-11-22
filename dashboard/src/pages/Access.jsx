@@ -3,6 +3,7 @@ import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, Loading, PageHeader, StatusBadge } from "../components/ui.jsx";
 import { localTime, plural } from "../lib/format.js";
+import NewTokenForm from "../components/NewTokenForm.jsx";
 
 const RECORD_TYPES = [
   "action", "communication", "decision", "event", "lesson",
@@ -28,7 +29,7 @@ function scopeSummary(scope) {
   if (!scope) return "—";
   const parts = [];
   for (const key of ["types", "agents", "swarms"]) {
-    if (scope[key]?.length) parts.push(`${key}: ${scope[key].join(", ")}`);
+    if (scope[key]?.length) parts.push(`${key}: ${scope[key].map((v) => (v === null ? "free agents" : v)).join(", ")}`);
   }
   if (scope.payloads === true) parts.push("payloads");
   return parts.length ? parts.join(" · ") : "—";
@@ -66,14 +67,8 @@ export function splitTokens(tokens) {
   return { active, inactive };
 }
 
-/** Why a token form can't be sent yet, or null (#445: a token needs a record type). */
-export function tokenFormProblem(form) {
-  if (!form.name.trim()) return "Give the token a name.";
-  if (!splitList(form.types).length) {
-    return "Choose at least one record type: a token with none can read nothing.";
-  }
-  return null;
-}
+// The New token form's rules live with the form (#446); re-exported for #445's tests.
+export { tokenFormProblem } from "../lib/tokenScope.js";
 
 function copyToClipboard(text) {
   return navigator.clipboard?.writeText(text) ?? Promise.resolve();
@@ -109,7 +104,8 @@ export default function Access() {
   const { data: policyData, error: policyApiError, loading: policyLoading, reload: reloadPolicy } = useApi("/admin/enrollment/policy");
   // null | "new": whether the "new token" form is open.
   const [mode, setMode] = useState(null);
-  const [form, setForm] = useState({ name: "", types: "", agents: "", swarms: "", payloads: false, expires: "", owner: "", purpose: "" });
+  const members = useApi("/admin/members");
+  const swarmList = useApi("/admin/swarms");
   // Shown exactly once after creation, then cleared on reload.
   const [shown, setShown] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -254,22 +250,14 @@ export default function Access() {
     }
   }
 
-  async function createToken() {
+  async function createToken(body) {
     setFormError(null);
-    const scope = {};
-    if (form.payloads) scope.payloads = true;
-    for (const key of ["types", "agents", "swarms"]) {
-      const values = splitList(form[key]);
-      if (values.length) scope[key] = values;
-    }
-    const body = { name: form.name.trim(), scope, expires_at: form.expires || null, owner: form.owner.trim() || null, purpose: form.purpose.trim() || null };
-    const problem = tokenFormProblem(form);
-    if (problem) { setFormError(new Error(problem)); return; }
     setBusy(true);
     try {
       const created = await api("/admin/mcp/tokens", { method: "POST", body });
       setMode(null);
       setShown({ name: created.name, token: created.token });
+      reload();  // the new token shows in the list at once
     } catch (err) {
       setFormError(err);
     } finally {
@@ -646,53 +634,8 @@ export default function Access() {
         {mode === "new" && (
           <section className="mb-6 rounded-md border border-ink-line bg-ink p-4" aria-labelledby={`${fid}-h`}>
             <h2 id={`${fid}-h`} className="mb-3 text-lg font-bold">New token</h2>
-            <form onSubmit={(e) => { e.preventDefault(); createToken(); }}
-                  className="mb-4 flex flex-wrap items-end gap-2" aria-label="New token">
-              <label htmlFor={`${fid}-name`} className="block text-sm text-paper-muted">Name</label>
-              <input className="field h-11 w-48" value={form.name}
-                     onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                     placeholder="daily-read" id={`${fid}-name`} required />
-              <label htmlFor={`${fid}-owner`} className="block text-sm text-paper-muted">Owner</label>
-              <input className="field h-11 w-48" value={form.owner}
-                     onChange={(e) => setForm((f) => ({ ...f, owner: e.target.value }))}
-                     placeholder="Sean (Claude connector)" id={`${fid}-owner`} />
-              <label htmlFor={`${fid}-purpose`} className="block text-sm text-paper-muted">Purpose</label>
-              <input className="field h-11 w-48" value={form.purpose}
-                     onChange={(e) => setForm((f) => ({ ...f, purpose: e.target.value }))}
-                     placeholder="Daily read of robot outcomes" id={`${fid}-purpose`} />
-              <label htmlFor={`${fid}-types`} className="block text-sm text-paper-muted">Record types (required)</label>
-              <input className="field h-11 w-40" value={form.types}
-                     onChange={(e) => setForm((f) => ({ ...f, types: e.target.value }))}
-                     placeholder="event, thought" id={`${fid}-types`} required aria-required="true" />
-              <label htmlFor={`${fid}-agents`} className="block text-sm text-paper-muted">Members</label>
-              <input className="field h-11 w-40" value={form.agents}
-                     onChange={(e) => setForm((f) => ({ ...f, agents: e.target.value }))}
-                     placeholder="z3-r0" id={`${fid}-agents`} />
-              <label htmlFor={`${fid}-swarms`} className="block text-sm text-paper-muted">Swarms</label>
-              <input className="field h-11 w-40" value={form.swarms}
-                     onChange={(e) => setForm((f) => ({ ...f, swarms: e.target.value }))}
-                     placeholder="echo-base" id={`${fid}-swarms`} />
-              <label className="flex items-center gap-2 text-sm mt-2 cursor-pointer">
-                <input type="checkbox" checked={form.payloads}
-                       onChange={(e) => setForm((f) => ({ ...f, payloads: e.target.checked }))}
-                       className="accent-led h-5 w-5" id={`${fid}-payloads`} />
-                Include payloads
-              </label>
-              <p className="text-xs text-paper-muted">
-                With payloads off the token sees headers only (records' payloads stay on the server).
-              </p>
-              <label htmlFor={`${fid}-expires`} className="block text-sm text-paper-muted">Expires (optional)</label>
-              <input className="field h-11 w-40" type="date" value={form.expires}
-                     onChange={(e) => setForm((f) => ({ ...f, expires: e.target.value }))}
-                     id={`${fid}-expires`} />
-              <ErrorNote error={formError} />
-              <button type="submit" className="btn btn-primary h-11" disabled={busy}>Create token</button>
-              <button className="btn h-11" type="button" disabled={busy} onClick={() => setMode(null)}>Cancel</button>
-            </form>
-            <p className="mt-2 text-xs text-paper-muted">
-              Comma-separated values per field. Record types are required: a token reads only the types
-              it names. Empty Members or Swarms fields mean all members or all swarms.
-            </p>
+            <NewTokenForm members={members.data?.members} swarms={swarmList.data} busy={busy} error={formError}
+                          onCreate={createToken} onCancel={() => setMode(null)} />
           </section>
         )}
 

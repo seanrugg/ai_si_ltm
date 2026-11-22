@@ -166,3 +166,25 @@ describe("MCP tokens (#445)", () => {
     expect(screen.getByText(/Reads nothing: this token names no record types/)).toBeTruthy();
   });
 });
+
+describe("New token form on the Access page (#446)", () => {
+  it("creates with the form's body, then reloads the list", async () => {
+    const reload = vi.fn();
+    const { useApi } = await import("../api/useApi.js");
+    vi.mocked(useApi).mockImplementation((path) => {
+      if (path === "/admin/mcp") return { data: mcpData, error: null, loading: false, reload };
+      if (path === "/admin/enrollment/policy") return { data: policyData, error: null, loading: false, reload: () => {} };
+      return { data: null, error: null, loading: false, reload: () => {} };
+    });
+    vi.mocked(api).mockResolvedValueOnce({ id: "9", name: "reader", token: "ltms_x" });
+    renderAccess();
+    fireEvent.click(screen.getByRole("button", { name: "New token" }));
+    fireEvent.change(screen.getByLabelText("Name (required)"), { target: { value: "reader" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "lesson" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create token" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/admin/mcp/tokens", { method: "POST", body: {
+      name: "reader", scope: { types: ["lesson"] }, expires_at: null, owner: null, purpose: null } }));
+    await waitFor(() => expect(reload).toHaveBeenCalled());
+    expect(await screen.findByLabelText("New token value")).toBeTruthy();
+  });
+});

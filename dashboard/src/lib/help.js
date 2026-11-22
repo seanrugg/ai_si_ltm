@@ -104,3 +104,13 @@ export const NAV_CONFIGURE = "Set once, revisit rarely: server settings, MCP acc
 export const GET_STARTED = "Steps to set up a new fleet. Each ticks itself when it's done; the list goes away once the required ones are.";
 // #407: the room-level view under Geography's globe (#405; was Places & movement).
 export const CHOREOGRAPHY = "Choreography: where a member's body went, from its own pose readings, in its own frame.";
+
+// New MCP token form (#446): what each field limits, and what empty means.
+export const TOKEN_NAME = "A short name you'll recognise in the token list and the audit log, e.g. daily-read. Must be unique.";
+export const TOKEN_OWNER = "Who or what holds the token, e.g. Sean (Claude connector). Optional; helps when reviewing tokens later.";
+export const TOKEN_PURPOSE = "Why the token exists, e.g. daily read of robot outcomes. Optional; shown in the token list.";
+export const TOKEN_TYPES = "Which kinds of record the token can read. At least one: a token reads only the types it names. All types ticks every one.";
+export const TOKEN_MEMBERS = "Limit the token to these members' records. Leave empty to read every member's records (within the types and swarms chosen).";
+export const TOKEN_SWARMS = "Limit the token to records from these swarms; Free agents means members in no swarm. Leave empty for every swarm.";
+export const TOKEN_PAYLOADS = "Payloads are full record contents (sensor readings, message text). Without them the token reads headers only: summary, time, type, chain.";
+export const TOKEN_EXPIRES = "The token stops working at the start of this day. Never means it works until revoked. Tokens with payloads should expire.";
