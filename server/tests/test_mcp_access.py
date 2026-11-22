@@ -74,7 +74,7 @@ def test_mode_off_denies_with_token(db_url):
 
 
 # --------------------------------------------------------------------------- #
-# 2. Mode open, no token -> open scope; payloads always off.
+# 2. Mode open, no token -> open scope; payloads only when the open scope says so (#447).
 # --------------------------------------------------------------------------- #
 def test_mode_open_no_token_grants_open_scope(db_url):
     cfg = _make_config(
@@ -83,7 +83,11 @@ def test_mode_open_no_token_grants_open_scope(db_url):
         mcp_open_scope={"types": ["thought", "lesson"], "swarms": None, "payloads": True},
     )
     scope = _run_session(db_url, cfg, lambda s: mcp_access.resolve(s, cfg, None))
-    assert scope == Scope(types=["thought", "lesson"], agents=None, places=None, swarms=None)
+    assert scope == Scope(types=["thought", "lesson"], agents=None, places=None, swarms=None, payloads=True)
+    for off in ({"types": ["thought"], "swarms": None}, {"types": ["thought"], "swarms": None, "payloads": False}):
+        cfg = _make_config(db_url, mcp_read_mode="open", mcp_open_scope=off)
+        scope = _run_session(db_url, cfg, lambda s, cfg=cfg: mcp_access.resolve(s, cfg, None))
+        assert scope == Scope(types=["thought"], agents=None, places=None, swarms=None, payloads=False)
 
 
 # --------------------------------------------------------------------------- #

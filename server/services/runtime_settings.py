@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from server.config import ServerConfig
 from server.models import RuntimeSetting
 from server.models.base import utcnow
+from server.services.errors import ServiceError
 
 MCP_ACCESS_KEY = "mcp_access"
 ENROLLMENT_POLICY_KEY = "enrollment_policy"
@@ -95,6 +96,17 @@ async def resolve_mcp_access(
             "source": "dashboard",
         }
     return {**_env_mcp_access(cfg), "source": "environment"}
+
+
+def open_payloads(open_scope: dict | None) -> bool:
+    """Whether the open scope includes payloads (#447). Missing or anything but true: no."""
+    return (open_scope or {}).get("payloads") is True
+
+
+def check_open_payloads(open_scope: dict) -> None:
+    """``open_scope.payloads`` may be absent (= false) or a boolean (#447)."""
+    if "payloads" in open_scope and not isinstance(open_scope["payloads"], bool):
+        raise ServiceError(422, "bad_scope", "open_scope.payloads must be true or false")
 
 
 async def is_locked(cfg: ServerConfig) -> bool:

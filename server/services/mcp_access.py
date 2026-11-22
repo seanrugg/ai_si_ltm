@@ -187,8 +187,11 @@ async def resolve(
         return _scope_from_dict(row.scope)
 
     if mode == "open":
-        # No token: the open scope. Payloads are always off for open access.
-        return effective_scope(["recall:scoped"], open_scope)
+        # No token: the open scope. Headers only unless the admin turned on
+        # payloads for open access (#447); missing means off.
+        scope = effective_scope(["recall:scoped"], open_scope)
+        scope.payloads = (open_scope or {}).get("payloads") is True
+        return scope
 
     return None
 
@@ -204,5 +207,5 @@ def _scope_from_dict(scope: dict) -> Scope:
 
 
 def include_payloads(scope_dict: dict | None) -> bool:
-    """True only for a token scope with ``payloads: true``."""
+    """True only for a scope with ``payloads: true`` (a token's, or the open scope's, #447)."""
     return bool(scope_dict) and scope_dict.get("payloads") is True

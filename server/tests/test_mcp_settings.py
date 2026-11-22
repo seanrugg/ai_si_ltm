@@ -180,13 +180,14 @@ def test_put_switch_open_to_off_no_confirm(admin):
     assert r.json()["mode"] == "off"
 
 
-def test_put_payloads_stripped_from_open_scope(admin):
+def test_put_open_payloads_kept(admin):
+    # #447 (Sean, 18 Nov): the open scope may include payloads; before, they were stripped.
     r = admin.put("/api/admin/mcp/settings", json={
         "mode": "open", "open_scope": {"types": ["thought"], "payloads": True},
         "confirm": "open",
     })
     assert r.status_code == 200, r.text
-    assert r.json()["open_scope"] == {"types": ["thought"], "swarms": None}
+    assert r.json()["open_scope"] == {"types": ["thought"], "swarms": None, "payloads": True}
 
 
 # --------------------------------------------------------------------------- #
@@ -378,3 +379,39 @@ def test_open_scope_swarms_must_be_names_or_null(admin):
     ok = admin.put("/api/admin/mcp/settings",
                    json={"mode": "token", "open_scope": {"types": [], "swarms": ["echo-base", None]}})
     assert ok.status_code == 200, ok.text
+
+
+# --------------------------------------------------------------------------- #
+# #447: open payloads
+# --------------------------------------------------------------------------- #
+def test_open_payloads_must_be_boolean(admin):
+    for bad in ("yes", 1, None, [True]):
+        r = admin.put("/api/admin/mcp/settings", json={
+            "mode": "open", "open_scope": {"types": ["thought"], "payloads": bad}, "confirm": "open"})
+        assert r.status_code == 422, (bad, r.text)
+        assert r.json()["error"]["code"] == "bad_scope"
+
+
+def test_turning_on_open_payloads_needs_confirm_and_is_audited(admin):
+    base = {"mode": "open", "open_scope": {"types": ["thought"], "swarms": None}}
+    assert admin.put("/api/admin/mcp/settings", json={**base, "confirm": "open"}).status_code == 200
+    on = {"mode": "open", "open_scope": {"types": ["thought"], "swarms": None, "payloads": True}}
+    r = admin.put("/api/admin/mcp/settings", json=on)
+    assert r.status_code == 422 and r.json()["error"]["code"] == "confirm_required"
+    assert admin.put("/api/admin/mcp/settings", json={**on, "confirm": "open"}).status_code == 200
+    assert admin.get("/api/admin/nav-status").json()["open_payloads"] is True
+    # Turning it off again narrows access: no confirm needed.
+    assert admin.put("/api/admin/mcp/settings", json=base).status_code == 200
+    assert admin.get("/api/admin/nav-status").json()["open_payloads"] is False
+    rows = admin.get("/api/admin/recall-log", params={"action": "mcp_settings_change"}).json()["entries"]
+    by_new = [(e["detail"]["old"]["open_scope"].get("payloads"), e["detail"]["new"]["open_scope"].get("payloads"))
+              for e in sorted(rows, key=lambda e: e["ts"])]
+    assert (None, True) in by_new and (True, None) in by_new
+
+
+def test_open_payloads_from_the_environment_are_validated():
+    import pytest
+    from server.config import load_config
+    with pytest.raises(ValueError):
+        load_config(mcp_open_scope={"types": ["thought"], "payloads": "yes"})
+    assert load_config(mcp_open_scope={"types": ["thought"], "payloads": True}).mcp_open_scope["payloads"] is True

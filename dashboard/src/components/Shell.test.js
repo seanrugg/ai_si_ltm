@@ -176,3 +176,20 @@ describe("Shell nav (#379)", () => {
     expect(screen.queryByText(/directive declines since you last looked/)).toBeNull();
   });
 });
+
+describe("open payloads banner (#447)", () => {
+  it("shows on every page while open payloads are on, linking to Access", async () => {
+    mockStatus({ open_payloads: true });
+    renderAt("/timeline");
+    const banner = await screen.findByText("Open MCP access includes payloads");
+    expect(within(banner.closest("[role=status]")).getByRole("link", { name: "Turn off" }).getAttribute("href"))
+      .toBe("/access");
+  });
+
+  it("is absent when they're off", async () => {
+    mockStatus({ open_payloads: false });
+    renderAt("/timeline");
+    await waitFor(() => expect(api).toHaveBeenCalled());
+    expect(screen.queryByText("Open MCP access includes payloads")).toBeNull();
+  });
+});

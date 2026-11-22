@@ -4,17 +4,22 @@ import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, Loading, PageHeader, StatusBadge } from "../components/ui.jsx";
 import { localTime, plural } from "../lib/format.js";
 import NewTokenForm from "../components/NewTokenForm.jsx";
+import HelpTip from "../components/HelpTip.jsx";
+import { OPEN_PAYLOADS } from "../lib/help.js";
 
 const RECORD_TYPES = [
   "action", "communication", "decision", "event", "lesson",
   "perception", "policy", "system", "thought",
 ];
 
-const MODE_LABELS = {
-  off: ["Off", "No MCP reads are allowed."],
-  token: ["Token", "Only a presented, valid read token grants access."],
-  open: ["Open", "Anyone can read the open scope (headers only, never payloads)."],
-};
+/** The read-mode radios; Open's text follows the open scope's payloads setting (#447). */
+export function modeLabels(openPayloads) {
+  return {
+    off: ["Off", "No MCP reads are allowed."],
+    token: ["Token", "Only a presented, valid read token grants access."],
+    open: ["Open", `Anyone can read the open scope (${openPayloads ? "headers and payloads" : "headers only"}).`],
+  };
+}
 
 const splitList = (s) => s.split(",").map((x) => x.trim()).filter(Boolean);
 
@@ -96,6 +101,7 @@ export function settingsFormFrom(data) {
     mode: data?.mode ?? "off",
     types: new Set(scope.types ?? []),
     swarms: Array.isArray(scope.swarms) ? scope.swarms.filter((s) => s !== null).join(", ") : "",
+    payloads: scope.payloads === true,
   };
 }
 
@@ -124,6 +130,7 @@ export default function Access() {
   const [openSwarms, setOpenSwarms] = useState(
     Array.isArray(data?.open_scope?.swarms) ? data.open_scope.swarms.join(", ") : "",
   );
+  const [openPayloads, setOpenPayloads] = useState(data?.open_scope?.payloads === true);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [settingsError, setSettingsError] = useState(null);
@@ -146,6 +153,7 @@ export default function Access() {
     setSettingsMode(f.mode);
     setOpenTypes(f.types);
     setOpenSwarms(f.swarms);
+    setOpenPayloads(f.payloads);
     setConfirmOpen(false);
   }, [loadedMode, loadedScope]);
 
@@ -183,6 +191,7 @@ export default function Access() {
       if (curSwarms !== null && newSwarms === null) return true;
       if (curSwarms !== null && newSwarms !== null && newSwarms.some((s) => !curSwarms.includes(s)))
         return true;
+      if (openPayloads && !(data?.mode === "open" && cur.payloads === true)) return true; // #447
     }
     return false;
   }
@@ -192,13 +201,15 @@ export default function Access() {
   async function saveSettings() {
     setSettingsError(null);
     if (showConfirm && !confirmOpen) {
-      setSettingsError(new Error("Confirm that you understand anyone on the internet can read these record summaries."));
+      setSettingsError(new Error(openPayloads
+        ? "Confirm that you understand anyone on the internet can read these records, payloads included."
+        : "Confirm that you understand anyone on the internet can read these record summaries."));
       return;
     }
     const newSwarms = openSwarms.trim() ? splitList(openSwarms) : null;
     const body = {
       mode: settingsMode,
-      open_scope: { types: [...openTypes], swarms: newSwarms },
+      open_scope: { types: [...openTypes], swarms: newSwarms, payloads: openPayloads },
     };
     if (showConfirm) body.confirm = "open";
     setSettingsBusy(true);
@@ -406,7 +417,8 @@ export default function Access() {
         <fieldset disabled={locked}>
           <legend className="mb-2 text-sm font-bold text-paper-muted">Read mode</legend>
           <div className="space-y-2">
-            {Object.entries(MODE_LABELS).map(([key, [label, desc]]) => {
+            {Object.entries(modeLabels(settingsMode === "open" ? openPayloads : data.open_scope?.payloads === true))
+              .map(([key, [label, desc]]) => {
               const checked = settingsMode === key;
               return (
                 <label key={key} className="flex items-start gap-3 cursor-pointer">
@@ -425,11 +437,13 @@ export default function Access() {
 
         {settingsMode === "open" && (
           <fieldset disabled={locked}>
-            <legend className="mt-6 mb-2 text-sm font-bold text-paper-muted">Open scope (headers only, never payloads)</legend>
+            <legend className="mt-6 mb-2 text-sm font-bold text-paper-muted">
+              Open scope ({openPayloads ? "headers and payloads" : "headers only"})
+            </legend>
             <div className="space-y-3">
               <div>
                 <p className="mb-2 text-sm text-paper-muted">Record types</p>
-                <div className="grid grid-cols-3 gap-2 text-sm">
+                <div className="grid grid-cols-3 gap-2 text-sm" id="open-types">
                   {RECORD_TYPES.map((type) => {
                     const selected = openTypes.has(type);
                     return (
@@ -442,6 +456,22 @@ export default function Access() {
                     );
                   })}
                 </div>
+              </div>
+              <div>
+                <span className="flex items-center gap-2 text-sm">
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input type="checkbox" checked={openPayloads} className="accent-led h-5 w-5"
+                           aria-describedby={openPayloads ? "open-payloads-warn" : undefined}
+                           onChange={(e) => setOpenPayloads(e.target.checked)} />
+                    Include payloads
+                  </label>
+                  <HelpTip id="open-payloads-help" label="About open payloads">{OPEN_PAYLOADS}</HelpTip>
+                </span>
+                {openPayloads && (
+                  <p id="open-payloads-warn" className="mt-1 text-sm font-bold text-warn" role="note">
+                    Anyone who can reach this server can read full record contents for these record types and swarms.
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm text-paper-muted mb-1">Swarms (comma-separated, empty = all)</label>
@@ -464,9 +494,13 @@ export default function Access() {
                      onChange={(e) => setConfirmOpen(e.target.checked)}
                      className="accent-led mt-0.5 h-5 w-5" disabled={locked} />
               <div>
-                <span className="font-semibold">I understand anyone on the internet can read these record summaries.</span>
+                <span className="font-semibold">
+                  {openPayloads
+                    ? "I understand anyone on the internet can read these records, payloads included."
+                    : "I understand anyone on the internet can read these record summaries."}
+                </span>
                 <p className="mt-1 text-xs text-paper-muted">
-                  Payloads are never part of the open scope. Headers only.
+                  {openPayloads ? "Full record contents: sensor readings, message text." : "Headers only: no payloads."}
                 </p>
               </div>
             </label>

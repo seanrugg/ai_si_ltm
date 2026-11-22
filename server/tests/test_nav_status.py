@@ -22,7 +22,7 @@ def test_empty_fleet(admin):
     body = r.json()
     assert datetime.fromisoformat(body.pop("as_of")).tzinfo is not None
     assert body == {"members_pending": 0, "charter_overdue": 0, "directive_declines": 0,
-                        "lrs_failing": 0, "setup": EMPTY_SETUP}
+                        "lrs_failing": 0, "setup": EMPTY_SETUP, "open_payloads": False}
 
 
 def test_requires_admin(http):
