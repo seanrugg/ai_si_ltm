@@ -70,3 +70,50 @@ def test_cli_prints_the_profile(capsys, tmp_path):
     assert main(["hardware", "--data-dir", str(tmp_path)]) == 0
     out = json.loads(capsys.readouterr().out)
     assert set(out) == {"version", "facts", "profile"}
+
+
+def test_spec_sheet_from_a_jetson_like_board(tmp_path, monkeypatch):
+    root = _fake_root(tmp_path, ram_kb=8 * 1024 * 1024, os_name="Ubuntu 22.04.5 LTS",
+                      devices=("nvhost-ctrl",))
+    (root / "proc" / "device-tree").mkdir()
+    (root / "proc" / "device-tree" / "model").write_text("NVIDIA Jetson Orin Nano Developer Kit\x00")
+    monkeypatch.setattr(hardware, "_total_disk", lambda path: 233 * hardware.GIB)
+    res = hardware.detect(str(tmp_path), str(root))
+    assert res["facts"]["board"] == "NVIDIA Jetson Orin Nano Developer Kit"
+    sheet = hardware.spec_sheet(res, "ltms-hub")
+    hw = sheet["hardware"]
+    assert hw["board"] == "NVIDIA Jetson Orin Nano Developer Kit"
+    assert hw["ram_mib"] == 8192 and hw["storage_gib"] == 233
+    assert hw["accelerators"] == ["CUDA GPU"]
+    assert sheet["software"]["os"] == "Ubuntu 22.04.5 LTS" and sheet["software"]["harness"] == "ltms-hub"
+    assert "models" not in sheet  # left to the cognition report
+
+
+def test_spec_sheet_is_valid_for_the_server_and_leaves_out_unknowns():
+    from server.services import specs
+    sheet = hardware.spec_sheet({"facts": {"board": "x" * 200, "cpus": 4}}, "ltms-hub")
+    assert sheet["hardware"] == {"board": "x" * 64, "cores": 4}
+    assert specs.validate(sheet) == sheet
+    assert specs.validate(hardware.spec_sheet({}, "ltms-hub"))["software"]["harness"] == "ltms-hub"
+
+
+def test_hub_reports_its_specs_and_survives_failure(tmp_path):
+    from types import SimpleNamespace
+    from cli_agent import hub_main
+
+    sent = []
+
+    class Client:
+        def report_specs(self, sheet):
+            sent.append(sheet)
+            return sheet
+
+    cfg = SimpleNamespace(outbox_path=str(tmp_path / "outbox.db"))
+    hub_main.report_own_specs(Client(), cfg)
+    assert sent and sent[0]["software"]["harness"] == "ltms-hub"
+
+    class Broken:
+        def report_specs(self, sheet):
+            raise RuntimeError("boom")
+
+    hub_main.report_own_specs(Broken(), cfg)  # logged, never raised

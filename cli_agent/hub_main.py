@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass
 from typing import Mapping
 
+from cli_agent import hardware
 from cli_agent.client import LTMSClient
 from cli_agent.hub import HeartbeatTimer, Hub
 from cli_agent.member_link import MemberLink
@@ -227,6 +228,18 @@ def make_on_message(hub):
     return on_message
 
 
+def report_own_specs(ltms_client, cfg) -> None:
+    """Tell LTMS what this hub runs on, once at start (#332). An identical re-report
+    changes nothing on the server; a failure is logged and never stops the hub."""
+    try:
+        data_dir = os.path.dirname(os.path.abspath(cfg.outbox_path))
+        sheet = hardware.spec_sheet(hardware.detect(data_dir), "ltms-hub")
+        if ltms_client.report_specs(sheet) is not None:
+            logging.info("Hub: spec sheet reported (%s)", ", ".join(sorted(sheet)))
+    except Exception:  # noqa: BLE001 - specs are best effort
+        logging.exception("Hub: spec sheet not reported")
+
+
 def make_on_connect(swarm):
     """``swarm`` is one topic prefix or a list of them (topic ID first, then a legacy name)."""
     prefixes = [swarm] if isinstance(swarm, str) else list(swarm)
@@ -255,6 +268,7 @@ def main() -> None:
     name, key = load_key(cfg.key_path)
     ltms_client = LTMSClient(cfg.ltms_server, key_path=cfg.key_path)
     outbox = Outbox(cfg.outbox_path)
+    report_own_specs(ltms_client, cfg)
 
     # clean_session=False: the broker queues QoS 1 records for the hub while it is down.
     mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=name, clean_session=False)
