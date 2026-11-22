@@ -317,6 +317,19 @@ def _call(http, tool="list_members", ip=None, token=None, arguments=None):
     return _rpc(http, "tools/call", {"name": tool, "arguments": arguments or {}}, token=token).json()
 
 
+def _deny_n(http, n, **kw):
+    """Call until ``n`` calls were refused (the bucket refills 1/s, so a slow run
+    lets the odd call through); returns the refusals' data."""
+    refused = []
+    for _ in range(n + 400):
+        body = _call(http, **kw)
+        if "error" in body:
+            refused.append(body["error"]["data"])
+            if len(refused) == n:
+                return refused
+    raise AssertionError(f"only {len(refused)} of {n} calls were refused")
+
+
 def _audit(admin):
     return admin.get("/api/admin/recall-log", params={"action": "mcp_rate_limited"}).json()["entries"]
 
@@ -382,10 +395,7 @@ def test_a_hundred_denials_make_one_audit_row_and_one_log_line(db_url, caplog):
     denials = app.state.mcp_denials
     start = mcp_remote.DenialLog.window_of(denials.clock()) + 1  # pin one minute for the test
     denials.clock = lambda: start
-    for _ in range(mcp_remote.CALLER_LIMIT):
-        _call(http, ip="10.9.9.9")
-    for _ in range(100):
-        assert _call(http, ip="10.9.9.9")["error"]["data"]["reason"] == "per_caller"
+    assert all(d["reason"] == "per_caller" for d in _deny_n(http, 100, ip="10.9.9.9"))
     assert _audit(admin) == []  # nothing written while the minute is open
 
     denials.clock = lambda: start + 60  # the next minute: the scheduler writes the ended one
@@ -413,8 +423,7 @@ def test_token_denials_are_logged_by_name_never_the_token(db_url):
     denials = app.state.mcp_denials
     start = mcp_remote.DenialLog.window_of(denials.clock()) + 1
     denials.clock = lambda: start
-    for _ in range(mcp_remote.CALLER_LIMIT + 3):
-        _call(http, token=plaintext)
+    _deny_n(http, 3, token=plaintext)
     denials.clock = lambda: start + 60
     # The first denial of the next minute writes the ended minute.
     assert _call(http, token=plaintext)["error"]["data"]["reason"] == "per_caller"
@@ -435,3 +444,33 @@ def test_denial_log_caps_the_callers_it_tracks(monkeypatch):
     ended = sorted((w["key"], w["denied"]) for w in d.take_ended())
     assert ended == [("(many)", 3), ("a", 1), ("b", 1)]
     assert d.take_ended() == []
+
+
+def test_a_tool_call_records_token_use(db_url):
+    """#445: resolve's usage update used to be rolled back (the tools never commit)."""
+    http, admin, _app = _make_app(db_url, mcp_read_mode="token")
+    plaintext = admin.post("/api/admin/mcp/tokens", json={"name": "counted", "scope": {"types": ["event"]}}).json()["token"]
+    _initialize(http)
+    before = admin.get("/api/admin/mcp/tokens").json()["tokens"][0]
+    assert before["use_count"] == 0 and before["last_used_at"] is None
+    for tool in ("list_members", "search_records", "integrity_report"):
+        assert "error" not in _call(http, tool=tool, token=plaintext)
+    after = admin.get("/api/admin/mcp/tokens").json()["tokens"][0]
+    assert after["use_count"] == 3 and after["last_used_at"] is not None
+    # A refused call (here: no such record) after the checks still counts as a use.
+    _call(http, tool="get_record", token=plaintext, arguments={"agent": "nobody", "seq": 1})
+    assert admin.get("/api/admin/mcp/tokens").json()["tokens"][0]["use_count"] == 4
+
+
+def test_rate_limited_token_calls_are_not_counted(db_url):
+    http, admin, _app = _make_app(db_url, mcp_read_mode="token")
+    plaintext = admin.post("/api/admin/mcp/tokens", json={"name": "busy", "scope": {"types": ["event"]}}).json()["token"]
+    _initialize(http)
+    ok = refused = 0
+    while refused < 5:
+        if "error" in _call(http, token=plaintext):
+            refused += 1
+        else:
+            ok += 1
+    assert ok >= mcp_remote.CALLER_LIMIT
+    assert admin.get("/api/admin/mcp/tokens").json()["tokens"][0]["use_count"] == ok

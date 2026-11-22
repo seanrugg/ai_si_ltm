@@ -45,6 +45,23 @@ def _validate_mcp_scope(scope: dict | None) -> dict:
     return scope
 
 
+def require_types(scope: dict | None) -> None:
+    """A new token must name at least one record type (#445).
+
+    Scopes are deny-by-default: no ``types`` means no records, so a token
+    without them would read nothing, silently. Checked where admins create
+    tokens (``POST /admin/mcp/tokens``).
+    """
+    types = (scope or {}).get("types")
+    if not isinstance(types, list) or not types:
+        raise ServiceError(422, "bad_scope", "a token needs at least one record type")
+
+
+def reads_nothing(scope: dict | None) -> bool:
+    """True for a token scope that can't read any record (no types)."""
+    return not (scope or {}).get("types")
+
+
 async def create(
     session: AsyncSession,
     *,
@@ -88,6 +105,8 @@ async def revoke(session: AsyncSession, token_id, *, actor: str) -> None:
     row = await session.get(McpToken, token_id)
     if row is None:
         raise ServiceError(404, "not_found", "token not found")
+    if row.revoked_at is not None:
+        return  # already revoked: keep the first time, and don't audit twice
     row.revoked_at = datetime.now(timezone.utc)
     session.add(
         AuditLog(actor=actor, action="mcp_token_revoke",
@@ -95,8 +114,35 @@ async def revoke(session: AsyncSession, token_id, *, actor: str) -> None:
     )
 
 
+async def delete(session: AsyncSession, token_id, *, actor: str) -> None:
+    """Delete a revoked or expired token (#445). An active token must be revoked first.
+
+    Its create and revoke rows stay in the audit log; this adds ``mcp_token_delete``.
+    """
+    row = await session.get(McpToken, token_id)
+    if row is None:
+        raise ServiceError(404, "not_found", "token not found")
+    now = datetime.now(timezone.utc)
+    expired = row.expires_at is not None and row.expires_at <= now
+    if row.revoked_at is None and not expired:
+        raise ServiceError(409, "token_active", "revoke the token before deleting it")
+    session.add(AuditLog(actor=actor, action="mcp_token_delete",
+                         detail={"name": row.name, "scope": row.scope, "revoked": row.revoked_at is not None,
+                                 "expired": expired}))
+    await session.delete(row)
+
+
+async def record_use(session: AsyncSession, presented: str) -> None:
+    """Count one use of a token: ``use_count + 1`` and ``last_used_at = now``."""
+    await session.execute(
+        update(McpToken)
+        .where(McpToken.token_hash == _token_hash(presented.strip()))
+        .values(last_used_at=datetime.now(timezone.utc), use_count=McpToken.use_count + 1)
+    )
+
+
 async def resolve(
-    session: AsyncSession, cfg: ServerConfig, presented: str | None
+    session: AsyncSession, cfg: ServerConfig, presented: str | None, *, count_use: bool = True
 ) -> Scope | None:
     """The read scope for an incoming MCP request, or ``None`` = denied.
 
@@ -109,6 +155,9 @@ async def resolve(
     (no cache), so a dashboard change takes effect on the next MCP request
     without a restart. The database value wins over the environment when a
     ``mcp_access`` row exists; otherwise the environment applies.
+
+    ``count_use=False`` skips the usage update; the caller then calls
+    ``record_use`` itself (the MCP endpoint does, after its rate limits, #445).
     """
     effective = await resolve_mcp_access(session, cfg)
     mode = effective["mode"]
@@ -128,12 +177,13 @@ async def resolve(
             return None
         if row.expires_at is not None and row.expires_at <= datetime.now(timezone.utc):
             return None
-        now = datetime.now(timezone.utc)
-        await session.execute(
-            update(McpToken)
-            .where(McpToken.id == row.id)
-            .values(last_used_at=now, use_count=McpToken.use_count + 1)
-        )
+        if count_use:
+            now = datetime.now(timezone.utc)
+            await session.execute(
+                update(McpToken)
+                .where(McpToken.id == row.id)
+                .values(last_used_at=now, use_count=McpToken.use_count + 1)
+            )
         return _scope_from_dict(row.scope)
 
     if mode == "open":

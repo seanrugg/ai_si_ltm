@@ -1330,11 +1330,22 @@ def _mcp_token_to_dict(t: McpToken) -> dict:
         "purpose": t.purpose,
         "use_count": t.use_count,
         "stale": _is_stale(t),
+        "state": _token_state(t),
+        "reads_nothing": mcp_access.reads_nothing(t.scope),
         "created_at": t.created_at.isoformat() if t.created_at else None,
         "expires_at": t.expires_at.isoformat() if t.expires_at else None,
         "revoked_at": t.revoked_at.isoformat() if t.revoked_at else None,
         "last_used_at": t.last_used_at.isoformat() if t.last_used_at else None,
     }
+
+
+def _token_state(t: McpToken) -> str:
+    """``active``, ``revoked`` or ``expired`` (#445: the list shows active tokens first)."""
+    if t.revoked_at is not None:
+        return "revoked"
+    if t.expires_at is not None and t.expires_at <= datetime.now(timezone.utc):
+        return "expired"
+    return "active"
 
 
 def _is_stale(t: McpToken) -> bool:
@@ -1624,6 +1635,7 @@ async def retention_put(request: Request, body: RetentionUpdate, admin: AdminAut
 @router.post("/admin/mcp/tokens")
 async def create_mcp_token(request: Request, body: McpTokenCreate, admin: AdminAuth = ADMIN) -> dict:
     """Create a read token. The plaintext is returned exactly once."""
+    mcp_access.require_types(body.scope)  # #445: a token without types would read nothing
     async with transaction(request) as session:
         row, plaintext = await mcp_access.create(
             session,
@@ -1641,6 +1653,14 @@ async def create_mcp_token(request: Request, body: McpTokenCreate, admin: AdminA
 async def revoke_mcp_token(token_id: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
     async with transaction(request) as session:
         await mcp_access.revoke(session, _uuid(token_id), actor=f"admin:{admin.username}")
+        return {"ok": True}
+
+
+@router.delete("/admin/mcp/tokens/{token_id}")
+async def delete_mcp_token(token_id: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    """Delete a revoked or expired token (#445); 409 for an active one."""
+    async with transaction(request) as session:
+        await mcp_access.delete(session, _uuid(token_id), actor=f"admin:{admin.username}")
         return {"ok": True}
 
 
