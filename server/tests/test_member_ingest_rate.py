@@ -67,3 +67,10 @@ def test_member_list_shows_when_ingest_was_refused(mesh, admin, monkeypatch):
     assert z3.http.post("/api/records", json={"records": [second]}, headers=headers).status_code == 429
 
     assert _listed(admin, "z3-r0")["ingest_refused_at"] is not None
+
+
+def test_member_list_includes_the_server_default(mesh, admin, app):
+    """#451: the dashboard shows "server default (N records/s)" without knowing LTMS_INGEST_RATE."""
+    mesh.member("z3-r0")
+    body = admin.get("/api/admin/members").json()
+    assert body["ingest_rate_default"] == app.state.config.ingest_rate == 1000  # the test config's value

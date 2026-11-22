@@ -115,3 +115,4 @@ export const TOKEN_SWARMS = "Limit the token to records from these swarms; Free 
 export const TOKEN_PAYLOADS = "Payloads are full record contents (sensor readings, message text). Without them the token reads headers only: summary, time, type, chain.";
 export const TOKEN_EXPIRES = "The token stops working at the start of this day. Never means it works until revoked. Tokens with payloads should expire.";
 export const OPEN_PAYLOADS = "Off: open callers read headers only (summary, time, type). On: they also read full record contents for the types and swarms above, with no token. Turn it off when you're done.";
+export const INGEST_RATE_HELP = "Records over the limit wait in the member's outbox and are sent later; nothing is lost. A hub is charged for every record it relays for its swarm, so a busy hub may need a higher limit.";

@@ -220,7 +220,8 @@ async def list_members(request: Request, status: str | None = None, free_agent: 
             at = refused.get(str(m.id))  # in-process, so it resets when the server restarts (#438)
             d["ingest_refused_at"] = at.isoformat() if at else None
             members.append(d)
-        return {"members": members}
+        # The global LTMS_INGEST_RATE (#451): what a member without its own limit gets.
+        return {"members": members, "ingest_rate_default": request.app.state.config.ingest_rate}
 
 
 @router.get("/admin/members/pending")

@@ -5,7 +5,7 @@ import React from "react";
 import { MemoryRouter } from "react-router-dom";
 
 afterEach(() => cleanup());
-import { filterMembers, default as Members } from "./Members.jsx";
+import { filterMembers, ingestRateProblem, ingestRateText, default as Members } from "./Members.jsx";
 import { api } from "../api/client.js";
 
 const members = {
@@ -23,10 +23,13 @@ const swarms = [
 let allMembers;
 let bulkResults;
 let swarmsData = swarms;
+let ingestDefault = 10;
 let locationsData = null;
 vi.mock("../api/useApi.js", () => ({
   useApi: vi.fn((path) => {
-    if (path === "/admin/members") return { data: { members: allMembers }, error: null, loading: false, reload: () => {} };
+    if (path === "/admin/members") {
+      return { data: { members: allMembers, ingest_rate_default: ingestDefault }, error: null, loading: false, reload: () => {} };
+    }
     if (path === "/admin/swarms") return { data: swarmsData, loading: false, reload: () => {} };
     if (path === "/admin/locations") return { data: locationsData, error: null, loading: false, reload: () => {} };
     return { data: null, error: null, loading: false, reload: () => {} };
@@ -408,5 +411,77 @@ describe("one swarm/role row per member (#392)", () => {
       expect(forms(name)).toHaveLength(1);
       expect(within(forms(name)[0]).getByLabelText(`Swarm for ${name}`).value).toBe("");
     }
+  });
+});
+
+describe("ingest rate limit control (#451)", () => {
+  const writer = (extra = {}) => ({ id: 7, name: "vector", status: "active", kind: "robot", permissions: ["contribute", "recall"],
+    last_ack_seq: 0, last_seen_at: null, ingest_rate: null, cognition: null, ...extra });
+  const form = () => screen.getByRole("form", { name: "Ingest limit for vector" });
+  const input = () => within(form()).getByLabelText("Ingest limit for vector, records per second");
+
+  afterEach(() => cleanup());
+  beforeEach(() => {
+    ingestDefault = 10;
+    vi.mocked(api).mockReset();
+    vi.mocked(api).mockResolvedValue({});
+  });
+
+  it("shows the server default, and sets 2.5 with a labelled Save", async () => {
+    allMembers = [writer()];
+    renderMembers();
+    expect(within(form()).getByText("Ingest limit: server default (10 records/s)")).toBeTruthy();
+    expect(within(form()).queryByRole("button", { name: /Use the server default/ })).toBeNull();
+    fireEvent.change(input(), { target: { value: "2.5" } });
+    fireEvent.click(within(form()).getByRole("button", { name: "Save ingest limit for vector" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/admin/members/7/ingest-rate",
+      { method: "PATCH", body: { ingest_rate: 2.5 } }));
+  });
+
+  it("after a refresh shows the override and badge; Use server default clears it", async () => {
+    allMembers = [writer({ ingest_rate: 2.5 })];
+    renderMembers();
+    expect(within(form()).getByText("Ingest limit: 2.5 records/s (override)")).toBeTruthy();
+    expect(screen.getByText("Limit 2.5/s")).toBeTruthy();
+    fireEvent.click(within(form()).getByRole("button", { name: "Use the server default ingest limit for vector" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/admin/members/7/ingest-rate",
+      { method: "PATCH", body: { ingest_rate: null } }));
+  });
+
+  it("refuses 0, -1, 20000 and text with a visible error, and sends nothing", () => {
+    allMembers = [writer()];
+    renderMembers();
+    for (const bad of ["0", "-1", "20000", "abc", ""]) {
+      fireEvent.change(input(), { target: { value: bad } });
+      fireEvent.click(within(form()).getByRole("button", { name: "Save ingest limit for vector" }));
+      expect(within(form()).getByRole("alert").textContent.length).toBeGreaterThan(0);
+    }
+    expect(api).not.toHaveBeenCalled();
+    expect(ingestRateProblem("abc")).toMatch(/must be a number/);
+    expect(ingestRateProblem("0")).toMatch(/above 0/);
+    expect(ingestRateProblem("20000")).toMatch(/at most 10000/);
+    expect(ingestRateProblem("2.5")).toBeNull();
+  });
+
+  it("shows the server's 422", async () => {
+    allMembers = [writer()];
+    vi.mocked(api).mockRejectedValueOnce(Object.assign(new Error("ingest_rate is a number of records per second"), { status: 422 }));
+    renderMembers();
+    fireEvent.change(input(), { target: { value: "5" } });
+    fireEvent.click(within(form()).getByRole("button", { name: "Save ingest limit for vector" }));
+    expect(await within(form()).findByRole("alert")).toBeTruthy();
+    expect(within(form()).getByText("ingest_rate is a number of records per second")).toBeTruthy();
+  });
+
+  it("isn't shown for members who can't write", () => {
+    allMembers = [writer({ permissions: ["recall"] })];
+    renderMembers();
+    expect(screen.queryByRole("form", { name: "Ingest limit for vector" })).toBeNull();
+  });
+
+  it("words the state", () => {
+    expect(ingestRateText(null, 10)).toBe("Ingest limit: server default (10 records/s)");
+    expect(ingestRateText(null, undefined)).toBe("Ingest limit: server default");
+    expect(ingestRateText(2.5, 10)).toBe("Ingest limit: 2.5 records/s (override)");
   });
 });
