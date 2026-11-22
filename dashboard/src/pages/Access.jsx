@@ -34,6 +34,23 @@ function scopeSummary(scope) {
   return parts.length ? parts.join(" · ") : "—";
 }
 
+/** "1 call per caller / 300 shared" style text for the rate limits (#443). */
+export function limitsText(data) {
+  const caller = data?.caller_limit ?? 60;
+  const budget = data?.open_budget;
+  const shared = budget === undefined || budget === null ? null
+    : budget > 0 ? `all tokenless callers together: ${budget} calls/min` : "no shared limit for tokenless callers";
+  return `${caller} calls/min per caller${shared ? `; ${shared}` : ""}`;
+}
+
+/** "Rate-limited calls (last 24 h)": total and the two reasons (#443). */
+export function rateLimitedText(summary) {
+  if (!summary) return null;
+  const r = summary.by_reason || {};
+  if (!summary.total) return "None";
+  return `${summary.total} (per caller: ${r.per_caller ?? 0}, shared open limit: ${r.open_budget ?? 0})`;
+}
+
 function tokenStatus(token) {
   if (token.revoked_at) return "revoked";
   if (token.expires_at && new Date(token.expires_at) <= new Date()) return "expired";
@@ -382,6 +399,16 @@ export default function Access() {
             <>
               <dt>Locked</dt>
               <dd>Yes — by the server environment</dd>
+            </>
+          )}
+          <dt>Rate limits</dt>
+          <dd>
+            {limitsText(data)} <span className="text-paper-faint">(<code className="hash">LTMS_MCP_OPEN_BUDGET</code>; read-only here)</span>
+          </dd>
+          {data.rate_limited_24h && (
+            <>
+              <dt>Rate-limited calls (last 24 h)</dt>
+              <dd>{rateLimitedText(data.rate_limited_24h)}</dd>
             </>
           )}
         </dl>

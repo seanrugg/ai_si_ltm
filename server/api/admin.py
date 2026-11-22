@@ -21,6 +21,7 @@ from server.api.schemas import (AdminLogin, ApproveRequest, BulkMembersRequest,
                                 SwarmMode)
 from server.models import (AuditLog, EnrollmentSwarmRequest, IntegrityRun, Member, McpToken, Record, RecordPayload,
                            RecordProvenance, RuntimeSetting, Swarm, SwarmMember)
+from server.mcp_remote import CALLER_LIMIT
 from server.services import auth as auth_service
 from server.services import conversation as conversation_service, enrollment, integrity, lrs as lrs_service, mcp_access, policy_lifecycle, recall, runtime_settings, swarms
 from server.services import export as export_service
@@ -1357,6 +1358,21 @@ def _is_stale(t: McpToken) -> bool:
 # --------------------------------------------------------------------------- #
 # MCP read access (issue #106)
 # --------------------------------------------------------------------------- #
+async def _mcp_rate_limited_24h(session) -> dict:
+    """Denied MCP calls in the last 24 h, by reason, from the per-minute audit rows (#443).
+
+    The minute in progress isn't counted until the scheduler writes it.
+    """
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    by_reason = {"per_caller": 0, "open_budget": 0}
+    rows = await session.scalars(select(AuditLog.detail).where(
+        AuditLog.action == "mcp_rate_limited", AuditLog.ts >= since))
+    for detail in rows:
+        reason = (detail or {}).get("reason")
+        by_reason[reason] = by_reason.get(reason, 0) + int((detail or {}).get("denied") or 0)
+    return {"total": sum(by_reason.values()), "by_reason": by_reason}
+
+
 @router.get("/admin/mcp")
 async def mcp_settings(request: Request, admin: AdminAuth = ADMIN) -> dict:
     """MCP read mode, open scope and the current tokens (hashes withheld)."""
@@ -1368,11 +1384,15 @@ async def mcp_settings(request: Request, admin: AdminAuth = ADMIN) -> dict:
             _mcp_token_to_dict(t)
             for t in await session.scalars(select(McpToken).order_by(McpToken.created_at.desc()))
         ]
+        rate_limited = await _mcp_rate_limited_24h(session)
     return {
         "mode": effective["mode"],
         "open_scope": effective["open_scope"],
         "source": effective["source"],
         "locked": cfg.mcp_settings_locked,
+        "open_budget": cfg.mcp_open_budget,
+        "caller_limit": CALLER_LIMIT,
+        "rate_limited_24h": rate_limited,
         "updated_at": row.updated_at.isoformat() if row and row.updated_at else None,
         "updated_by": row.updated_by if row else None,
         "tokens": tokens,
