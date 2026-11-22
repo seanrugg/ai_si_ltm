@@ -58,6 +58,20 @@ def _any(root: str, *patterns: str) -> bool | None:
     return any(glob.glob(os.path.join(root, p)) for p in patterns)
 
 
+def _board(root: str) -> str | None:
+    """The board's own name from the device tree (Jetson, Pi, Arduino boards); None on a PC."""
+    text = _read(os.path.join(root, "proc/device-tree/model"))
+    text = (text or "").replace("\x00", "").strip()
+    return text or None
+
+
+def _total_disk(path: str) -> int | None:
+    try:
+        return shutil.disk_usage(path).total
+    except OSError:
+        return None
+
+
 def _free_disk(path: str) -> int | None:
     try:
         return shutil.disk_usage(path).free
@@ -72,10 +86,12 @@ def detect(data_dir: str = ".", root: str = "/") -> dict:
     except Exception:  # noqa: BLE001
         cpus = None
     facts = {
+        "board": _board(root),
         "arch": platform.machine() or None,
         "cpus": cpus,
         "ram_bytes": _mem_total_bytes(root),
         "disk_free_bytes": _free_disk(data_dir),
+        "disk_total_bytes": _total_disk(data_dir),
         "os": _os_release(root),
         # Hexagon/other NPUs: FastRPC compute DSP devices, or the kernel's accel class.
         "npu": _any(root, "dev/fastrpc-cdsp*", "dev/accel*"),
@@ -110,3 +126,43 @@ def summary(result: dict) -> str:
     return (f"hardware: {f.get('arch') or '?'}, {f.get('cpus') or '?'} CPU, {ram}, {f.get('os') or 'OS unknown'}"
             f"{', ' + ', '.join(flags) if flags else ''}; profile {p['tier']}, "
             f"heartbeat {p['heartbeat_seconds']} s, hub-capable {'yes' if p['can_host_hub'] else 'no'}")[:900]
+
+
+def _version() -> str | None:
+    try:
+        from importlib.metadata import version
+        return version("ltms")
+    except Exception:  # noqa: BLE001 - not installed as a package
+        return None
+
+
+def spec_sheet(result: dict, harness: str) -> dict:
+    """The facts as a spec sheet for ``LTMSClient.report_specs`` (#332): hardware and
+    software only. Models are left to the cognition report, and an admin's overrides
+    always win on the server. Unknown facts are left out, never guessed. Never raises.
+    """
+    f = result.get("facts") or {}
+    hw = {}
+    if f.get("board"):
+        hw["board"] = f["board"][:64]
+    if f.get("arch"):
+        hw["cpu"] = f["arch"][:64]
+    if isinstance(f.get("cpus"), int):
+        hw["cores"] = f["cpus"]
+    if isinstance(f.get("ram_bytes"), int):
+        hw["ram_mib"] = f["ram_bytes"] // MIB
+    if isinstance(f.get("disk_total_bytes"), int):
+        hw["storage_gib"] = f["disk_total_bytes"] // GIB
+    acc = [label for key, label in (("gpu_cuda", "CUDA GPU"), ("npu", "NPU"), ("mcu_bridge", "MCU bridge")) if f.get(key)]
+    if acc:
+        hw["accelerators"] = acc
+    sw = {"harness": harness[:64]}
+    if f.get("os"):
+        sw["os"] = f["os"][:64]
+    ver = _version()
+    if ver:
+        sw["harness_version"] = ver[:64]
+    sheet = {"software": sw}
+    if hw:
+        sheet["hardware"] = hw
+    return sheet
