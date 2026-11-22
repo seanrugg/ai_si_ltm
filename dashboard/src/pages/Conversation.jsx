@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useApi } from "../api/useApi.js";
 import { api } from "../api/client.js";
 import { EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui.jsx";
 import { localTime, relativeTime } from "../lib/format.js";
+import RecordLink from "../components/RecordLink.jsx";
 
 const LIMIT = 200;
 const MAX_MEMBERS = 16;
@@ -43,9 +44,9 @@ function RecordRow({ r, twoMember, firstMember }) {
               relayed by {r.relayed_by}
             </span>
           )}
-          <Link to={`/record/${r.agent}/${r.seq}`} className="underline decoration-ink-line hover:decoration-led">
+          <RecordLink agent={r.agent} seq={r.seq} className="underline decoration-ink-line hover:decoration-led">
             #{r.seq}
-          </Link>
+          </RecordLink>
         </p>
         {r.summary && <p className="mt-1 text-sm">{r.summary}</p>}
         {payloadText && <p className="mt-1 text-sm text-paper-muted">“{payloadText}”</p>}

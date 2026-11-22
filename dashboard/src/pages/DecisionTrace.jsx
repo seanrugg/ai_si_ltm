@@ -1,6 +1,8 @@
 import { Link, useParams } from "react-router-dom";
 import { useApi } from "../api/useApi.js";
+import RecordLink, { RecordBreadcrumb } from "../components/RecordLink.jsx";
 import RecordRow, { RecordDetail } from "../components/RecordRow.jsx";
+import { timelinePath } from "../lib/origin.js";
 import { ErrorNote, Loading, PageHeader } from "../components/ui.jsx";
 
 function Section({ title, records, empty }) {
@@ -22,8 +24,12 @@ export default function DecisionTrace() {
 
   return (
     <>
-      <PageHeader title={`Trace: ${agent} #${seq}`}>
-        <Link className="btn" to={`/record/${agent}/${seq}`}>Open record</Link>
+      <RecordBreadcrumb agent={agent} seq={seq} page="trace" />
+      <PageHeader title={<>Trace: <Link to={`/members/${encodeURIComponent(agent)}/profile`}
+                                         className="underline decoration-ink-line hover:decoration-led"
+                                         aria-label={`Profile of ${agent}`}>{agent}</Link> #{seq}</>}>
+        <RecordLink className="btn" agent={agent} seq={seq}>Open record</RecordLink>
+        <Link className="btn" to={timelinePath(agent, seq)}>View in timeline</Link>
       </PageHeader>
       {loading && !data && <Loading what="Following the references" />}
       <ErrorNote error={error} onRetry={reload} />

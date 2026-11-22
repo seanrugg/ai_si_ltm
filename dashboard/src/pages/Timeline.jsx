@@ -7,17 +7,28 @@ import { EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui.jsx
 import { localTime } from "../lib/format.js";
 import { LABELS, parseTypes } from "../lib/typeFilter.js";
 import { mergeTombstones, tombstoneRange } from "../lib/tombstones.js";
+import RecordLink from "../components/RecordLink.jsx";
 
 const OUTCOMES = ["success", "partial", "reflex_stop", "stuck", "abandoned", "failed"];
 const PAGE = 50;
 const FILTERS = ["agent", "type", "outcome", "place", "q", "since", "swarm"];
 // Text fields apply after typing stops; selects and the Types picker apply at once.
 const TEXT_APPLY_DELAY_MS = 400;
+// "View in timeline" (#393): `focus=<seq>` with `agent` opens that record. The
+// list is newest first, so older records need more pages; stop after this many.
+export const FOCUS_MAX_PAGES = 10;
+
+/** The focused record's index in `records`, or -1. */
+export function focusIndex(records, agent, focus) {
+  if (!agent || focus === "" || focus === null || focus === undefined) return -1;
+  return records.findIndex((r) => r.agent === agent && String(r.seq) === String(focus));
+}
 
 export default function Timeline() {
   const [params, setParams] = useSearchParams();
   const filters = Object.fromEntries(FILTERS.map((k) => [k, params.get(k) || ""]));
   const filterKey = JSON.stringify(filters);
+  const focus = params.get("focus") || "";
 
   const [records, setRecords] = useState([]);
   const [error, setError] = useState(null);
@@ -148,6 +159,15 @@ export default function Timeline() {
     rows.splice(at === -1 ? rows.length : at, 0, t);
   }
 
+  // Keep loading older pages until the focused record shows up (or give up).
+  const focused = focusIndex(records, filters.agent, focus);
+  const focusPending = Boolean(focus && filters.agent) && focused === -1;
+  useEffect(() => {
+    if (focusPending && more && !loading && !error && records.length < FOCUS_MAX_PAGES * PAGE) load(records.length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusPending, more, loading, error, records.length]);
+  const focusMissing = focusPending && !loading && !error && (!more || records.length >= FOCUS_MAX_PAGES * PAGE);
+
   const countText = records.length === 0
     ? "No records match"
     : records.length === 1
@@ -207,11 +227,19 @@ export default function Timeline() {
       )}
 
       <ErrorNote error={error} onRetry={() => load(0)} />
+      {focusMissing && (
+        <p className="mb-2 text-sm" role="status">
+          {filters.agent} #{focus} isn&apos;t in this list: it may be older than the newest {records.length} records, or
+          hidden by a filter (sensed records are hidden unless Types includes them).{" "}
+          <RecordLink agent={filters.agent} seq={focus} className="underline">Open #{focus} on its own</RecordLink>
+        </p>
+      )}
       {rows.length > 0 && (
         <ul className="panel" aria-label="Records, newest first">
           {rows.map((r) => (r.deleted
             ? <TombstoneRow key={`deleted-${r.hash}`} tombstone={r} />
-            : <RecordRow key={r.hash} record={r} />))}
+            : <RecordRow key={r.hash} record={r}
+                         highlight={r.agent === filters.agent && String(r.seq) === focus} />))}
         </ul>
       )}
       {loading && <Loading what="Loading records" />}
