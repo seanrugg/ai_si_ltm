@@ -62,5 +62,10 @@ def start_scheduler(app) -> AsyncIOScheduler:
     sched.add_job(run, "interval", hours=1,
                   args=("enroll_expire_pending", enrollment.enroll_expire_pending,
                         cfg.pending_enrollment_ttl_days))
+    # MCP rate-limit denials (#443): one audit row per caller and reason per
+    # minute, written for each minute that has ended.
+    denials = getattr(app.state, "mcp_denials", None)
+    if denials is not None:
+        sched.add_job(run, "interval", minutes=1, args=("mcp_rate_limited", denials.flush))
     sched.start()
     return sched

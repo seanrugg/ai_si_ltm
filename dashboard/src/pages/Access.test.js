@@ -4,7 +4,7 @@ import React from "react";
 import { MemoryRouter } from "react-router-dom";
 
 afterEach(() => cleanup());
-import { settingsFormFrom, default as Access } from "./Access.jsx";
+import { limitsText, rateLimitedText, settingsFormFrom, default as Access } from "./Access.jsx";
 
 const mcpData = {
   mode: "off",
@@ -97,5 +97,19 @@ describe("enrollment policy", () => {
     renderAccess();
     expect(screen.getByRole("radio", { name: /Manual/i }).closest("fieldset").disabled).toBe(true);
     expect(screen.getByRole("radio", { name: /Auto-approve/i }).closest("fieldset").disabled).toBe(true);
+  });
+});
+
+describe("MCP rate limits (#443)", () => {
+  it("shows the per-caller and shared limits", () => {
+    expect(limitsText({ caller_limit: 60, open_budget: 300 }))
+      .toBe("60 calls/min per caller; all tokenless callers together: 300 calls/min");
+    expect(limitsText({ caller_limit: 60, open_budget: 0 })).toBe("60 calls/min per caller; no shared limit for tokenless callers");
+  });
+  it("sums the last 24 h of rate-limited calls by reason", () => {
+    expect(rateLimitedText({ total: 0, by_reason: { per_caller: 0, open_budget: 0 } })).toBe("None");
+    expect(rateLimitedText({ total: 130, by_reason: { per_caller: 100, open_budget: 30 } }))
+      .toBe("130 (per caller: 100, shared open limit: 30)");
+    expect(rateLimitedText(undefined)).toBeNull();
   });
 });

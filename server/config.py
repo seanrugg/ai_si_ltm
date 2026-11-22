@@ -156,6 +156,11 @@ class ServerConfig(BaseSettings):
     # closed: an empty "types" list sees nothing. Env: LTMS_MCP_OPEN_SCOPE.
     mcp_open_scope: dict = {"types": [], "swarms": None}
 
+    # Tool calls per minute for all tokenless (open-mode) MCP callers combined
+    # (#443), on top of each caller's own 60/min. Token callers don't count
+    # against it. 0 = no shared ceiling. Env: LTMS_MCP_OPEN_BUDGET.
+    mcp_open_budget: int = Field(default=300, ge=0)
+
     # When true, the environment (LTMS_MCP_READ_MODE / LTMS_MCP_OPEN_SCOPE) is
     # authoritative: the dashboard-stored value is ignored, writes return 409
     # locked, and the Access page shows the settings read-only. For operators

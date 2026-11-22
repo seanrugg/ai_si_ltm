@@ -300,3 +300,138 @@ def test_bare_mcp_path_works_with_dashboard_mounted(db_url, tmp_path):
     assert "result" in r.json()
     # The dashboard still serves everything else.
     assert http.get("/").status_code == 200
+
+
+# --------------------------------------------------------------------------- #
+# #443: stored integrity results, open budget, actionable and logged 429s
+# --------------------------------------------------------------------------- #
+import logging  # noqa: E402
+
+from server import mcp_remote  # noqa: E402
+from server.services import integrity as integrity_service  # noqa: E402
+
+
+def _call(http, tool="list_members", ip=None, token=None, arguments=None):
+    if ip is not None:
+        http._transport.client = (ip, 50000)
+    return _rpc(http, "tools/call", {"name": tool, "arguments": arguments or {}}, token=token).json()
+
+
+def _audit(admin):
+    return admin.get("/api/admin/recall-log", params={"action": "mcp_rate_limited"}).json()["entries"]
+
+
+def test_integrity_report_reads_stored_results_only(db_url, monkeypatch):
+    http, admin, _app = _make_app(db_url, mcp_read_mode="open", mcp_open_scope={"types": ["event"]})
+    mesh = Mesh(http, admin)
+    checked = mesh.member("checked")
+    checked.append("event", summary="one")
+    checked.flush()
+    assert admin.get("/api/admin/integrity", params={"member": "checked"}).status_code == 200
+    mesh.member("never-checked")
+
+    def boom(*a, **k):
+        raise AssertionError("integrity_report must not verify on demand")
+    monkeypatch.setattr(integrity_service, "verify_all", boom)
+    monkeypatch.setattr(integrity_service, "verify_member", boom)
+    monkeypatch.setattr(integrity_service, "check_all", boom)
+    monkeypatch.setattr(integrity_service, "check_member", boom)
+
+    _initialize(http)
+    report = {r["member"]: r for r in _extract_result(_rpc(http, "tools/call", {"name": "integrity_report", "arguments": {}}))}
+    assert report["checked"]["status"] == "ok" and report["checked"]["records"] == 1
+    assert report["checked"]["verified_at"] and report["checked"]["verified_through"] == 1
+    assert report["never-checked"]["status"] == "not_yet_verified" and report["never-checked"]["verified_at"] is None
+
+
+def test_open_budget_is_shared_by_tokenless_callers_not_tokens(db_url):
+    http, admin, _app = _make_app(db_url, mcp_read_mode="open", mcp_open_scope={"types": ["event"]},
+                                  mcp_open_budget=5)
+    plaintext = admin.post("/api/admin/mcp/tokens", json={"name": "reader", "scope": {"types": ["event"]}}).json()["token"]
+    _initialize(http)
+    for i in range(5):
+        assert "error" not in _call(http, ip=f"10.0.0.{i + 1}"), i
+    denied = _call(http, ip="10.0.0.6")["error"]  # a different IP, but the shared budget is spent
+    assert denied["code"] == 429 and denied["message"] == "rate_limited"
+    data = denied["data"]
+    assert data["reason"] == "open_budget" and data["retry_after_seconds"] >= 1
+    assert data["message"] == (f"Open read access on this FLTMS instance is busy (shared limit of 5 calls/min reached). "
+                               f"Retry in {data['retry_after_seconds']} s, or ask the fleet admin for a read token.")
+    assert "10.0.0" not in json.dumps(data)  # nothing about other callers
+    assert "error" not in _call(http, ip="10.0.0.6", token=plaintext)  # a token caller is unaffected
+    assert admin.get("/api/admin/mcp").json()["open_budget"] == 5
+
+
+def test_per_caller_429_says_when_to_retry(db_url):
+    http, _admin, _app = _make_app(db_url, mcp_read_mode="open", mcp_open_scope={"types": ["event"]},
+                                   mcp_open_budget=0)
+    _initialize(http)
+    for _ in range(mcp_remote.CALLER_LIMIT):
+        assert "error" not in _call(http, ip="10.0.0.1")
+    data = _call(http, ip="10.0.0.1")["error"]["data"]
+    assert data["reason"] == "per_caller" and data["retry_after_seconds"] >= 1
+    assert data["message"] == (f"Rate limited: this caller is limited to {mcp_remote.CALLER_LIMIT} tool calls per minute. "
+                               f"Retry in {data['retry_after_seconds']} s.")
+    assert "error" not in _call(http, ip="10.0.0.2")  # another caller has its own bucket
+
+
+def test_a_hundred_denials_make_one_audit_row_and_one_log_line(db_url, caplog):
+    http, admin, app = _make_app(db_url, mcp_read_mode="open", mcp_open_scope={"types": ["event"]},
+                                 mcp_open_budget=0)
+    _initialize(http)
+    denials = app.state.mcp_denials
+    start = mcp_remote.DenialLog.window_of(denials.clock()) + 1  # pin one minute for the test
+    denials.clock = lambda: start
+    for _ in range(mcp_remote.CALLER_LIMIT):
+        _call(http, ip="10.9.9.9")
+    for _ in range(100):
+        assert _call(http, ip="10.9.9.9")["error"]["data"]["reason"] == "per_caller"
+    assert _audit(admin) == []  # nothing written while the minute is open
+
+    denials.clock = lambda: start + 60  # the next minute: the scheduler writes the ended one
+    with caplog.at_level(logging.WARNING, logger="ltms.mcp"):
+        async def flush():
+            async with app.state.sessionmaker() as s:
+                out = await denials.flush(s)
+                await s.commit()
+                return out
+        assert http.portal.call(flush) == {"mcp_rate_limited_rows": 1}
+    rows = _audit(admin)
+    assert len(rows) == 1
+    assert rows[0]["detail"]["denied"] == 100 and rows[0]["detail"]["reason"] == "per_caller"
+    assert rows[0]["detail"]["key_kind"] == "ip" and rows[0]["detail"]["key"] == "10.9.9.9"
+    lines = [r for r in caplog.records if "MCP rate limited" in r.getMessage()]
+    assert len(lines) == 1 and "denied=100" in lines[0].getMessage()
+    assert admin.get("/api/admin/mcp").json()["rate_limited_24h"] == {
+        "total": 100, "by_reason": {"per_caller": 100, "open_budget": 0}}
+
+
+def test_token_denials_are_logged_by_name_never_the_token(db_url):
+    http, admin, app = _make_app(db_url, mcp_read_mode="token")
+    plaintext = admin.post("/api/admin/mcp/tokens", json={"name": "busy-agent", "scope": {"types": ["event"]}}).json()["token"]
+    _initialize(http)
+    denials = app.state.mcp_denials
+    start = mcp_remote.DenialLog.window_of(denials.clock()) + 1
+    denials.clock = lambda: start
+    for _ in range(mcp_remote.CALLER_LIMIT + 3):
+        _call(http, token=plaintext)
+    denials.clock = lambda: start + 60
+    # The first denial of the next minute writes the ended minute.
+    assert _call(http, token=plaintext)["error"]["data"]["reason"] == "per_caller"
+    rows = _audit(admin)
+    assert len(rows) == 1 and rows[0]["detail"]["key_kind"] == "token"
+    assert rows[0]["detail"]["key"] == "busy-agent" and rows[0]["detail"]["denied"] == 3
+    import hashlib
+    raw = json.dumps(rows)
+    assert plaintext not in raw and hashlib.sha256(plaintext.encode()).hexdigest() not in raw
+
+
+def test_denial_log_caps_the_callers_it_tracks(monkeypatch):
+    monkeypatch.setattr(mcp_remote, "DENIAL_KEYS_MAX", 2)
+    d = mcp_remote.DenialLog(clock=lambda: 120.0)
+    for ip in ("a", "b", "c", "d", "c"):
+        assert d.note("per_caller", "ip", ip) == []
+    d.clock = lambda: 180.0
+    ended = sorted((w["key"], w["denied"]) for w in d.take_ended())
+    assert ended == [("(many)", 3), ("a", 1), ("b", 1)]
+    assert d.take_ended() == []

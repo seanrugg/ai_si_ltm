@@ -143,6 +143,7 @@ def create_app(config: ServerConfig | None = None, *, create_tables: bool = True
     # Remote MCP read-only endpoint (issue #107), mounted before the dashboard's
     # StaticFiles catch-all so /mcp takes precedence.
     mcp_server = create_mcp_server(cfg, lambda: app.state.sessionmaker())
+    app.state.mcp_denials = mcp_server.ltms_denials  # flushed once a minute by the scheduler (#443)
     app.mount(
         "/mcp",
         mcp_server.streamable_http_app(

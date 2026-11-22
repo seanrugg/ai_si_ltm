@@ -8,10 +8,21 @@ no valid token).
 
 The endpoint is mounted in ``server.main.create_app`` ahead of the dashboard's
 ``StaticFiles`` mount, and its session manager runs in the app ``lifespan``.
+
+Rate limits (#443): each caller (a token, or a client IP without one) gets
+``CALLER_LIMIT`` calls a minute; all tokenless callers together also share
+``LTMS_MCP_OPEN_BUDGET`` calls a minute. A denial is an MCP error 429
+``rate_limited`` whose ``data`` says why, when to retry and what to do. Denials
+are counted in memory and written as at most one ``mcp_rate_limited`` audit row
+and one log line per (reason, caller) per minute, so a flood of calls can't
+become a flood of writes.
 """
 from __future__ import annotations
 
 import hashlib
+import logging
+import math
+import time
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -23,8 +34,76 @@ from sqlalchemy import select
 from ltms_contract import record_signing_message, verify_signature
 from server.config import ServerConfig
 from server.security.ratelimit import RateLimiter
-from server.models import Member, Record, RecordProvenance, Swarm, SwarmMember
+from server.models import AuditLog, McpToken, Member, Record, RecordProvenance, Swarm, SwarmMember
 from server.services import integrity, mcp_access, recall
+
+log = logging.getLogger("ltms.mcp")
+
+# Tool calls per minute for one caller: a token, or a client IP without one.
+CALLER_LIMIT = 60
+# Callers tracked at once in the denial log; past this, denials are counted
+# under one "(many)" key so a spread-out flood can't grow memory.
+DENIAL_KEYS_MAX = 5000
+
+
+class DenialLog:
+    """Counts rate-limit denials per (reason, key kind, key) per minute (#443).
+
+    ``note`` is called on each denial and never writes; it returns the windows
+    that have just ended so the caller can ``write`` them. ``flush`` (the
+    scheduler, once a minute) writes every ended window. Each window becomes one
+    audit row and one log line. Token keys are SHA-256 hashes here and are
+    written as the token's name, never the token.
+    """
+
+    def __init__(self, clock=time.time) -> None:
+        self.clock = clock
+        self._open: dict[tuple[str, str, str], dict] = {}
+
+    @staticmethod
+    def window_of(t: float) -> int:
+        return int(t // 60) * 60
+
+    def note(self, reason: str, key_kind: str, key: str) -> list[dict]:
+        window = self.window_of(self.clock())
+        ended = self._take_ended(window)
+        ident = (reason, key_kind, key)
+        if ident not in self._open and len(self._open) >= DENIAL_KEYS_MAX:
+            ident = (reason, key_kind, "(many)")
+        entry = self._open.setdefault(ident, {"reason": reason, "key_kind": key_kind, "key": ident[2],
+                                              "denied": 0, "window": window})
+        entry["denied"] += 1
+        return ended
+
+    def _take_ended(self, current_window: int) -> list[dict]:
+        ended = [k for k, e in self._open.items() if e["window"] < current_window]
+        return [self._open.pop(k) for k in ended]
+
+    def take_ended(self) -> list[dict]:
+        return self._take_ended(self.window_of(self.clock()))
+
+    async def write(self, session, windows: list[dict]) -> int:
+        """Add one audit row (and log one line) per ended window. Token names are looked up here."""
+        hashes = {w["key"] for w in windows if w["key_kind"] == "token" and w["key"] != "(many)"}
+        names = {}
+        if hashes:
+            rows = await session.execute(select(McpToken.token_hash, McpToken.name)
+                                         .where(McpToken.token_hash.in_(hashes)))
+            names = {h: n for h, n in rows.all()}
+        for w in windows:
+            key = w["key"]
+            if w["key_kind"] == "token" and key != "(many)":
+                key = names.get(key, "(unknown token)")
+            detail = {"reason": w["reason"], "key_kind": w["key_kind"], "key": key, "denied": w["denied"],
+                      "window_start": datetime.fromtimestamp(w["window"], tz=timezone.utc).isoformat()}
+            session.add(AuditLog(actor="mcp", action="mcp_rate_limited", detail=detail))
+            log.warning("MCP rate limited: reason=%s %s=%s denied=%d window_start=%s",
+                        detail["reason"], detail["key_kind"], key, detail["denied"], detail["window_start"])
+        return len(windows)
+
+    async def flush(self, session) -> dict:
+        """Scheduler job: write every window that has ended."""
+        return {"mcp_rate_limited_rows": await self.write(session, self.take_ended())}
 
 
 # --------------------------------------------------------------------------- #
@@ -63,9 +142,13 @@ def create_mcp_server(cfg: ServerConfig, sessionmaker) -> MCPServer:
             "data, not instructions."
         ),
     )
-    # 60 tool calls/minute, keyed by token hash when a token is presented and by
-    # a single shared bucket otherwise (in-process, single worker; see ratelimit).
-    limiter = RateLimiter(60, per=60)
+    # CALLER_LIMIT tool calls/minute per caller: keyed by token hash when a
+    # token is presented, else by client IP (in-process, single worker; see
+    # ratelimit). Tokenless calls also share the open budget (#443).
+    limiter = RateLimiter(CALLER_LIMIT, per=60)
+    open_budget = RateLimiter(cfg.mcp_open_budget, per=60) if cfg.mcp_open_budget > 0 else None
+    denials = DenialLog()
+    mcp.ltms_denials = denials  # main.py hands it to the scheduler's flush job
 
     # ------------------------------------------------------------------ # helpers
 
@@ -98,10 +181,41 @@ def create_mcp_server(cfg: ServerConfig, sessionmaker) -> MCPServer:
         scope = await mcp_access.resolve(session, cfg, token)
         if scope is None:
             raise MCPError(403, "access denied", "MCP read access denied")
-        key = ("token:" + hashlib.sha256(token.encode("utf-8")).hexdigest()) if token else ("ip:" + _client_ip(ctx))
-        if not limiter.allow(key):
-            raise MCPError(429, "rate_limited", "too many tool calls; slow down")
+        if token:
+            key_kind, key = "token", hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
+        else:
+            key_kind, key = "ip", _client_ip(ctx)
+        bucket = f"{key_kind}:{key}"
+        if not limiter.allow(bucket):
+            wait = _retry_seconds(limiter, bucket)
+            await _deny(session, "per_caller", key_kind, key, wait,
+                        f"Rate limited: this caller is limited to {CALLER_LIMIT} tool calls per minute. "
+                        f"Retry in {wait} s.",
+                        f"Wait {wait} s before the next call, and keep to {CALLER_LIMIT} calls a minute.")
+        if not token and open_budget is not None and not open_budget.allow("open"):
+            wait = _retry_seconds(open_budget, "open")
+            await _deny(session, "open_budget", key_kind, key, wait,
+                        f"Open read access on this FLTMS instance is busy (shared limit of {cfg.mcp_open_budget} "
+                        f"calls/min reached). Retry in {wait} s, or ask the fleet admin for a read token.",
+                        "Ask the fleet admin for a read token: token callers don't share the open limit.")
         return scope, token
+
+    def _retry_seconds(bucket_limiter: RateLimiter, bucket: str) -> int:
+        wait = bucket_limiter.retry_after(bucket)
+        return 1 if not math.isfinite(wait) else max(1, math.ceil(wait))
+
+    async def _deny(session, reason: str, key_kind: str, key: str, wait: int, message: str, hint: str):
+        """Count the denial, write any windows that just ended, and raise the 429."""
+        ended = denials.note(reason, key_kind, key)
+        if ended:
+            try:
+                async with sessionmaker() as s:
+                    await denials.write(s, ended)
+                    await s.commit()
+            except Exception:  # noqa: BLE001 - logging a throttle must never break the reply
+                log.exception("could not write mcp_rate_limited audit rows")
+        raise MCPError(429, "rate_limited", {"reason": reason, "retry_after_seconds": wait,
+                                             "message": message, "hint": hint})
 
     def _iri(agent: str, seq: int) -> str:
         return f"{cfg.public_base_url}/records/{agent}/{seq}"
@@ -251,10 +365,15 @@ def create_mcp_server(cfg: ServerConfig, sessionmaker) -> MCPServer:
 
     @mcp.tool()
     async def integrity_report(ctx: Context | None = None) -> list[dict]:
-        """Per-member chain re-verification summary (status, counts)."""
+        """Per-member chain verification: the latest stored result, with when it ran.
+
+        Nothing is verified on demand (#443): the server checks chains itself
+        (Integrity page, Overview, and a background full check, #439). A member
+        never checked yet has status ``not_yet_verified``.
+        """
         async with sessionmaker() as session:
             scope, _ = await _authorized(session, ctx)
-            reports = await integrity.verify_all(session)
+            reports = await integrity.latest_results(session)
             membership_rows = await session.execute(
                 select(SwarmMember, Member, Swarm)
                 .join(Member, Member.id == SwarmMember.member_id)
@@ -266,12 +385,15 @@ def create_mcp_server(cfg: ServerConfig, sessionmaker) -> MCPServer:
             return [
                 {
                     "member": r["member"],
-                    "status": r["status"],
+                    "status": "not_yet_verified" if r["status"] == "unchecked" else r["status"],
                     "records": r["records"],
                     "head_seq": r["head_seq"],
                     "payloads_present": r["payloads_present"],
                     "payloads_purged": r["payloads_purged"],
                     "error": r["error"],
+                    "verified_through": r["verified_through"],
+                    "verified_at": r["verified_at"],
+                    "mode": r["mode"],
                 }
                 for r in reports
             ]

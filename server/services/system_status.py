@@ -41,6 +41,7 @@ JOB_LABELS = {
     "lrs_forward": "LRS sync and summary",
     "enroll_auto_denied": "Auto-denied enrollment summary",
     "enroll_expire_pending": "Pending enrollment expiry",
+    "mcp_rate_limited": "MCP rate-limit log",
 }
 
 MAX_MESSAGE = 200

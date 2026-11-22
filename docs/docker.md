@@ -143,6 +143,17 @@ means free agents). The Access page shows the current mode; changing it means
 editing `.env`. `LTMS_PUBLIC_BASE_URL` must match the public host, because
 `/mcp` only accepts requests addressed to it.
 
+**Rate limits (#443).** Each caller (a token, or a client address without one)
+gets 60 tool calls a minute. All tokenless callers together also share
+`LTMS_MCP_OPEN_BUDGET` calls a minute (default 300; `0` turns the shared limit
+off); token callers don't count against it. A refused call gets MCP error 429
+`rate_limited`, whose `data` gives the `reason` (`per_caller` or
+`open_budget`), `retry_after_seconds` and a hint. Refusals are logged at most
+once a minute per caller and reason: a `mcp_rate_limited` audit row and a
+warning in `docker compose logs ltms`. The Access page shows the last 24 hours.
+`integrity_report` returns the latest stored chain check (with `verified_at`)
+and never verifies on demand.
+
 ## Notes
 
 - All configuration comes from `.env`; no secrets or site values are baked
