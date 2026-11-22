@@ -23,8 +23,26 @@ const LABELS = {
   ingest_rate: "Writes per member", recall_rate: "Reads per member", enroll_rate_per_ip: "Enrollment requests per IP",
   max_batch: "Records per batch", max_recall: "Records per read", max_pending_enrollments: "Pending enrollments",
   retention_payload_rules: "Payloads purged after", retention_audit_days: "Audit log kept",
-  enable_scheduler: "Scheduled jobs", dashboard_dir: "Dashboard files",
+  enable_scheduler: "Scheduled jobs", dashboard_dir: "Dashboard files", deployment: "Deployment",
 };
+
+// Where this deployment keeps its settings (#390). Same wording as System status.
+const DEPLOYMENTS = {
+  docker: { label: "Docker", file: ".env next to compose.yaml", apply: "run docker compose up -d" },
+  service: { label: "systemd service", file: "/etc/ltms/ltms.env", apply: "restart the service" },
+  other: { label: "other", file: "this process's environment variables", apply: "restart FLTMS" },
+};
+
+/** The intro's "where do I change this" sentence for a deployment mode (or null while loading). */
+export function settingsWhere(mode) {
+  const d = DEPLOYMENTS[mode];
+  if (!d) {
+    return "Settings change through environment variables on the server (with Docker Compose, .env next to "
+      + "compose.yaml; as a systemd service, /etc/ltms/ltms.env) and take effect after a restart.";
+  }
+  return `This server runs as ${d.label === "other" ? "neither Docker nor a systemd service" : `a ${d.label} deployment`}`
+    + `: settings change in ${d.file}; then ${d.apply}.`;
+}
 
 function duration(seconds) {
   if (seconds % 86400 === 0) return `${seconds / 86400} days`;
@@ -42,6 +60,7 @@ export function formatValue(key, value) {
   if (Array.isArray(value)) return value.length ? value.map(describeRule).join(" · ") : "Never";
   if (typeof value === "boolean") return value ? "On" : "Off";
   if (value === "" || value === null || value === undefined) return "Not set";
+  if (key === "deployment") return DEPLOYMENTS[value]?.label ?? String(value);
   if (typeof value === "number") {
     if (key.endsWith("_seconds")) return duration(value);
     if (key.endsWith("_minutes")) return duration(value * 60);
@@ -309,9 +328,8 @@ export default function Settings() {
     <>
       <PageHeader title="Settings" />
       <p className="mb-6 max-w-prose text-sm text-paper-muted">
-        The server's current configuration. Settings change through environment variables on the server
-        (<code className="hash">/etc/ltms/ltms.env</code>, defaults in <code className="hash">config/default.yaml</code>)
-        and take effect after a restart. Passwords are never shown.
+        The server&apos;s current configuration. {settingsWhere(data?.deployment)} Every setting and its default
+        is listed in <code className="hash">docs/configuration.md</code>. Passwords are never shown.
       </p>
       <section className="panel mb-6 p-4" aria-labelledby="server-location-h">
         <h2 id="server-location-h" className="font-bold">Server location</h2>
