@@ -1,8 +1,9 @@
-"""ltms_recorder: a Hermes Agent plugin that records sessions and tool calls to LTMS (#469).
+"""ltms_recorder: a Hermes Agent plugin that records sessions and tool calls to LTMS (#469),
+plus a daily usage rollup (#470).
 
 Hermes loads this directory from ``~/.hermes/plugins/ltms_recorder/`` and calls
-``register(ctx)``. All the logic lives in ``recorder.py``; this file only wires
-it to Hermes hooks. See ``integrations/hermes/README.md``.
+``register(ctx)``. The logic lives in ``recorder.py`` and ``rollup.py``; this
+file only wires them to Hermes hooks. See ``integrations/hermes/README.md``.
 """
 from __future__ import annotations
 
@@ -13,7 +14,9 @@ from pathlib import Path
 
 log = logging.getLogger("ltms_recorder")
 
+PLUGIN_VERSION = "0.2.0"
 HOOKS = ("on_session_start", "post_tool_call", "on_session_end")
+ROLLUP_HOOKS = ("post_api_request", "api_request_error", "post_compaction")
 
 
 def _data_dir() -> Path:
@@ -46,6 +49,43 @@ def build_recorder(settings: dict | None = None, *, background: bool = True):
     )
 
 
+def rollup_enabled(settings: dict | None) -> bool:
+    return (settings or {}).get("rollup", True) is not False
+
+
+def build_rollup():
+    from .rollup import Rollup
+    return Rollup(_data_dir(), plugin_version=PLUGIN_VERSION)
+
+
+def wire(recorder, rollup) -> dict:
+    """Hook name -> callable. Each one feeds the recorder, then the rollup, and never raises."""
+    if rollup is None:
+        return {"on_session_start": recorder.on_session_start,
+                "post_tool_call": recorder.on_post_tool_call,
+                "on_session_end": recorder.on_session_end}
+
+    def both(record, count):
+        def hook(*args, **kwargs):
+            record(*args, **kwargs)
+            count(*args, **kwargs)
+            rollup.emit_due(recorder)  # local signing only; the recorder's thread sends
+        return hook
+
+    def count_only(count):
+        def hook(*args, **kwargs):
+            count(*args, **kwargs)
+            rollup.emit_due(recorder)
+        return hook
+
+    return {"on_session_start": both(recorder.on_session_start, rollup.on_session_start),
+            "post_tool_call": both(recorder.on_post_tool_call, rollup.on_post_tool_call),
+            "on_session_end": both(recorder.on_session_end, rollup.on_session_end),
+            "post_api_request": count_only(rollup.on_post_api_request),
+            "api_request_error": count_only(rollup.on_api_request_error),
+            "post_compaction": count_only(rollup.on_post_compaction)}
+
+
 def register(ctx) -> None:
     """Hermes entry point. Never raises: a broken recorder must not stop Hermes."""
     try:
@@ -54,6 +94,7 @@ def register(ctx) -> None:
         except Exception:  # noqa: BLE001 - older Hermes, or no settings saved yet
             settings = {}
         recorder = build_recorder(settings)
+        rollup = build_rollup() if rollup_enabled(settings) else None
     except KeyError as exc:
         log.warning("ltms_recorder: not started, %s is not set", exc.args[0])
         return
@@ -64,8 +105,14 @@ def register(ctx) -> None:
         log.warning("ltms_recorder: not started (%s)", type(exc).__name__)
         return
 
-    ctx.register_hook("on_session_start", recorder.on_session_start)
-    ctx.register_hook("post_tool_call", recorder.on_post_tool_call)
-    ctx.register_hook("on_session_end", recorder.on_session_end)
-    atexit.register(recorder.close)
-    log.info("ltms_recorder: recording as %s (mode %s)", recorder.client.name, recorder.settings["record_mode"])
+    for name, fn in wire(recorder, rollup).items():
+        ctx.register_hook(name, fn)
+
+    def close() -> None:
+        if rollup is not None:
+            rollup.close(recorder)
+        recorder.close()
+
+    atexit.register(close)
+    log.info("ltms_recorder: recording as %s (mode %s, rollup %s)", recorder.client.name,
+             recorder.settings["record_mode"], "on" if rollup is not None else "off")

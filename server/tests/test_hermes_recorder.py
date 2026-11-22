@@ -228,7 +228,7 @@ def test_register_wires_three_hooks(monkeypatch, tmp_path):
     monkeypatch.setenv("LTMS_KEY_PATH", str(key))
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
     monkeypatch.setattr(ltms_recorder.atexit, "register", lambda fn: None)
-    ctx = _FakeCtx({"record_mode": "summary"})
+    ctx = _FakeCtx({"record_mode": "summary", "rollup": False})  # rollup wiring: test_hermes_rollup.py
     ltms_recorder.register(ctx)
     assert set(ctx.hooks) == {"on_session_start", "post_tool_call", "on_session_end"}
     recorder = ctx.hooks["post_tool_call"].__self__

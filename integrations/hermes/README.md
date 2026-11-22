@@ -1,6 +1,6 @@
 # Hermes Agent integration: `ltms_recorder`
 
-A [Hermes Agent](https://hermes-agent.nousresearch.com/) plugin that records what the agent **actually did** to LTMS: one signed record when a session starts, one for **every tool call** (with the tool's raw result), and one when the session ends.
+A [Hermes Agent](https://hermes-agent.nousresearch.com/) plugin that records what the agent **actually did** to LTMS: one signed record when a session starts, one for **every tool call** (with the tool's raw result), and one when the session ends. Once a day it also sends a [rollup](#daily-rollup) of usage counters.
 
 The plugin runs from Hermes's own lifecycle hooks, so it records every call whether or not the model "decides" to. It records the tool's result as returned, not the model's summary of it. That makes it possible to tell real actions from text that only looks like them: a model that claims a result without calling the tool leaves no `action` record.
 
@@ -95,6 +95,7 @@ plugins:
         redact_keys: [key, token, secret, password, authorization, cookie]
         flush_interval_seconds: 5
         flush_batch: 20
+        rollup: true               # daily usage rollup; false turns it off
 ```
 
 Example: if a robot's MCP server is configured in Hermes as `vector`, its tools are named `mcp__vector__…`. Then `peer_map: {"mcp__vector__": "<that robot's member name>"}` shows every Hermes action on that robot in the robot's timeline as well.
@@ -110,8 +111,30 @@ Example: if a robot's MCP server is configured in Hermes as `vector`, its tools 
 - **Exit.** At shutdown the plugin makes one last attempt to send.
 - **Sessions.** Tool calls carry the `session_id` of the most recently started session. Hermes runs one session at a time in the CLI. With several concurrent gateway sessions, treat `session_id` on tool calls as approximate.
 
+## Daily rollup
+
+Besides the detailed records, the plugin keeps **bounded usage counters** for each UTC day and sends them once, as one record. A rollup is built to be safe to share and easy to add up across members. It works in every `record_mode`, including `off`, so a deployment that must keep traces on the device can still report usage.
+
+| Field | Counted from |
+|---|---|
+| `sessions.started / completed / interrupted` | session start and end |
+| `tool_calls{name: {ok, error}}` | each tool call. Only MCP tool names (`mcp__…`) and Hermes built-in tool names are kept, up to 64; anything else counts under `other`. A model can invent a tool name, and an invented name is content |
+| `tool_errors{reason: n}` | each failed tool call, classified into a **fixed list**: `timeout`, `not_found`, `invalid_args`, `refused`, `unavailable`, `upstream_error`, `other`. The result is read to classify it and never kept |
+| `model_routes{"provider/model": {calls, input_tokens, output_tokens, api_seconds}}` | each model API call (`post_api_request`). A provider or model that looks like a URL or path becomes `custom` / `unknown`; at most 16 routes |
+| `api_errors{4xx, 5xx, network, other}` | failed model API calls (`api_request_error`) |
+| `compactions` | context compactions (`post_compaction`) |
+| `machine` | `arch`, `os`, RAM in whole GB, `hermes_version`, `plugin_version` |
+
+**Never in a rollup:** prompts, messages, tool arguments or results, file paths, setting values, error text, URLs.
+
+**The record:** a `perception` tagged `telemetry,internal,agent-rollup`, summary `daily rollup <date>: <sessions> sessions, <calls> tool calls, <errors> errors`, payload `{"rollup_schema": 1, "date": "<date>", …counters}`. It shows in the Timeline with the telemetry filter on.
+
+**How it is kept and sent:**
+- The day's counters are saved to `<HERMES_HOME>/plugin-data/ltms_recorder/rollup-<date>.json` after every update, so a restart keeps the day.
+- At the first hook after midnight UTC, the finished day is signed into the chain (local work only; hooks never use the network) and the recorder's thread sends it. The day file is deleted once LTMS has accepted it. If the chain isn't ready yet, for example while offline, the file waits for a later hook or for exit.
+- If Hermes stops between signing the rollup and saving that it was signed, that day can be sent twice. The record's date says which day it covers.
+
 ## Not included
 
-- Daily usage counters (a separate issue).
 - Recording model replies or prompts.
 - OpenClaw. A sibling plugin would use the same pattern.
