@@ -120,3 +120,10 @@ def test_system_status_says_where_settings_live(app, admin):
                                             "settings_file": ".env next to compose.yaml",
                                             "apply": "docker compose up -d"}
     assert "deployment: docker (settings: .env next to compose.yaml)" in body["diagnostics"]
+
+
+def test_settings_page_gets_the_detected_deployment(app, admin):
+    """Settings names the file for this deployment, so it must get the detected mode (#390 follow-up)."""
+    assert admin.get("/api/admin/settings").json()["deployment"] in ("docker", "service", "other")
+    app.state.config = app.state.config.model_copy(update={"deployment": "service"})
+    assert admin.get("/api/admin/settings").json()["deployment"] == "service"

@@ -1312,7 +1312,11 @@ async def settings(request: Request, admin: AdminAuth = ADMIN) -> dict:
     # plus the database URL (it can embed a password).
     def hidden(k: str) -> bool:
         return k == "database_url" or any(w in k for w in ("password", "secret", "_key"))
-    return {k: v for k, v in json.loads(cfg.model_dump_json()).items() if not hidden(k)}
+    out = {k: v for k, v in json.loads(cfg.model_dump_json()).items() if not hidden(k)}
+    from server.services import system_status  # the detected mode, so the page names the right settings file
+
+    out["deployment"] = system_status.deployment_mode(cfg)
+    return out
 
 
 def _mcp_token_to_dict(t: McpToken) -> dict:
