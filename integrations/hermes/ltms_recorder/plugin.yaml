@@ -1,0 +1,46 @@
+name: ltms_recorder
+version: 0.1.0
+description: >-
+  Records Hermes sessions and every tool call (with the raw result) as signed
+  LTMS/FLTMS records, so a fleet can see what the agent actually did.
+author: LTMS project
+provides_hooks:
+  - on_session_start
+  - post_tool_call
+  - on_session_end
+requires_env:
+  - name: LTMS_SERVER
+    description: LTMS base URL, e.g. https://ltms.example.org
+  - name: LTMS_KEY_PATH
+    description: Path to this agent member's key file (python -m cli_agent agent genkey)
+    secret: true
+config_schema:
+  record_mode:
+    type: string
+    enum: [full, summary, "off"]
+    default: full
+    description: >-
+      full records tool arguments (redacted) and raw results; summary records
+      only tool name, outcome and timing; off records only session start and end.
+  peer_map:
+    type: object
+    default: {}
+    description: >-
+      Tool-name prefix -> the LTMS member the tool acts on, e.g.
+      {"mcp__robot__": "<robot-member>"}. Sets the record's peers.
+  max_result_bytes:
+    type: integer
+    default: 8192
+    description: Longest raw tool result kept, in bytes (at most 8192).
+  redact_keys:
+    type: array
+    default: [key, token, secret, password, authorization, cookie]
+    description: Argument names whose values are replaced with [redacted] (case-insensitive, substring).
+  flush_interval_seconds:
+    type: number
+    default: 5
+    description: How often queued records are sent.
+  flush_batch:
+    type: integer
+    default: 20
+    description: Send as soon as this many records are waiting.
