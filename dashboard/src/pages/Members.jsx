@@ -381,15 +381,20 @@ function MemberRow({ m, swarm, swarms, location, inherited, estimate, geo, unpla
       </div>
       <ErrorNote error={error} />
       <p className={notice ? "mt-2 text-sm" : "sr-only"} role="status">{notice}</p>
+      {/* Each form's key starts with its own name: they are siblings, and the
+          membership and AI-location keys used to both be ":" (a robot with no
+          override, before the swarms loaded), so React kept a stale "Free agent"
+          row next to the real one (#392). A new key remounts the form from the
+          server's values. */}
       {m.status === "active" && mode === null && (
-        <MembershipForm key={`${swarm?.swarm ?? ""}:${swarm?.role ?? ""}`} name={m.name} current={swarm ?? null}
+        <MembershipForm key={`membership:${swarm?.swarm ?? ""}:${swarm?.role ?? ""}`} name={m.name} current={swarm ?? null}
                         swarms={swarms} onDone={onDone} />
       )}
       {m.status === "active" && mode === null && m.kind === "robot" && (
-        <CognitionControl key={`${m.cognition?.source ?? ""}:${m.cognition?.value ?? ""}`} m={m} onDone={onDone} />
+        <CognitionControl key={`cognition:${m.cognition?.source ?? ""}:${m.cognition?.value ?? ""}`} m={m} onDone={onDone} />
       )}
       {m.status === "active" && mode === null && (
-        <LocationForm key={JSON.stringify([location, estimate])} subjectType="member" name={m.name} current={location}
+        <LocationForm key={`location:${JSON.stringify([location, estimate])}`} subjectType="member" name={m.name} current={location}
                       inherited={inherited} estimate={estimate} suggestion={estimate} geo={geo} unplaced={unplaced}
                       onDone={onDone} />
       )}
