@@ -2,7 +2,7 @@ import { useState } from "react";
 import GuidedSetup from "../components/GuidedSetup.jsx";
 import HelpTip from "../components/HelpTip.jsx";
 import LocationForm from "../components/LocationForm.jsx";
-import { FINGERPRINT_CHECK, HUB_INTENT, SWARM_MOVE, SWARM_ROLE, MEMORY_WIPE, WIPE_VS_DELETE } from "../lib/help.js";
+import { FINGERPRINT_CHECK, HUB_INTENT, INGEST_RATE_HELP, SWARM_MOVE, SWARM_ROLE, MEMORY_WIPE, WIPE_VS_DELETE } from "../lib/help.js";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
@@ -304,7 +304,80 @@ export function CognitionControl({ m, onDone }) {
   );
 }
 
-function MemberRow({ m, swarm, swarms, location, inherited, estimate, geo, unplaced, onDone }) {
+const MAX_INGEST_RATE = 10000; // records/s, as the server allows (#450)
+
+/** Why a typed ingest limit can't be sent, or null (#451). The server still checks. */
+export function ingestRateProblem(text) {
+  const t = String(text ?? "").trim();
+  if (!t) return "Enter a number of records per second, or use the server default.";
+  const n = Number(t);
+  if (!Number.isFinite(n)) return "The limit must be a number of records per second.";
+  if (n <= 0) return "The limit must be above 0 records per second.";
+  if (n > MAX_INGEST_RATE) return `The limit can be at most ${MAX_INGEST_RATE} records per second.`;
+  return null;
+}
+
+/** "Ingest limit: …" for a member's current state. */
+export function ingestRateText(rate, defaultRate) {
+  if (rate === null || rate === undefined) {
+    return `Ingest limit: server default${defaultRate == null ? "" : ` (${defaultRate} records/s)`}`;
+  }
+  return `Ingest limit: ${rate} records/s (override)`;
+}
+
+/** Set or clear a member's ingest rate limit (#451); the server is authoritative (422 shown as is). */
+export function IngestRateControl({ m, defaultRate, onDone }) {
+  const [value, setValue] = useState(m.ingest_rate == null ? "" : String(m.ingest_rate));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const id = `ingest-${m.id}`;
+
+  async function send(rate) {
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/admin/members/${m.id}/ingest-rate`, { method: "PATCH", body: { ingest_rate: rate } });
+      onDone();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function save(e) {
+    e.preventDefault();
+    const problem = ingestRateProblem(value);
+    if (problem) {
+      setError(new Error(problem));
+      return;
+    }
+    send(Number(value));
+  }
+
+  return (
+    <form onSubmit={save} noValidate className="mt-2 text-sm" aria-label={`Ingest limit for ${m.name}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-paper-muted">{ingestRateText(m.ingest_rate, defaultRate)}</span>
+        <label htmlFor={id} className="sr-only">Ingest limit for {m.name}, records per second</label>
+        <input id={id} type="number" inputMode="decimal" min="0" max={MAX_INGEST_RATE} step="any"
+               className="field w-28" value={value} onChange={(e) => setValue(e.target.value)}
+               placeholder="records/s" aria-describedby={`${id}-help`} />
+        <button className="btn" disabled={busy} aria-label={`Save ingest limit for ${m.name}`}>Save</button>
+        {m.ingest_rate != null && (
+          <button type="button" className="btn" disabled={busy} onClick={() => send(null)}
+                  aria-label={`Use the server default ingest limit for ${m.name}`}>
+            Use server default
+          </button>
+        )}
+      </div>
+      <p id={`${id}-help`} className="mt-1 text-xs text-paper-muted">{INGEST_RATE_HELP}</p>
+      <ErrorNote error={error} />
+    </form>
+  );
+}
+
+function MemberRow({ m, swarm, swarms, location, inherited, estimate, geo, unplaced, onDone, ingestDefault }) {
   const [mode, setMode] = useState(null); // null | "edit" | "revoke" | "wipe"
   const [reason, setReason] = useState("");
   const [confirmWipe, setConfirmWipe] = useState("");
@@ -389,6 +462,9 @@ function MemberRow({ m, swarm, swarms, location, inherited, estimate, geo, unpla
       {m.status === "active" && mode === null && (
         <MembershipForm key={`membership:${swarm?.swarm ?? ""}:${swarm?.role ?? ""}`} name={m.name} current={swarm ?? null}
                         swarms={swarms} onDone={onDone} />
+      )}
+      {m.status === "active" && mode === null && (m.permissions || []).includes("contribute") && (
+        <IngestRateControl key={`ingest:${m.ingest_rate ?? ""}`} m={m} defaultRate={ingestDefault} onDone={onDone} />
       )}
       {m.status === "active" && mode === null && m.kind === "robot" && (
         <CognitionControl key={`cognition:${m.cognition?.source ?? ""}:${m.cognition?.value ?? ""}`} m={m} onDone={onDone} />
@@ -695,6 +771,7 @@ export default function Members() {
             </select>
             {list.length ? (
               <ul className="panel mt-3">{list.map((m) => <MemberRow key={m.id} m={m} swarm={swarmOf.get(m.name)} swarms={swarmsData}
+                                                      ingestDefault={data?.ingest_rate_default}
                                                       location={declaredOf(m.name)} inherited={inheritedOf(m.name)} estimate={estimateOf(m.name)}
                                                       geo={locations.data?.geo} unplaced={locOf(m.name)?.unplaced} onDone={() => { reload(); locations.reload(); }} />)}</ul>
             ) : (
