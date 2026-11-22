@@ -1,7 +1,7 @@
 """Incremental integrity checks from per-member checkpoints, and the background full check (#439)."""
 from __future__ import annotations
 
-import time
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, text, update
@@ -12,17 +12,25 @@ from server.services import integrity, retention
 
 
 def run_full_check(admin, timeout: float = 30) -> dict:
-    """Start a full check from the API and wait for it to finish."""
+    """Start a full check from the API and wait for its background task to finish.
+
+    It waits on the task itself instead of polling GET /admin/integrity/full:
+    in tests the in-memory SQLite database is one shared connection, and status
+    requests running alongside the check interleave their transactions with it,
+    which made the check miss an edit or stall now and then on busy CI runners.
+    """
     r = admin.post("/api/admin/integrity/full")
     assert r.status_code == 202, r.text
     assert r.json()["run"]["mode"] == "full"
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        run = admin.get("/api/admin/integrity/full").json()["run"]
-        if run["status"] != "running":
-            return run
-        time.sleep(0.05)
-    raise AssertionError("full check did not finish")
+    tasks = list(getattr(admin.http.app.state, "integrity_tasks", ()))
+
+    async def wait():
+        if tasks:
+            await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout)
+    admin.http.portal.call(wait)
+    run = admin.get("/api/admin/integrity/full").json()["run"]
+    assert run["status"] != "running", "full check did not finish"
+    return run
 
 
 def _check(admin, name=None) -> dict:
