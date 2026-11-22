@@ -348,6 +348,9 @@ class VectorSDK(Adapter):
         self.open: dict[str, str] = {}  # state -> key of its start record
         self.faces_last: dict[int, float] = {}
         self.on_specs: Callable[[dict], object] | None = None
+        # On the charger, from the battery poll (#449). A plain bool: the SDK
+        # thread writes it and the sidecar's loop reads it, so no lock is needed.
+        self._on_charger = False
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -406,6 +409,18 @@ class VectorSDK(Adapter):
             emit(Item("sample", values=values,
                       sensor={"sensor": group, "modality": modality, "unit": unit,
                               "deadband": DEADBANDS.get(group, {})}))
+
+    def on_battery(self, emit: Emit, state) -> None:
+        """One battery poll: the health item, and whether Vector is on the charger (#449)."""
+        health = battery_values(state)
+        if isinstance(health.get("on_charger_platform"), bool):
+            self._on_charger = health["on_charger_platform"]
+        if health:
+            emit(Item("health", values=health))
+
+    def resting(self) -> bool:
+        """Docked: on the charger platform, per the last battery reading (False before the first)."""
+        return self._on_charger
 
     def on_connected(self, robot) -> None:
         """Report the spec sheet once per connection, if the sidecar asked for it."""
@@ -471,9 +486,7 @@ class VectorSDK(Adapter):
                 if now >= next_battery:
                     next_battery = now + self.battery_seconds
                     try:
-                        health = battery_values(robot.get_battery_state())
-                        if health:
-                            emit(Item("health", values=health))
+                        self.on_battery(emit, robot.get_battery_state())
                     except Exception as exc:  # noqa: BLE001
                         logging.info("vector_sdk: battery read failed: %s", exc)
                 self._stop.wait(self.flag_seconds)

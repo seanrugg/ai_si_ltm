@@ -82,5 +82,13 @@ class Adapter:
     def start(self, emit: Emit) -> None:
         raise NotImplementedError
 
+    def resting(self) -> bool:
+        """True while the body is at rest (e.g. docked); the sidecar then uses the rest heartbeat.
+
+        The sidecar never knows what "resting" means for a given robot (#449,
+        AGENTS.md rule 10); each adapter decides. Default: never resting.
+        """
+        return False
+
     def stop(self) -> None:
         pass

@@ -562,3 +562,77 @@ def test_proximity_signs_on_distance_over_25_mm_or_a_boolean_not_on_signal_quali
     base["distance"] = 230.0
     assert window(180) == 2
     assert window(210, unobstructed=False) == 3  # a boolean flip signs
+
+
+# -- longer heartbeat while resting (#449) -------------------------------------
+
+class RestingAdapter(FakeAdapter):
+    def __init__(self, resting=True):
+        super().__init__([])
+        self.rest = resting
+
+    def resting(self):
+        return self.rest
+
+
+def _wheels_window(sc, link, now, left=10.0):
+    wheels = {"sensor": "wheels", "modality": "encoder", "unit": "mm/s", "deadband": {"left": 1.0, "right": 1.0}}
+    sc.emit(Item("sample", values={"left": left, "right": 10.0}, sensor=wheels), at=now)
+    sc.poll(link, now)
+    return len(link.records)
+
+
+def test_resting_body_heartbeats_at_the_rest_interval():
+    adapter = RestingAdapter(resting=True)
+    sc = Sidecar([adapter], body_seconds=30, now=0, heartbeat_seconds=600, rest_heartbeat_seconds=1800)
+    link = FakeLink()
+    assert _wheels_window(sc, link, 30) == 1
+    for now in range(60, 1801, 30):  # unchanged for 29.5 minutes: no 600 s heartbeat while resting
+        assert _wheels_window(sc, link, now) == 1, now
+    assert _wheels_window(sc, link, 1830) == 2  # 1800 s after the first: the rest heartbeat
+    assert link.records[1]["payload"]["stats"]["windows_skipped"] == 59
+    # A change still signs at once while resting.
+    assert _wheels_window(sc, link, 1860, left=20.0) == 3
+    # Off the charger: the normal 600 s interval applies, from the last signed record (1860 s).
+    adapter.rest = False
+    assert _wheels_window(sc, link, 2430, left=20.0) == 3  # 570 s since the last sign
+    assert _wheels_window(sc, link, 2460, left=20.0) == 4  # 600 s: heartbeat
+
+
+def test_resting_health_heartbeat_and_a_broken_resting_is_ignored():
+    class Broken(FakeAdapter):
+        def resting(self):
+            raise RuntimeError("bug in an adapter")
+
+    hadapter = HealthAdapter([])
+    sc = Sidecar([hadapter, RestingAdapter(True)], body_seconds=30, now=0, heartbeat_seconds=600,
+                 rest_heartbeat_seconds=1800)
+    link = FakeLink()
+    for now in range(30, 1201, 30):
+        sc.emit(Item("health", values={"battery_volts": 4.1, "charging": True}), at=now)
+        sc.poll(link, now)
+    assert len(link.records) == 1  # first window only: 20 min unchanged while resting
+    plain = Sidecar([Broken([])], body_seconds=30, now=0, heartbeat_seconds=600)
+    assert plain._heartbeat_seconds() == 600  # an adapter whose resting() fails counts as not resting
+
+
+def test_vector_resting_follows_the_charger_platform():
+    class State:
+        def __init__(self, on):
+            self.battery_volts, self.battery_level, self.is_charging = 4.0, 2, on
+            self.is_on_charger_platform = on
+
+    v = VectorSDK()
+    got = []
+    assert v.resting() is False  # before the first reading
+    v.on_battery(got.append, State(True))
+    assert v.resting() is True and got[-1].values["on_charger_platform"] is True
+    v.on_battery(got.append, State(False))
+    assert v.resting() is False
+    class NoFlag:
+        battery_volts = 4.0
+    v._on_charger = True
+    v.on_battery(got.append, NoFlag())  # a reading without the flag leaves it as it was
+    assert v.resting() is True
+    from adapters.wirepod import WirePodLogs
+    assert WirePodLogs("http://pod").resting() is False  # the default
