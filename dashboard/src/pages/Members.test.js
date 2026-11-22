@@ -22,11 +22,12 @@ const swarms = [
 
 let allMembers;
 let bulkResults;
+let swarmsData = swarms;
 let locationsData = null;
 vi.mock("../api/useApi.js", () => ({
   useApi: vi.fn((path) => {
     if (path === "/admin/members") return { data: { members: allMembers }, error: null, loading: false, reload: () => {} };
-    if (path === "/admin/swarms") return { data: swarms, loading: false };
+    if (path === "/admin/swarms") return { data: swarmsData, loading: false, reload: () => {} };
     if (path === "/admin/locations") return { data: locationsData, error: null, loading: false, reload: () => {} };
     return { data: null, error: null, loading: false, reload: () => {} };
   }),
@@ -46,6 +47,7 @@ beforeEach(() => {
     { id: "5", name: "eve", status: "pending", kind: "agent", permissions: [], requested_permissions: ["recall"], public_key: "bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222", created_at: "2026-01-02T00:00:00Z" },
   ];
   bulkResults = [{ id: "4", ok: true }, { id: "5", ok: true }];
+  swarmsData = swarms;
   locationsData = null;
   vi.mocked(api).mockResolvedValue({ results: bulkResults });
 });
@@ -359,5 +361,52 @@ describe("locations on the member rows (#399)", () => {
     fireEvent.click(within(row).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith("/admin/locations/member/alice",
       { method: "PUT", body: { label: "Example City, Example Country", room: null, lat: 1, lon: 2 } }));
+  });
+});
+
+describe("one swarm/role row per member (#392)", () => {
+  const forms = (name) => screen.queryAllByRole("form", { name: `Swarm and role for ${name}` });
+  const robot = { id: 9, name: "v3-c7r", status: "active", kind: "robot", permissions: [], last_ack_seq: 0,
+    last_seen_at: null, cognition: null };
+
+  afterEach(() => cleanup());
+
+  it("a robot with no AI-location override shows one row once the swarms load", () => {
+    // The real bug: before /admin/swarms arrives the swarm form and the robot's
+    // AI-location form had the same key, and a stale "Free agent" row stayed.
+    allMembers = [robot];
+    swarmsData = null;
+    const view = renderMembers();
+    expect(forms("v3-c7r")).toHaveLength(1);
+    swarmsData = [{ id: 1, name: "echo-base", members: [{ name: "v3-c7r", role: "member" }] }];
+    view.rerender(React.createElement(MemoryRouter, null, React.createElement(Members)));
+    const rows = forms("v3-c7r");
+    expect(rows).toHaveLength(1);
+    expect(within(rows[0]).getByLabelText("Swarm for v3-c7r").value).toBe("echo-base");
+    expect(within(rows[0]).getByLabelText("Role for v3-c7r").value).toBe("member");
+    expect(screen.getAllByRole("form", { name: "AI location for v3-c7r" })).toHaveLength(1);
+  });
+
+  it("approved with an intended swarm and added in the same flow: one row, the new swarm", () => {
+    allMembers = [{ ...robot, intended: { swarm: "echo-base", role: "member" } }];
+    swarmsData = [{ id: 1, name: "echo-base", members: [] }];
+    const view = renderMembers();
+    expect(within(forms("v3-c7r")[0]).getByLabelText("Swarm for v3-c7r").value).toBe("");
+    swarmsData = [{ id: 1, name: "echo-base", members: [{ name: "v3-c7r", role: "member" }] }];
+    view.rerender(React.createElement(MemoryRouter, null, React.createElement(Members)));
+    expect(forms("v3-c7r")).toHaveLength(1);
+    expect(within(forms("v3-c7r")[0]).getByLabelText("Swarm for v3-c7r").value).toBe("echo-base");
+  });
+
+  it("moving a member to Free agent: one row", () => {
+    allMembers = [robot, { ...allMembers[0] }];
+    swarmsData = [{ id: 1, name: "echo-base", members: [{ name: "v3-c7r", role: "member" }, { name: "alice", role: "member" }] }];
+    const view = renderMembers();
+    swarmsData = [{ id: 1, name: "echo-base", members: [] }];
+    view.rerender(React.createElement(MemoryRouter, null, React.createElement(Members)));
+    for (const name of ["v3-c7r", "alice"]) {
+      expect(forms(name)).toHaveLength(1);
+      expect(within(forms(name)[0]).getByLabelText(`Swarm for ${name}`).value).toBe("");
+    }
   });
 });
