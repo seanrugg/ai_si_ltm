@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import HelpTip from "../../components/HelpTip.jsx";
+import RecordLink from "../../components/RecordLink.jsx";
 import VizFrame, { HoloTable } from "../../components/VizFrame.jsx";
 import { CategoryLine } from "../../components/visual.jsx";
 import { api } from "../../api/client.js";
@@ -202,9 +203,9 @@ export function WhatItRead({ reading, swarm = false }) {
                       <ul className="ml-4 mt-1 list-disc text-sm">
                         {c.lessons.map((l) => (
                           <li key={`${l.agent}:${l.seq}`}>
-                            <Link to={`/record/${encodeURIComponent(l.agent)}/${l.seq}`} className="underline hover:text-paper">
+                            <RecordLink agent={l.agent} seq={l.seq} className="underline hover:text-paper">
                               {l.summary || `${l.agent}:${l.seq}`}
-                            </Link>
+                            </RecordLink>
                           </li>
                         ))}
                       </ul>
@@ -237,9 +238,9 @@ function Lessons({ lessons }) {
         <ul className="panel">
           {lessons.map((l) => (
             <li key={`${l.agent}:${l.seq}`} className="border-b border-ink-line px-3 py-2 last:border-b-0">
-              <Link to={`/record/${encodeURIComponent(l.agent)}/${l.seq}`} className="underline hover:text-paper">
+              <RecordLink agent={l.agent} seq={l.seq} className="underline hover:text-paper">
                 {l.summary || `${l.agent}:${l.seq}`}
-              </Link>
+              </RecordLink>
               <span className="ml-2 text-xs text-paper-muted">{`${l.agent} · ${localTime(l.ts)}`}</span>
             </li>
           ))}

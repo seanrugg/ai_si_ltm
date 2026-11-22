@@ -99,3 +99,34 @@ describe("the Types picker's None", () => {
     expect(vi.mocked(api).mock.calls[0][1].params.type).toBe("none");
   });
 });
+
+describe("View in timeline: focus on one record (#393)", () => {
+  it("opens and marks the focused record", async () => {
+    mockApi();
+    renderAt("/timeline?agent=z3-r0&focus=5");
+    const five = (await screen.findAllByText("five"))[0];
+    const row = five.closest("li");
+    expect(row.getAttribute("aria-current")).toBe("true");
+    expect(within(row).getByRole("button", { name: /five/ }).getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("six").closest("li").getAttribute("aria-current")).toBeNull();
+    // Links opened from here carry the timeline (with its filters) as their origin.
+    expect(within(row).getByRole("link", { name: "Trace this record" }).getAttribute("href"))
+      .toBe(`/decision-trace/z3-r0/5?from=${encodeURIComponent("/timeline?agent=z3-r0&focus=5")}`);
+  });
+
+  it("loads older pages until it finds the record, and says so when it can't", async () => {
+    const page1 = Array.from({ length: 50 }, (_, i) => rec(100 - i, `r${100 - i}`));
+    const page2 = [rec(9, "nine"), rec(8, "eight")];
+    vi.mocked(api).mockReset();
+    vi.mocked(api).mockImplementation(async (path, opts = {}) => {
+      if (path === "/admin/timeline") return { records: opts.params.offset ? page2 : page1 };
+      return { tombstones: [] };
+    });
+    renderAt("/timeline?agent=z3-r0&focus=8");
+    expect((await screen.findAllByText("eight"))[0].closest("li").getAttribute("aria-current")).toBe("true");
+    cleanup();
+    renderAt("/timeline?agent=z3-r0&focus=2");
+    expect(await screen.findByText(/z3-r0 #2 isn't in this list/)).toBeDefined();
+    expect(screen.getByRole("link", { name: "Open #2 on its own" })).toBeDefined();
+  });
+});

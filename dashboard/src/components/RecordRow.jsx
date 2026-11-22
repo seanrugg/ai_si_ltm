@@ -1,12 +1,12 @@
 // One record in a list. Click (or Enter) to expand the signed header and payload.
 import { useEffect, useId, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import { GENESIS, localTime, relativeTime } from "../lib/format.js";
 import { RECORD_DELETE, WIPE_VS_DELETE } from "../lib/help.js";
 import { splitRef, tombstoneText } from "../lib/tombstones.js";
 import HelpTip from "./HelpTip.jsx";
+import RecordLink from "./RecordLink.jsx";
 import { ErrorNote, HashStrip, StatusBadge } from "./ui.jsx";
 
 const HEADER_FIELDS = ["v", "agent", "seq", "ts", "type", "summary", "place", "peers", "tags", "refs", "outcome", "sw"];
@@ -48,9 +48,9 @@ function RefLinks({ refs }) {
             {deleted.has(ref) ? (
               <span>{ref} (deleted record)</span>
             ) : (
-              <Link className="underline decoration-ink-line hover:decoration-led" to={`/record/${agent}/${seq}`}>
+              <RecordLink className="underline decoration-ink-line hover:decoration-led" agent={agent} seq={seq}>
                 {ref}
-              </Link>
+              </RecordLink>
             )}
           </span>
         );
@@ -241,9 +241,9 @@ export function RecordDetail({ record, onDeleted }) {
           </pre>
         )}
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Link to={`/decision-trace/${record.agent}/${record.seq}`} className="btn">
+          <RecordLink trace agent={record.agent} seq={record.seq} className="btn">
             Trace this record
-          </Link>
+          </RecordLink>
           <span>
             <button ref={deleteButton} type="button" className="btn btn-danger" aria-expanded={deleting}
                     onClick={() => setDeleting(true)} disabled={deleting}>
@@ -260,12 +260,18 @@ export function RecordDetail({ record, onDeleted }) {
   );
 }
 
-export default function RecordRow({ record, showAgent = true, status }) {
-  const [open, setOpen] = useState(false);
+export default function RecordRow({ record, showAgent = true, status, highlight = false }) {
+  const [open, setOpen] = useState(highlight);
   const [tombstone, setTombstone] = useState(null);
+  const row = useRef(null);
+  // "View in timeline" (#393): the record it came from is open, marked and in view.
+  useEffect(() => {
+    if (highlight) row.current?.scrollIntoView?.({ block: "center" });
+  }, [highlight]);
   if (tombstone) return <TombstoneRow tombstone={tombstone} showAgent={showAgent} announce />;
   return (
-    <li className="border-b border-ink-line last:border-b-0">
+    <li ref={row} className={`border-b border-ink-line last:border-b-0 ${highlight ? "ring-2 ring-inset ring-led" : ""}`}
+        aria-current={highlight ? "true" : undefined}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}

@@ -4,6 +4,7 @@ import { api } from "../api/client.js";
 import { useApi } from "../api/useApi.js";
 import { EmptyState, ErrorNote, Loading, PageHeader, StatusBadge } from "../components/ui.jsx";
 import { localTime, plural, relativeTime } from "../lib/format.js";
+import RecordLink from "../components/RecordLink.jsx";
 
 const EXPLAIN = {
   gap: "A record is missing from the chain.",
@@ -137,7 +138,7 @@ export default function Integrity() {
                 {r.error && (
                   <div className="mt-2 rounded-md border border-bad/40 bg-bad/5 p-3 text-sm">
                     <p>
-                      At <Link className="underline" to={`/record/${r.member}/${r.error.seq}`}>#{r.error.seq}</Link>:{" "}
+                      At <RecordLink className="underline" agent={r.member} seq={r.error.seq}>#{r.error.seq}</RecordLink>:{" "}
                       {EXPLAIN[r.error.code] || r.error.message}
                     </p>
                     <p className="mt-1 text-xs text-paper-muted">{r.error.code}: {r.error.message}</p>
