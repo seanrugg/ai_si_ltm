@@ -11,7 +11,7 @@ import RecordLink from "../components/RecordLink.jsx";
 
 const OUTCOMES = ["success", "partial", "reflex_stop", "stuck", "abandoned", "failed"];
 const PAGE = 50;
-const FILTERS = ["agent", "type", "outcome", "place", "q", "since", "swarm"];
+const FILTERS = ["agent", "type", "outcome", "place", "q", "since", "swarm", "involving"];
 // Text fields apply after typing stops; selects and the Types picker apply at once.
 const TEXT_APPLY_DELAY_MS = 400;
 // "View in timeline" (#393): `focus=<seq>` with `agent` opens that record. The
@@ -90,10 +90,12 @@ export default function Timeline() {
     try {
       // The admin timeline endpoint takes the window start as the "from" query
       // param; the browser URL keeps it as "since" so drill-down links can share it.
-      const { since, ...rest } = filters;
+      // `involving` (#477) only means something with a member; the API takes a boolean.
+      const { since, involving, ...rest } = filters;
       const res = await api("/admin/timeline", {
         params: {
           ...rest,
+          ...(involving && rest.agent ? { involving: true } : {}),
           limit: PAGE,
           offset,
           ...(since ? { from: since } : {}),
@@ -147,6 +149,9 @@ export default function Timeline() {
   }
   if (filters.swarm) active.push({ key: "swarm", label: `Swarm: ${filters.swarm}` });
   if (filters.agent) active.push({ key: "agent", label: `Member: ${filters.agent}` });
+  if (filters.agent && filters.involving) {
+    active.push({ key: "involving", label: `Including records naming ${filters.agent}` });
+  }
   if (filters.outcome) active.push({ key: "outcome", label: `Outcome: ${filters.outcome.replace("_", " ")}` });
   if (filters.place) active.push({ key: "place", label: `Place: ${filters.place}` });
   if (filters.q) active.push({ key: "q", label: `Summary contains: ${filters.q}` });
@@ -190,6 +195,14 @@ export default function Timeline() {
             onSubmit={(e) => e.preventDefault()}>
         <input className="field w-36" placeholder="Member" value={textValue("agent")}
                onChange={(e) => onTextChange(e, "agent")} aria-label="Member" />
+        {filters.agent && (
+          <label className="flex items-center gap-2 text-sm text-paper-muted"
+                 title="Also show records other members wrote that name this member as a peer, such as commands it received">
+            <input type="checkbox" className="accent-led" checked={Boolean(filters.involving)}
+                   onChange={(e) => setParam("involving", e.target.checked ? "1" : "")} />
+            Include records naming this member
+          </label>
+        )}
         <select className="field" value={filters.outcome}
                 onChange={(e) => setParam("outcome", e.target.value)} aria-label="Outcome">
           <option value="">Any outcome</option>
