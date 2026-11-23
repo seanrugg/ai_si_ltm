@@ -130,3 +130,34 @@ describe("View in timeline: focus on one record (#393)", () => {
     expect(screen.getByRole("link", { name: "Open #2 on its own" })).toBeDefined();
   });
 });
+
+describe("records naming a member (#477)", () => {
+  const timelineCalls = () => vi.mocked(api).mock.calls.filter(([path]) => path === "/admin/timeline");
+
+  it("offers the checkbox only with a Member filter", async () => {
+    mockApi();
+    renderAt("/");
+    await screen.findByText("six");
+    expect(screen.queryByLabelText("Include records naming this member")).toBeNull();
+  });
+
+  it("asks for records naming the member and shows a chip", async () => {
+    mockApi();
+    renderAt("/?agent=z3-r0");
+    await screen.findByText("six");
+    expect(timelineCalls().at(-1)[1].params.involving).toBeUndefined();
+    fireEvent.click(screen.getByLabelText("Include records naming this member"));
+    await waitFor(() => expect(timelineCalls().at(-1)[1].params.involving).toBe(true));
+    expect(timelineCalls().at(-1)[1].params.agent).toBe("z3-r0");
+    const chips = screen.getByRole("group", { name: "Active filters" });
+    expect(within(chips).getByText(/Including records naming z3-r0/)).toBeDefined();
+  });
+
+  it("ignores involving without a member", async () => {
+    mockApi();
+    renderAt("/?involving=1");
+    await screen.findByText("six");
+    expect(timelineCalls().at(-1)[1].params.involving).toBeUndefined();
+    expect(screen.queryByText(/Including records naming/)).toBeNull();
+  });
+});

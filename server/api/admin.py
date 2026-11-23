@@ -464,12 +464,18 @@ async def timeline(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     swarm: str | None = None,
+    involving: bool = False,
 ) -> dict:
-    f = recall.RecordFilter(agent=agent, place=place, peer=peer, tag=tag, exclude_tag=exclude_tag,
-                            outcome=outcome, since=since, until=until, q=q, limit=limit, offset=offset)
+    """``involving`` with ``agent`` (#477): records the member signed **or** that name it in ``peers``."""
+    involving = involving and bool(agent)
+    f = recall.RecordFilter(agent=None if involving else agent, place=place, peer=peer, tag=tag,
+                            exclude_tag=exclude_tag, outcome=outcome, since=since, until=until, q=q,
+                            limit=limit, offset=offset)
     async with transaction(request) as session:
         # `type` is handled here (not by build_query) so it can accept `sensed`.
         stmt = recall.build_query(session, f, recall.Scope()).where(_timeline_type_clause(session, type))
+        if involving:
+            stmt = stmt.where(or_(Record.agent == agent, recall._json_list_contains(session, Record.peers, agent)))
         if swarm:
             stmt = stmt.where(await _in_swarm_clause(session, swarm))
         stmt = stmt.order_by(Record.ts.desc(), Record.id.desc()).limit(limit).offset(offset)
