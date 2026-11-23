@@ -146,6 +146,32 @@ Besides the detailed records, the plugin keeps **bounded usage counters** for ea
 - At the first hook after midnight UTC, the finished day is signed into the chain (local work only; hooks never use the network) and the recorder's thread sends it. The day file is deleted once LTMS has accepted it. If the chain isn't ready yet, for example while offline, the file waits for a later hook or for exit.
 - If Hermes stops between signing the rollup and saving that it was signed, that day can be sent twice. The record's date says which day it covers.
 
+## `tool_guard`: limits on tool arguments
+
+A second, separate plugin in this folder. A model can send any number to a tool, and some tools pass it straight to hardware. VectorClaw's `vector_drive` drives `distance_mm` as given, so a made-up `2000` drives two metres. `tool_guard` checks each call in Hermes's `pre_tool_call` hook, **before the tool runs**, and blocks a call whose argument is out of range. Hermes returns the block message to the model as the tool's result, for example:
+
+> Error: refused by tool_guard before mcp__vector__vector_drive ran: distance_mm=2000 is outside the limit of ±100; use a value between -100 and 100. The robot did not move.
+
+Install it like the recorder: link `integrations/hermes/tool_guard` into `~/.hermes/plugins/tool_guard`, run `hermes plugins enable tool_guard`, and restart the gateway. It needs no variables and no dependencies. The log shows `tool_guard: guarding vector_drive (distance_mm ±100, angle_deg ±90, speed ±100)`.
+
+**Limits** (`plugins.entries.tool_guard.settings.limits` in `~/.hermes/config.yaml`): tool name → `{argument: largest allowed absolute value}`. A bare name such as `vector_drive` also matches `mcp__<server>__vector_drive` for every server. Setting `limits` replaces the defaults; `{}` turns the guard off.
+
+```yaml
+plugins:
+  entries:
+    tool_guard:
+      settings:
+        limits:
+          vector_drive: {distance_mm: 100, angle_deg: 90, speed: 100}   # the default
+```
+
+- **Rejected values:** a value that isn't a finite number (text, `true`, infinity) is refused too.
+- **Missing arguments** aren't checked: the tool's own defaults apply.
+- **Fail-closed:** if the guard itself fails while checking a guarded tool, it blocks the call. Other tools are never touched.
+- **With the recorder,** a blocked call is recorded as a failed tool call, since its result starts with `Error:`, if Hermes runs `post_tool_call` for blocked calls. Check this on your Hermes version with one deliberate out-of-range call.
+
+The guard is a backstop, not the whole safety story: keep a narrow tool list for routines, and rely on the robot's own protections (Vector's cliff sensors, stopping when lifted).
+
 ## Not included
 
 - Recording model replies or prompts.

@@ -1,0 +1,21 @@
+name: tool_guard
+version: 0.1.0
+description: >-
+  Refuses tool calls whose numeric arguments are out of range, before the tool
+  runs (for example a robot drive of 2000 mm). Limits are settings; the default
+  guards VectorClaw's vector_drive.
+author: LTMS project
+provides_hooks:
+  - pre_tool_call
+config_schema:
+  limits:
+    type: object
+    default:
+      vector_drive:
+        distance_mm: 100
+        angle_deg: 90
+        speed: 100
+    description: >-
+      Tool name -> {argument: largest allowed absolute value}. A bare tool name
+      also matches mcp__<server>__<name> for any server. Setting this replaces
+      the defaults; {} turns the guard off.
