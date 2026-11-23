@@ -425,8 +425,9 @@ def test_token_denials_are_logged_by_name_never_the_token(db_url):
     denials.clock = lambda: start
     _deny_n(http, 3, token=plaintext)
     denials.clock = lambda: start + 60
-    # The first denial of the next minute writes the ended minute.
-    assert _call(http, token=plaintext)["error"]["data"]["reason"] == "per_caller"
+    # The first denial of the next minute writes the ended minute. _deny_n, not a
+    # single call: on a slow run the bucket can refill and let one call through.
+    assert _deny_n(http, 1, token=plaintext)[0]["reason"] == "per_caller"
     rows = _audit(admin)
     assert len(rows) == 1 and rows[0]["detail"]["key_kind"] == "token"
     assert rows[0]["detail"]["key"] == "busy-agent" and rows[0]["detail"]["denied"] == 3
