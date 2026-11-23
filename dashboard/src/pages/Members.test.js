@@ -327,7 +327,9 @@ describe("locations on the member rows (#399)", () => {
     renderMembers();
     const alice = rowOf("alice").textContent;
     expect(alice).toContain("Example City, Example Country (network estimate · 203.0.113.7, via hub-1)");
-    expect(alice).toContain("IP geolocation by DB-IP");
+    // The credit is shown once under the list, not repeated on each card.
+    expect(alice).not.toContain("DB-IP");
+    expect(screen.getAllByText("IP geolocation by DB-IP")).toHaveLength(1);
     expect(alice).not.toContain("not set");
     const bob = rowOf("bob").textContent;
     expect(bob).toContain("Lab, B12");
@@ -346,6 +348,7 @@ describe("locations on the member rows (#399)", () => {
     };
     renderMembers();
     expect(rowOf("alice").textContent).not.toContain("DB-IP");
+    expect(screen.queryByText("IP geolocation by DB-IP")).toBeNull();
     const bob = rowOf("bob").textContent;
     expect(bob).toContain("not set");
     expect(bob).toContain("It has never connected to FLTMS directly.");
@@ -483,5 +486,18 @@ describe("ingest rate limit control (#451)", () => {
     expect(ingestRateText(null, 10)).toBe("Ingest limit: server default (10 records/s)");
     expect(ingestRateText(null, undefined)).toBe("Ingest limit: server default");
     expect(ingestRateText(2.5, 10)).toBe("Ingest limit: 2.5 records/s (override)");
+  });
+});
+
+describe("repeated help text", () => {
+  it("puts the ingest-limit explanation behind one ? per card instead of printing it on every card", () => {
+    const base = { status: "active", kind: "robot", permissions: ["contribute"], last_ack_seq: 0, last_seen_at: null };
+    allMembers = [{ ...base, id: 21, name: "one" }, { ...base, id: 22, name: "two" }];
+    renderMembers();
+    expect(screen.queryByText(/Records over the limit wait/)).toBeNull();
+    const tips = screen.getAllByRole("button", { name: "About ingest limits" });
+    expect(tips).toHaveLength(2);
+    fireEvent.click(tips[0]);
+    expect(screen.getAllByText(/Records over the limit wait/)).toHaveLength(1);
   });
 });

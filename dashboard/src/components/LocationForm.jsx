@@ -50,10 +50,11 @@ export function EstimateText({ estimate }) {
  * ``inherited``: a declared location this subject gets from its swarm (#285), shown when it has none of its own.
  * ``suggestion``: a network estimate to pre-fill the form with; it is never saved without the admin pressing Save.
  * ``estimate``: a gps or network entry shown when nothing is declared or inherited (#399), with ``geo``
- * for the DB-IP credit; ``unplaced``: why there is no location at all, shown after "not set".
+ * for the DB-IP credit; ``credit={false}`` leaves that credit to the page, for lists that show it once;
+ * ``unplaced``: why there is no location at all, shown after "not set".
  */
 export default function LocationForm({ subjectType, name, current, onDone, title, inherited, suggestion, prompt,
-  estimate, geo, unplaced }) {
+  estimate, geo, unplaced, credit = true }) {
   const [open, setOpen] = useState(false);
   const seed = current ?? suggestion ?? null;
   const [draft, setDraft] = useState({
@@ -114,7 +115,7 @@ export default function LocationForm({ subjectType, name, current, onDone, title
           <ErrorNote error={error} />
         </form>
       )}
-      {showEstimate && estimate.source === "network" && <GeoCredit geo={geo} className="mt-1" />}
+      {credit && showEstimate && estimate.source === "network" && <GeoCredit geo={geo} className="mt-1" />}
     </div>
   );
 }
