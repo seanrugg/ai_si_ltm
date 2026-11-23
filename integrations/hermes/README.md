@@ -19,7 +19,7 @@ The model never sees the member's key.
 | Session ends | `event` "Hermes session completed: N tool calls, M errors" | `hermes,session` | the counts, `completed`, `interrupted` |
 
 - **`ok`** is a best guess. Hermes has no separate error flag, so a result counts as an error when it is a JSON object with a truthy `error`, `success: false`, `ok: false` or `isError: true`, or text that starts with `Error`.
-- **`peers`.** When a tool name matches a `peer_map` prefix, the record's `peers` names the member the tool acted on, so the action also appears with that robot.
+- **`peers`.** When a tool name matches a `peer_map` prefix, the record's `peers` names the member the tool acted on. The action then also counts for that robot: on its profile (Top peers), in Conversation, in the xAPI export, and on its Timeline with **Include records naming this member** checked.
 - **Limits.**
   - `result_raw` is cut to `max_result_bytes` (default 8192), with `result_truncated: true`.
   - `args` over 4 KB are kept as truncated text, with `args_truncated: true`.
@@ -38,46 +38,58 @@ Use `summary` or `off` wherever tool content must not leave the device.
 
 ## Install
 
-You need a running LTMS and Hermes Agent on the same machine as the plugin.
+You need a running LTMS and Hermes Agent (tested with v0.23.3) on the same machine as the plugin, and a checkout of this repository. The checkout can be read-only to the user running Hermes, for example one that a hub's service user owns.
 
-1. **Install the LTMS client into Hermes's Python.** The plugin imports `cli_agent`, which ships in the `ltms-harness` package (`harness/` in this repo). Install it into the Python environment Hermes runs in, not the system Python. For example, from a checkout of this repo:
-
-   ```bash
-   cd ~/.hermes/hermes-agent && uv pip install /path/to/ltms/harness
-   ```
-
-   Adjust the first path if your Hermes install lives elsewhere. `hermes plugins doctor` shows whether the plugin can load.
-
-2. **Create a key and enroll the agent as a member** (with the client installed, from any shell):
+1. **Create a key and enroll the agent as a member.** Run this from the checkout with any Python 3.11+, using `uv` to supply the two libraries the client needs:
 
    ```bash
-   python -m cli_agent genkey --name <agent-name> --out ~/.hermes/ltms/<agent-name>.json
-   python -m cli_agent enroll --key ~/.hermes/ltms/<agent-name>.json \
+   cd /path/to/ltms
+   uv run --no-project --with pynacl --with httpx python -m cli_agent genkey --name <agent-name> --out ~/.hermes/ltms/<agent-name>.json
+   uv run --no-project --with pynacl --with httpx python -m cli_agent enroll --key ~/.hermes/ltms/<agent-name>.json \
        --server https://ltms.example.org --kind agent --swarm <your-swarm> --role member
-   python -m cli_agent pubkey --key ~/.hermes/ltms/<agent-name>.json   # fingerprint to check
+   uv run --no-project --with pynacl --with httpx python -m cli_agent pubkey --key ~/.hermes/ltms/<agent-name>.json
    ```
 
-   Then approve it in the dashboard (**Members**). Check that the public key matches the `pubkey` output before approving. `--swarm` and `--role` are a request shown to the admin, not a grant.
+   Then approve the member in the dashboard (**Members**), after checking that its public key matches the `pubkey` output. `--swarm` and `--role` are a request shown to the admin, not a grant.
 
-   Use a key **only for this plugin**. If another program (for example `ltms_mcp`) signs with the same key, the two will fork the member's chain.
+   Use the key **only for this plugin**. If another program (for example `ltms_mcp`) signs with the same key, the two will fork the member's chain. Keep the key file private (`chmod 700 ~/.hermes/ltms`).
 
-3. **Link the plugin into Hermes:**
+2. **Link the plugin and enable it.** Hermes plugins are opt-in: a linked plugin does nothing until it is enabled.
 
    ```bash
    ln -s /path/to/ltms/integrations/hermes/ltms_recorder ~/.hermes/plugins/ltms_recorder
-   hermes plugins doctor
+   hermes plugins enable ltms_recorder
    ```
 
-   Enable it if your Hermes version asks you to, for example in `hermes plugins` or `/plugins`.
+   Enabling installs the plugin's dependencies (`pynacl`, `httpx`, from `pyproject.toml` beside the plugin) into Hermes's own environment. The LTMS client code (`cli_agent`, `ltms_contract`) is not installed: the plugin loads it from the checkout it is linked from, so `git pull` updates the plugin and the client together.
 
-4. **Set the environment** wherever Hermes starts, for example in Hermes's env file or the service that runs `hermes gateway`:
+3. **Set the two variables in `~/.hermes/.env`.** Hermes and its gateway read this file when they start. An `export` in your shell does not reach a running gateway.
 
    ```bash
    LTMS_SERVER=https://ltms.example.org
    LTMS_KEY_PATH=/home/<user>/.hermes/ltms/<agent-name>.json
    ```
 
-   If either is missing, the plugin logs a warning and stays off. Hermes still starts.
+4. **Restart the gateway** (`hermes gateway restart`), start a new chat, and check the log:
+
+   ```bash
+   grep ltms_recorder ~/.hermes/logs/agent.log | tail -3
+   ```
+
+   Look for `recording as <agent-name> (mode full, rollup on)` and then `chain ready (online, seq …)`. Each session then shows on the member's Timeline: a session start, one `action` per tool call, a session end.
+
+**Copying the plugin instead of linking it?** Then it can't find the client in a checkout. Install `ltms-harness` (`harness/` in this repo) into **Hermes's environment** instead: the `site-packages` folder that `hermes --run-module site` lists under `environments/`, as `uv pip install --python <that environment>/bin/python …`. Hermes may rebuild that environment when plugins change, which drops a manual install, so linking is the better choice. If the checkout is read-only, build from a scratch copy of `harness/`, `cli_agent/` and `ltms_contract/`: the build writes an `egg-info` folder beside `harness/`.
+
+### Troubleshooting
+
+| What you see | Why | Fix |
+|---|---|---|
+| `hermes plugins doctor` passes but nothing is recorded | The plugin isn't enabled. Doctor loads a plugin to test it even when it's disabled | `hermes plugins enable ltms_recorder`; `hermes plugins list` shows the status |
+| Doctor reports `0 hook(s)` | Doctor runs without your environment, so the plugin finds no `LTMS_SERVER` and registers nothing | Expected; check the log after a real session instead |
+| `not started, LTMS_SERVER is not set` | The variables aren't in `~/.hermes/.env`, or the gateway started before they were added | Add them to `~/.hermes/.env` and restart the gateway |
+| `not started, cannot import nacl` (or `httpx`) | Hermes's environment lacks a dependency, for example after it was rebuilt | `hermes plugins enable ltms_recorder` again, then restart the gateway |
+| `not started, cannot import cli_agent` | The plugin isn't linked from a checkout and `ltms-harness` isn't installed in Hermes's environment | Link it from a checkout (step 2), or see "Copying the plugin" above |
+| `Provider temporarily unavailable` in chat | The model server is slow or out of memory; not the plugin | Check the model server (for Ollama: `ollama ps`, `free -h`) |
 
 ## Settings
 

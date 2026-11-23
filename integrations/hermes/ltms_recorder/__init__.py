@@ -10,13 +10,52 @@ from __future__ import annotations
 import atexit
 import logging
 import os
+import sys
 from pathlib import Path
 
 log = logging.getLogger("ltms_recorder")
 
-PLUGIN_VERSION = "0.2.0"
+PLUGIN_VERSION = "0.2.1"
 HOOKS = ("on_session_start", "post_tool_call", "on_session_end")
 ROLLUP_HOOKS = ("post_api_request", "api_request_error", "post_compaction")
+
+
+CLIENT_PACKAGES = ("cli_agent", "ltms_contract")
+
+
+def checkout_root() -> Path | None:
+    """The LTMS repository this plugin lives in, if it holds the client packages.
+
+    Symlinks are resolved, so a plugin linked into ``~/.hermes/plugins/`` from a
+    checkout finds that checkout (``<repo>/integrations/hermes/ltms_recorder``).
+    """
+    try:
+        root = Path(__file__).resolve().parents[3]
+    except IndexError:
+        return None
+    if all((root / pkg / "__init__.py").is_file() for pkg in CLIENT_PACKAGES):
+        return root
+    return None
+
+
+def use_checkout_client() -> Path | None:
+    """Make ``cli_agent`` and ``ltms_contract`` importable from the checkout (#478).
+
+    An installed ``ltms-harness`` wins: the checkout is only added when the
+    packages can't be imported. It is appended, never prepended, so it can't
+    shadow anything Hermes ships. Returns the root it added, or None.
+    """
+    try:
+        import cli_agent  # noqa: F401
+        import ltms_contract  # noqa: F401
+        return None
+    except ImportError:
+        pass
+    root = checkout_root()
+    if root is not None and str(root) not in sys.path:
+        sys.path.append(str(root))
+        return root
+    return None
 
 
 def _data_dir() -> Path:
@@ -89,6 +128,7 @@ def wire(recorder, rollup) -> dict:
 def register(ctx) -> None:
     """Hermes entry point. Never raises: a broken recorder must not stop Hermes."""
     try:
+        use_checkout_client()
         try:
             settings = ctx.get_config() or {}
         except Exception:  # noqa: BLE001 - older Hermes, or no settings saved yet
@@ -98,8 +138,14 @@ def register(ctx) -> None:
     except KeyError as exc:
         log.warning("ltms_recorder: not started, %s is not set", exc.args[0])
         return
-    except ImportError:
-        log.warning("ltms_recorder: not started, install ltms-harness into Hermes's Python (see README)")
+    except ImportError as exc:
+        missing = getattr(exc, "name", None) or str(exc)
+        if missing in CLIENT_PACKAGES or (missing or "").split(".")[0] in CLIENT_PACKAGES:
+            hint = ("link the plugin from an LTMS checkout, or install ltms-harness into Hermes's environment "
+                    "(see README)")
+        else:
+            hint = "run `hermes plugins enable ltms_recorder` again to install its dependencies (see README)"
+        log.warning("ltms_recorder: not started, cannot import %s: %s", missing, hint)
         return
     except Exception as exc:  # noqa: BLE001
         log.warning("ltms_recorder: not started (%s)", type(exc).__name__)

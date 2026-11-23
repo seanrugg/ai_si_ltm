@@ -1,5 +1,5 @@
 name: ltms_recorder
-version: 0.2.0
+version: 0.2.1
 description: >-
   Records Hermes sessions and every tool call (with the raw result) as signed
   LTMS/FLTMS records, so a fleet can see what the agent actually did, plus one
@@ -12,6 +12,10 @@ provides_hooks:
   - post_api_request
   - api_request_error
   - post_compaction
+# Shown by `hermes plugins doctor`; Hermes installs from pyproject.toml beside this file.
+python_dependencies:
+  - pynacl>=1.5
+  - httpx>=0.27
 requires_env:
   - name: LTMS_SERVER
     description: LTMS base URL, e.g. https://ltms.example.org

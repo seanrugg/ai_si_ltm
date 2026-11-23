@@ -243,3 +243,60 @@ def test_register_without_env_does_nothing(monkeypatch):
     ctx = _FakeCtx()
     ltms_recorder.register(ctx)  # must not raise
     assert ctx.hooks == {}
+
+
+# ---------------------------------------------------------------- #478: client from the checkout, real import errors
+def test_checkout_root_is_this_repository():
+    assert ltms_recorder.checkout_root() == ROOT
+
+
+def test_checkout_client_is_added_only_when_missing(monkeypatch):
+    # Installed (importable): nothing changes.
+    before = list(sys.path)
+    assert ltms_recorder.use_checkout_client() is None
+    assert sys.path == before
+
+    # Not importable: the checkout is appended (never prepended), once.
+    import builtins
+    real_import = builtins.__import__
+
+    def no_client(name, *args, **kwargs):
+        if name in ("cli_agent", "ltms_contract"):
+            raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_client)
+    monkeypatch.setattr(sys, "path", [p for p in sys.path if p != str(ROOT)])
+    assert ltms_recorder.use_checkout_client() == ROOT
+    assert sys.path[-1] == str(ROOT)
+    assert ltms_recorder.use_checkout_client() is None  # already there
+
+
+def test_checkout_root_needs_both_packages(monkeypatch, tmp_path):
+    fake = tmp_path / "repo" / "integrations" / "hermes" / "ltms_recorder" / "__init__.py"
+    fake.parent.mkdir(parents=True)
+    fake.write_text("")
+    (tmp_path / "repo" / "cli_agent").mkdir()
+    (tmp_path / "repo" / "cli_agent" / "__init__.py").write_text("")
+    monkeypatch.setattr(ltms_recorder, "__file__", str(fake))
+    assert ltms_recorder.checkout_root() is None
+    (tmp_path / "repo" / "ltms_contract").mkdir()
+    (tmp_path / "repo" / "ltms_contract" / "__init__.py").write_text("")
+    assert ltms_recorder.checkout_root() == (tmp_path / "repo").resolve()
+
+
+@pytest.mark.parametrize("missing, hint", [("nacl", "hermes plugins enable"), ("cli_agent", "LTMS checkout")])
+def test_import_error_names_the_module(monkeypatch, caplog, missing, hint):
+    monkeypatch.setenv("LTMS_SERVER", "http://127.0.0.1:9")
+    monkeypatch.setenv("LTMS_KEY_PATH", "/nonexistent")
+
+    def broken(*a, **k):
+        raise ModuleNotFoundError(f"No module named {missing!r}", name=missing)
+
+    monkeypatch.setattr(ltms_recorder, "build_recorder", broken)
+    ctx = _FakeCtx({})
+    with caplog.at_level(logging.WARNING, logger="ltms_recorder"):
+        ltms_recorder.register(ctx)
+    assert ctx.hooks == {}
+    msg = " ".join(r.getMessage() for r in caplog.records)
+    assert f"cannot import {missing}" in msg and hint in msg
