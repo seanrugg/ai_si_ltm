@@ -1,4 +1,5 @@
 import { useState } from "react";
+import GeoCredit from "../components/GeoCredit.jsx";
 import GuidedSetup from "../components/GuidedSetup.jsx";
 import HelpTip from "../components/HelpTip.jsx";
 import LocationForm from "../components/LocationForm.jsx";
@@ -362,7 +363,7 @@ export function IngestRateControl({ m, defaultRate, onDone }) {
         <label htmlFor={id} className="sr-only">Ingest limit for {m.name}, records per second</label>
         <input id={id} type="number" inputMode="decimal" min="0" max={MAX_INGEST_RATE} step="any"
                className="field w-28" value={value} onChange={(e) => setValue(e.target.value)}
-               placeholder="records/s" aria-describedby={`${id}-help`} />
+               placeholder="records/s" />
         <button className="btn" disabled={busy} aria-label={`Save ingest limit for ${m.name}`}>Save</button>
         {m.ingest_rate != null && (
           <button type="button" className="btn" disabled={busy} onClick={() => send(null)}
@@ -370,8 +371,9 @@ export function IngestRateControl({ m, defaultRate, onDone }) {
             Use server default
           </button>
         )}
+        {/* Same text on every card, so it lives behind "?" (dashboard/README.md, "Repeated text"). */}
+        <HelpTip id={`${id}-help`} label="About ingest limits">{INGEST_RATE_HELP}</HelpTip>
       </div>
-      <p id={`${id}-help`} className="mt-1 text-xs text-paper-muted">{INGEST_RATE_HELP}</p>
       <ErrorNote error={error} />
     </form>
   );
@@ -472,7 +474,7 @@ function MemberRow({ m, swarm, swarms, location, inherited, estimate, geo, unpla
       {m.status === "active" && mode === null && (
         <LocationForm key={`location:${JSON.stringify([location, estimate])}`} subjectType="member" name={m.name} current={location}
                       inherited={inherited} estimate={estimate} suggestion={estimate} geo={geo} unplaced={unplaced}
-                      onDone={onDone} />
+                      credit={false} onDone={onDone} />
       )}
       {mode === "edit" && (
         <PermissionEditor initial={m.permissions} initialScope={m.scope} saveLabel="Save permissions" busy={busy}
@@ -776,6 +778,10 @@ export default function Members() {
                                                       geo={locations.data?.geo} unplaced={locOf(m.name)?.unplaced} onDone={() => { reload(); locations.reload(); }} />)}</ul>
             ) : (
               <EmptyState title={emptyTitle}>{emptyBody}</EmptyState>
+            )}
+            {/* DB-IP's CC BY credit, once for the list rather than on every card (#388). */}
+            {list.some((m) => !declaredOf(m.name) && !inheritedOf(m.name) && estimateOf(m.name)?.source === "network") && (
+              <GeoCredit geo={locations.data?.geo} className="mt-2" />
             )}
           </section>
           {past.length > 0 && (

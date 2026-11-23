@@ -44,3 +44,18 @@ add `LTMS_DASHBOARD_DIR=dashboard/dist` to the uvicorn command and open http://l
 Design tokens are in `tailwind.config.js`: `ink` backgrounds, `paper` text,
 `led` (amber) for the one primary action per screen, `ok/warn/bad` for status
 only. Use the shared components instead of new styles where you can.
+
+## Repeated text
+
+If the same explanation would print on every card or row of a page, it belongs
+behind a `HelpTip` ("?") next to the control it explains, not in the layout.
+Cards show what differs between them (names, values, status); text that is
+identical everywhere costs space on every card and gets skimmed past anyway.
+
+- One `HelpTip` per control, with a specific `label` ("About ingest limits"),
+  so screen-reader users still reach it from each card. Put the text in
+  `src/lib/help.js` so it is written once.
+- A notice that must stay visible (a licence credit, a safety warning) is
+  shown once for the whole list or page, not once per item.
+- Warnings that change what an admin is about to do (revoke, wipe, delete) stay
+  in the confirm panel where they apply; they are not moved into a tooltip.
