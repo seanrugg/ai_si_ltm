@@ -32,7 +32,7 @@ function Row({ r }) {
       </td>
       <td className="px-3 py-2">
         <span className={`font-bold ${statusClass(r.status)}`}>{STATUS_TEXT[r.status] ?? r.status}</span>
-        <div className="text-xs text-paper-muted">{interval ? `Heartbeat ${interval} (self-report)` : "No heartbeat interval yet"}</div>
+        <div className="text-xs text-paper-muted">{interval ? `Heartbeat ${interval} (self-report)` : r.status === "idle" ? "Quiet is normal: it runs only when used" : "No heartbeat interval yet"}</div>
       </td>
       <td className="px-3 py-2">
         {health

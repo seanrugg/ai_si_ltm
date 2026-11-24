@@ -79,6 +79,8 @@ def is_silent(row: dict, now: datetime) -> bool:
     """No heartbeat or record for over 2× the member's interval (24 h when unknown)."""
     if not row.get("last_heard"):
         return False  # never heard: an enrollment matter, not a silence
+    if row.get("status") == "idle":
+        return False  # runs only when used (#384): quiet is normal
     interval = (row.get("heartbeat") or {}).get("interval_s") or DEFAULT_INTERVAL_S
     age = (now - datetime.fromisoformat(row["last_heard"])).total_seconds()
     return age > fleet_health.SILENT_FACTOR * interval

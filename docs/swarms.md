@@ -209,8 +209,23 @@ nothing is pushed:
    publishes `<topic_id>/<agent>/ping` (empty, not retained) for members on MQTT.
    A member with `LTMS_SERVER` set also checks for itself.
 2. The member answers with a heartbeat whose payload has `"ping": true`.
-3. The profile shows *waiting* → *delivered* → *answered in N s* (the first
-   record LTMS received from it after the request).
+3. The profile shows *waiting* → *passed to the hub* or *picked up by the
+   member* → *answered in N s* (the first record LTMS received from it after the
+   request). Only a record answers; any other call from the member doesn't.
+
+How quickly a member can answer depends on its **answer mode** (#384), declared
+in its spec sheet as `software.ping` or inferred (see [specs.md](specs.md)):
+
+- `polling` members answer within a minute or two; silence means trouble.
+- `on_use` members (chat assistants) answer with their next record, when next
+  used. A hub is never handed their pings, since they aren't on MQTT; they fetch
+  their own. The Health page and Needs attention show them as *idle*, not
+  *silent*.
+- `none` members can't be pinged; the profile says why.
+
+A hub passes a ping on only to members it has heard on the bus (a hello or a
+record) since it started: a ping message isn't retained, so a member that isn't
+subscribed would never see it. The hub logs the ping as not passed on instead.
 
 The broker's ACL needs `topic write <topic_id>/+/ping` for the hub and
 `pattern read <topic_id>/%u/ping` for members (see `examples/echo-base/deploy/echo-base.acl`).

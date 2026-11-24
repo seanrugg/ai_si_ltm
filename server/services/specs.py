@@ -24,7 +24,12 @@ WHERE = ("onboard", "offboard")
 
 HARDWARE = {"board": str, "cpu": str, "cores": int, "ram_mib": int, "storage_gib": int,
             "accelerators": list, "sensors": list, "actuators": list, "power": str}
-SOFTWARE = {"os": str, "harness": str, "harness_version": str}
+SOFTWARE = {"os": str, "harness": str, "harness_version": str, "ping": str, "ping_reason": str}
+# How the member can answer an admin ping (#384): it checks for pings itself or
+# through its hub ("polling"), only when someone uses it ("on_use", e.g. a chat
+# assistant), or never ("none", with ``ping_reason``).
+PING_MODES = ("polling", "on_use", "none")
+MAX_PING_REASON = 200
 MODEL = {"name": str, "params": str, "quant": str, "runtime": str, "where": str, "role": str}
 SECTIONS = ("hardware", "models", "software", "notes")
 
@@ -53,9 +58,11 @@ def _fields(body, schema: dict, where: str, *, allow_null: bool = False) -> dict
             continue
         kind = schema[k]
         if kind is str:
-            out[k] = _str(v, f"{where}.{k}")
+            out[k] = _str(v, f"{where}.{k}", MAX_PING_REASON if k == "ping_reason" else MAX_STR)
             if k == "where" and out[k] not in WHERE:
                 _bad(f"{where}.where must be onboard or offboard")
+            if k == "ping" and out[k] not in PING_MODES:
+                _bad(f"{where}.ping must be one of {', '.join(PING_MODES)}")
         elif kind is int:
             if isinstance(v, bool) or not isinstance(v, int) or v < 0:
                 _bad(f"{where}.{k} must be a whole number ≥ 0")

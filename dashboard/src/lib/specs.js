@@ -4,7 +4,8 @@ export const HARDWARE_FIELDS = [
   ["board", "Board"], ["cpu", "CPU"], ["cores", "Cores"], ["ram_mib", "RAM (MiB)"], ["storage_gib", "Storage (GiB)"],
   ["accelerators", "Accelerators"], ["sensors", "Sensors"], ["actuators", "Actuators"], ["power", "Power"],
 ];
-export const SOFTWARE_FIELDS = [["os", "Operating system"], ["harness", "Harness"], ["harness_version", "Harness version"]];
+export const SOFTWARE_FIELDS = [["os", "Operating system"], ["harness", "Harness"], ["harness_version", "Harness version"],
+  ["ping", "Ping (polling, on_use or none)"], ["ping_reason", "Why it can't answer pings"]];
 export const NUMERIC = new Set(["cores", "ram_mib", "storage_gib"]);
 export const LISTS = new Set(["accelerators", "sensors", "actuators"]);
 
