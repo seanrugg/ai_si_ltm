@@ -38,7 +38,7 @@ docs = ["pypdf>=4", "python-docx>=1.1", "python-pptx>=0.6.23", "openpyxl>=3.1"]
 media = ["mcap>=1.1", "rosbags>=0.10", "h5py>=3.10", "numpy>=1.26", "pillow>=10", "mutagen>=1.47"]
 
 [tool.setuptools.packages.find]
-include = ["ltms_contract*", "server*", "cli_agent*", "ltms_mcp*"]
+include = ["ltms_contract*", "server*", "cli_agent*", "ltms_mcp*", "ltms_mind*"]
 exclude = ["server.tests*"]
 
 [tool.setuptools.package-data]
@@ -46,6 +46,6 @@ ltms_contract = ["vectors.json"]
 server = ["migrations/sql/*.sql"]  # issue #97: migration SQL shipped with the package
 
 [tool.pytest.ini_options]
-testpaths = ["server/tests", "examples/robot-sidecar/tests"]
+testpaths = ["server/tests", "examples/robot-sidecar/tests", "tests/mind"]
 addopts = "-q"
 filterwarnings = ["ignore::DeprecationWarning"]
