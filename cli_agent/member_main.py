@@ -16,6 +16,7 @@ import queue
 import signal
 import threading
 import time
+from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Mapping
 
@@ -294,103 +295,287 @@ def heartbeat(link, started_at: float, now: float, ping: bool = False) -> dict:
     )
 
 
+class MemberNode:
+    """The member as a node another program drives: ``start()``, ``step()`` on every
+    pass of its own loop, ``stop()`` (#491).
+
+    For hosts that own their main thread: Arduino App Lab (``App.run``), a ROS 2
+    node's executor, a simulator's step callback, an agent framework. ``main()``
+    is this node in a plain loop, so ``ltms-member`` behaves as before.
+
+    - ``on_message(rec)``: each decoded swarm message, after the introducer.
+    - ``decide(stmt) -> Decision``: whether to follow a verified directive (default:
+      follow). Passed to ``DirectiveHandler``.
+    - ``poll(link, now)``: called once a step, so a program can sign its own records
+      into the same chain and transport (the robot sidecar, #312).
+    - ``submit(fn)``: from another thread, run ``fn(link)`` inside the next
+      ``step()``; the result (or exception) comes back through the returned Future.
+
+    ``MemberLink`` and the SQLite outbox are main-thread only: call ``start``,
+    ``step`` and ``stop`` from one thread. Hooks run on that thread; an exception in
+    one is logged, never fatal.
+    """
+
+    def __init__(self, cfg: MemberConfig, on_message=None, decide=None, *, poll=None,
+                 env: Mapping[str, str] | None = None, ltms=None, mqtt_factory=None, clock=time.monotonic) -> None:
+        self.cfg = cfg
+        self.on_message_hook, self.decide, self.poll = on_message, decide, poll
+        self.env = os.environ if env is None else env
+        self.ltms, self._ltms_given = ltms, ltms is not None
+        self.mqtt_factory = mqtt_factory
+        self.clock = clock
+        self.started = False
+        self.connected = False
+        self.link = None
+        self._submits: "queue.Queue" = queue.Queue()
+
+    # ------------------------------------------------------------------ start
+    def start(self) -> None:
+        """Everything before the loop. Raises ``NoSwarmTopic`` if no topic can be found."""
+        cfg = self.cfg
+        name, key = load_key(cfg.key_path)
+        self.name = name
+        if not self._ltms_given and cfg.ltms_server:
+            from cli_agent.client import LTMSClient
+            self.ltms = LTMSClient(cfg.ltms_server, key_path=cfg.key_path)
+        ltms = self.ltms
+        if cfg.transport == "direct":
+            prefix, source = "", "direct"
+        else:
+            prefix, source = member_prefix(cfg, ltms.swarm if ltms is not None and not cfg.swarm_topic_id else None)
+        self.prefix = prefix
+        logging.info("Member: %s, transport %s, topic prefix %s (from %s)", name, cfg.transport, prefix or "-", source)
+        self.outbox = Outbox(cfg.outbox_path)
+        if cfg.transport == "auto" and ltms is None:
+            logging.info("Member: no LTMS_SERVER, so no direct fallback; MQTT only")
+        now = self.clock()
+        self.transport = Transport(cfg.transport, cfg.fallback_after_seconds, now, can_direct=ltms is not None)
+        self.direct = DirectLink(ltms, self.outbox, name) if ltms is not None else None
+
+        self.use_mqtt = cfg.transport != "direct"
+        mqtt_client = None
+        if self.use_mqtt:
+            if self.mqtt_factory is None:
+                import paho.mqtt.client as mqtt  # imported here so the module imports without paho
+                mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=name)
+            else:
+                mqtt_client = self.mqtt_factory(name)
+        self.mqtt = mqtt_client
+
+        def publish(topic: str, payload: bytes, retain: bool = False) -> None:
+            if not self.use_mqtt:
+                return  # records stay in the outbox; DirectLink sends them
+            mqtt_client.publish(topic, payload, qos=1, retain=retain)
+
+        self.link = MemberLink(name, key, self.outbox, cfg.state_path, publish, prefix)
+
+        def hello():
+            try:
+                network = local_addresses()
+            except OSError:  # no resolvable hostname: announce without addresses
+                network = []
+            return hello_topic(name, prefix), encode_hello(name, network)
+
+        self.acks: "queue.Queue[bytes]" = queue.Queue()
+        self.messages: "queue.Queue" = queue.Queue()
+        self.fleet_msgs: "queue.Queue" = queue.Queue()
+        self.pinged = threading.Event()
+        self.resend_wanted = threading.Event()
+        connected_cb = make_on_connect(acks_topic(name, prefix), self.resend_wanted, hello, say_subscription(prefix),
+                                       ping_topic(name, prefix), fleet_subscription(prefix))
+        state_dir = os.path.dirname(os.path.abspath(cfg.state_path))
+        fleet_key_cache = os.path.join(state_dir, "fleet-key.pub")
+
+        def fleet_key() -> str | None:
+            """The fleet's public key: cached beside the state, fetched from LTMS if missing (#306)."""
+            try:
+                with open(fleet_key_cache, encoding="utf-8") as f:
+                    return f.read().strip() or None
+            except OSError:
+                pass
+            k = self.env.get("FLEET_PUBLIC_KEY") or (ltms.fleet_key() if ltms is not None else None)
+            if k:
+                with open(fleet_key_cache, "w", encoding="utf-8") as f:
+                    f.write(k)
+            return k
+        leader_cache = {"at": -1e9, "key": None}
+
+        def leader_key() -> str | None:
+            """The current swarm leader's public key (#310), from GET /api/swarm, kept for 10 minutes."""
+            if ltms is None:
+                return None
+            if self.clock() - leader_cache["at"] > 600:
+                swarm = ltms.swarm()
+                leader_cache.update(at=self.clock(), key=((swarm or {}).get("leader") or {}).get("public_key"))
+            return leader_cache["key"]
+
+        from cli_agent.directives import DirectiveHandler, follow_by_default
+        self.directives = DirectiveHandler(self.link, fleet_key, os.path.join(state_dir, "directives.json"),
+                                           decide=self.decide or follow_by_default, leader_key=leader_key)
+
+        def on_connect(client, userdata, flags, reason_code, properties) -> None:
+            self.connected = True
+            self.transport.on_connect()
+            connected_cb(client, userdata, flags, reason_code, properties)
+
+        def on_disconnect(client, userdata, *args) -> None:
+            self.connected = False
+            self.transport.on_disconnect(self.clock())
+
+        if self.use_mqtt:
+            mqtt_client.on_connect = on_connect
+            mqtt_client.on_disconnect = on_disconnect
+            mqtt_client.on_message = make_on_message(self.acks, self.messages, self.pinged, self.fleet_msgs)
+            if cfg.mqtt_username is not None:
+                mqtt_client.username_pw_set(cfg.mqtt_username, cfg.mqtt_password)
+            mqtt_client.connect_async(cfg.mqtt_host, cfg.mqtt_port)
+            mqtt_client.loop_start()
+
+        self.started_at = now
+        self.introducer = None
+        if ltms is not None:
+            from cli_agent.introductions import Introducer
+            self.introducer = Introducer(name, os.path.join(state_dir, "introduced.json"),
+                                         make_intro_sender(self.link, cfg.transport == "direct"),
+                                         reply_policy=cfg.intro_reply)
+        self.next_intro_check = now
+        self.next_heartbeat = now + cfg.heartbeat_seconds
+        self.next_resend = now + cfg.resend_seconds
+        self.next_ping_poll = now
+        self.started = True
+
+    # ------------------------------------------------------------------ one pass
+    def _on_swarm_message(self, rec: dict) -> None:
+        log_message(rec)
+        if self.introducer is not None:
+            self.introducer.on_message(rec, self.clock())
+        if self.on_message_hook is not None:
+            try:
+                self.on_message_hook(rec)
+            except Exception:  # noqa: BLE001 - behaviour code must not stop the member
+                logging.exception("Member: on_message failed")
+
+    def _run_submits(self) -> None:
+        while True:
+            try:
+                fn, fut = self._submits.get_nowait()
+            except queue.Empty:
+                return
+            if not fut.set_running_or_notify_cancel():
+                continue
+            try:
+                fut.set_result(fn(self.link))
+            except Exception as exc:  # noqa: BLE001 - handed back to the caller
+                fut.set_exception(exc)
+
+    def step(self) -> None:
+        """One pass of the member loop. Non-blocking; main thread only."""
+        if not self.started:
+            raise RuntimeError("MemberNode.step() before start()")
+        cfg, link = self.cfg, self.link
+        drain_acks(link, self.acks)
+        drain_messages(self.messages, self.name, self.prefix, self._on_swarm_message)
+        drain_directives(self.fleet_msgs, self.directives)
+        self._run_submits()
+        if self.resend_wanted.is_set():
+            self.resend_wanted.clear()
+            link.resend_pending()
+        now = self.clock()
+        if now >= self.next_resend:
+            # Resend anything unacked: covers a hub restart while we stayed
+            # connected. Duplicates are harmless (hub and LTMS both dedupe).
+            link.resend_pending()
+            self.next_resend = now + cfg.resend_seconds
+        if self.introducer is not None:
+            if now >= self.next_intro_check:
+                self.next_intro_check = now + cfg.intro_check_seconds
+                try:
+                    self.introducer.check(self.ltms.swarm())
+                except Exception:  # noqa: BLE001 - an introduction must not stop the member
+                    logging.exception("Member: introduction failed")
+            self.introducer.due(now)
+        if self.ltms is not None and now >= self.next_ping_poll:
+            self.next_ping_poll = now + cfg.ping_poll_seconds
+            if self.name in self.ltms.pings():
+                self.pinged.set()
+        if self.pinged.is_set():
+            self.pinged.clear()
+            heartbeat(link, self.started_at, now, ping=True)
+            logging.info("Member: answered an admin ping")
+        elif now >= self.next_heartbeat:
+            heartbeat(link, self.started_at, now)
+            self.next_heartbeat = now + cfg.heartbeat_seconds
+        if self.poll is not None:
+            try:
+                self.poll(link, now)
+            except Exception:  # noqa: BLE001 - a source's bug must not stop the member
+                logging.exception("Member: poll failed")
+        if self.direct is not None and self.transport.choose(self.clock()) == "direct":
+            self.direct.flush()
+
+    # ------------------------------------------------------------------ other threads
+    def submit(self, fn) -> Future:
+        """Run ``fn(link)`` inside the next ``step()``; returns a Future with its result.
+
+        Safe from any thread. Before ``start()`` or after ``stop()`` the Future fails
+        at once with ``RuntimeError``: nothing can be signed then.
+        """
+        fut: Future = Future()
+        if not self.started:
+            fut.set_exception(RuntimeError("the member isn't running: nothing can be signed"))
+            return fut
+        self._submits.put((fn, fut))
+        return fut
+
+    def status(self) -> dict:
+        if not self.started:
+            return {"running": False}
+        return {"running": True, "member": self.name, "prefix": self.prefix or "-", "mqtt": self.connected,
+                "transport": self.transport.choose(self.clock()), "head_seq": self.link.head["seq"],
+                "unacked": len(self.outbox.pending(self.name, 1000))}
+
+    # ------------------------------------------------------------------ stop
+    def stop(self) -> None:
+        """Run what was submitted, send once directly if that's the transport, disconnect, close."""
+        if not self.started:
+            return
+        self.started = False
+        try:
+            self._run_submits()
+            if self.direct is not None and self.transport.choose(self.clock()) == "direct":
+                try:
+                    self.direct.flush()
+                except Exception:  # noqa: BLE001 - best effort on the way out; the outbox keeps them
+                    logging.exception("Member: last direct send failed")
+        finally:
+            while True:  # anything submitted after the last run fails rather than hanging
+                try:
+                    _fn, fut = self._submits.get_nowait()
+                except queue.Empty:
+                    break
+                if fut.set_running_or_notify_cancel():
+                    fut.set_exception(RuntimeError("the member stopped"))
+            if self.use_mqtt and self.mqtt is not None:
+                try:
+                    self.mqtt.disconnect()
+                except Exception:  # noqa: BLE001
+                    pass
+                self.mqtt.loop_stop()
+            self.outbox.close()
+
+
 def main(poll=None) -> None:
     """Run the member. ``poll(link, now)``, if given, is called once a loop (about every
     second) so a program built on the member (a robot sidecar, #312) can sign its own
     records into the same chain and transport. An exception in it is logged, never fatal.
     """
-    # paho is imported here so the rest of the module imports without it.
-    import paho.mqtt.client as mqtt
-
     cfg = load_config(os.environ)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-
-    name, key = load_key(cfg.key_path)
-    ltms = None
-    if cfg.ltms_server:
-        from cli_agent.client import LTMSClient
-        ltms = LTMSClient(cfg.ltms_server, key_path=cfg.key_path)
-    if cfg.transport == "direct":
-        prefix, source = "", "direct"
-    else:
-        try:
-            prefix, source = member_prefix(cfg, ltms.swarm if ltms is not None and not cfg.swarm_topic_id else None)
-        except NoSwarmTopic as exc:
-            raise SystemExit(f"Member: {exc}") from None
-    logging.info("Member: %s, transport %s, topic prefix %s (from %s)", name, cfg.transport, prefix or "-", source)
-    outbox = Outbox(cfg.outbox_path)
-    if cfg.transport == "auto" and ltms is None:
-        logging.info("Member: no LTMS_SERVER, so no direct fallback; MQTT only")
-    transport = Transport(cfg.transport, cfg.fallback_after_seconds, time.monotonic(), can_direct=ltms is not None)
-    direct = DirectLink(ltms, outbox, name) if ltms is not None else None
-
-    mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=name)
-    acks: "queue.Queue[bytes]" = queue.Queue()
-    resend_wanted = threading.Event()
-
-    def publish(topic: str, payload: bytes, retain: bool = False) -> None:
-        if cfg.transport == "direct":
-            return  # records stay in the outbox; DirectLink sends them
-        mqtt_client.publish(topic, payload, qos=1, retain=retain)
-
-    link = MemberLink(name, key, outbox, cfg.state_path, publish, prefix)
-    def hello():
-        try:
-            network = local_addresses()
-        except OSError:  # no resolvable hostname: announce without addresses
-            network = []
-        return hello_topic(name, prefix), encode_hello(name, network)
-
-    messages: "queue.Queue" = queue.Queue()
-    pinged = threading.Event()
-    connected_cb = make_on_connect(acks_topic(name, prefix), resend_wanted, hello, say_subscription(prefix),
-                                   ping_topic(name, prefix), fleet_subscription(prefix))
-    fleet_msgs: "queue.Queue" = queue.Queue()
-    from cli_agent.directives import DirectiveHandler
-    fleet_key_cache = os.path.join(os.path.dirname(os.path.abspath(cfg.state_path)), "fleet-key.pub")
-
-    def fleet_key() -> str | None:
-        """The fleet's public key: cached beside the state, fetched from LTMS if missing (#306)."""
-        try:
-            with open(fleet_key_cache, encoding="utf-8") as f:
-                return f.read().strip() or None
-        except OSError:
-            pass
-        key = os.environ.get("FLEET_PUBLIC_KEY") or (ltms.fleet_key() if ltms is not None else None)
-        if key:
-            with open(fleet_key_cache, "w", encoding="utf-8") as f:
-                f.write(key)
-        return key
-    leader_cache = {"at": -1e9, "key": None}
-
-    def leader_key() -> str | None:
-        """The current swarm leader's public key (#310), from GET /api/swarm, kept for 10 minutes."""
-        if ltms is None:
-            return None
-        if time.monotonic() - leader_cache["at"] > 600:
-            swarm = ltms.swarm()
-            leader_cache.update(at=time.monotonic(), key=((swarm or {}).get("leader") or {}).get("public_key"))
-        return leader_cache["key"]
-    directives = DirectiveHandler(link, fleet_key,
-                                  os.path.join(os.path.dirname(os.path.abspath(cfg.state_path)), "directives.json"),
-                                  leader_key=leader_key)
-
-    def on_connect(client, userdata, flags, reason_code, properties) -> None:
-        transport.on_connect()
-        connected_cb(client, userdata, flags, reason_code, properties)
-
-    def on_disconnect(client, userdata, *args) -> None:
-        transport.on_disconnect(time.monotonic())
-
-    use_mqtt = cfg.transport != "direct"
-    if use_mqtt:
-        mqtt_client.on_connect = on_connect
-        mqtt_client.on_disconnect = on_disconnect
-        mqtt_client.on_message = make_on_message(acks, messages, pinged, fleet_msgs)
-        if cfg.mqtt_username is not None:
-            mqtt_client.username_pw_set(cfg.mqtt_username, cfg.mqtt_password)
-        mqtt_client.connect_async(cfg.mqtt_host, cfg.mqtt_port)
-        mqtt_client.loop_start()
+    node = MemberNode(cfg, poll=poll)
+    try:
+        node.start()
+    except NoSwarmTopic as exc:
+        raise SystemExit(f"Member: {exc}") from None
 
     running = True
 
@@ -400,71 +585,15 @@ def main(poll=None) -> None:
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-
-    started_at = time.monotonic()
-    introducer = None
-    if ltms is not None:
-        from cli_agent.introductions import Introducer
-        introducer = Introducer(name, os.path.join(os.path.dirname(os.path.abspath(cfg.state_path)), "introduced.json"),
-                                make_intro_sender(link, cfg.transport == "direct"), reply_policy=cfg.intro_reply)
-    next_intro_check = started_at
-
-    def on_swarm_message(rec: dict) -> None:
-        log_message(rec)
-        if introducer is not None:
-            introducer.on_message(rec, time.monotonic())
-
-    next_heartbeat = started_at + cfg.heartbeat_seconds
-    next_resend = started_at + cfg.resend_seconds
-    next_ping_poll = started_at
     try:
         while running:
-            drain_acks(link, acks)
-            drain_messages(messages, name, prefix, on_swarm_message)
-            drain_directives(fleet_msgs, directives)
-            if resend_wanted.is_set():
-                resend_wanted.clear()
-                link.resend_pending()
-            now = time.monotonic()
-            if now >= next_resend:
-                # Resend anything unacked: covers a hub restart while we stayed
-                # connected. Duplicates are harmless (hub and LTMS both dedupe).
-                link.resend_pending()
-                next_resend = now + cfg.resend_seconds
-            if introducer is not None:
-                if now >= next_intro_check:
-                    next_intro_check = now + cfg.intro_check_seconds
-                    try:
-                        introducer.check(ltms.swarm())
-                    except Exception:  # noqa: BLE001 - an introduction must not stop the member
-                        logging.exception("Member: introduction failed")
-                introducer.due(now)
-            if ltms is not None and now >= next_ping_poll:
-                next_ping_poll = now + cfg.ping_poll_seconds
-                if name in ltms.pings():
-                    pinged.set()
-            if pinged.is_set():
-                pinged.clear()
-                heartbeat(link, started_at, now, ping=True)
-                logging.info("Member: answered an admin ping")
-            elif now >= next_heartbeat:
-                heartbeat(link, started_at, now)
-                next_heartbeat = now + cfg.heartbeat_seconds
-            if poll is not None:
-                try:
-                    poll(link, now)
-                except Exception:  # noqa: BLE001 - a source's bug must not stop the member
-                    logging.exception("Member: poll failed")
-            if direct is not None and transport.choose(time.monotonic()) == "direct":
-                direct.flush()
+            node.step()
             # Sleep up to 1 second, waking early if asked to stop.
             deadline = time.monotonic() + 1.0
             while running and time.monotonic() < deadline:
                 time.sleep(min(0.25, deadline - time.monotonic()))
     finally:
-        if use_mqtt:
-            mqtt_client.loop_stop()
-        outbox.close()
+        node.stop()
 
 
 if __name__ == "__main__":
