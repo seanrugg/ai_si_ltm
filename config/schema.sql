@@ -155,6 +155,7 @@ CREATE TABLE members (
 	ping_requested_at TIMESTAMP WITH TIME ZONE, 
 	ping_requested_by VARCHAR(128), 
 	ping_delivered_at TIMESTAMP WITH TIME ZONE, 
+	ping_delivered_by VARCHAR(64), 
 	specs_declared JSONB, 
 	specs_admin JSONB, 
 	specs_reported_at TIMESTAMP WITH TIME ZONE, 

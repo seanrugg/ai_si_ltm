@@ -72,6 +72,8 @@ class Member(Base):
     ping_requested_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     ping_requested_by: Mapped[str | None] = mapped_column(String(128))
     ping_delivered_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # Who fetched it (#384): the member itself, or its hub's name when the hub passed it on.
+    ping_delivered_by: Mapped[str | None] = mapped_column(String(64))
     # Spec sheet (#332): what the device reports, and an admin's per-field overrides.
     specs_declared: Mapped[dict | None] = mapped_column(JSONType)
     specs_admin: Mapped[dict | None] = mapped_column(JSONType)

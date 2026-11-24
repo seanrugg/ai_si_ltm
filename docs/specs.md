@@ -18,10 +18,26 @@ LTMSClient(server, key_path=...).report_specs({
 ```
 
 `PUT /api/members/me/specs` with the same body. Every field is optional;
-unknown keys are refused (422). Text is at most 64 characters, lists at most 16
+unknown keys are refused (422). Text is at most 64 characters (`ping_reason`: 200), lists at most 16
 items, and the whole sheet at most 8 KiB (413). A report replaces the previous
 one. An identical re-report changes nothing, so a harness can report on every
 start without filling the audit log.
+
+### How it answers a ping (#384)
+
+`software.ping` says how the member can answer an admin ping (see
+[swarms.md](swarms.md#heartbeats-and-ping-356)):
+
+- `polling`: it runs all the time and checks for pings itself or through its hub.
+- `on_use`: it runs only when someone uses it, such as a chat assistant. It
+  answers with its next record, which may be hours away.
+- `none`: it can't answer. Give the reason in `software.ping_reason` (up to 200
+  characters); the dashboard shows it and turns Ping off. Use this, for example,
+  for a member whose key the fleet holds and for which an admin submits.
+
+An admin can set or correct either field like any other. When neither the
+member nor an admin has set it, LTMS infers it: a member with regular heartbeats
+is `polling`, an `assistant` without them is `on_use`, anything else is unknown.
 
 `PUT /api/members/me/cognition` (where the AI runs, #185) also writes its models
 into the sheet; cognition still owns the on/off-board location.

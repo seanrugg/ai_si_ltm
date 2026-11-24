@@ -56,6 +56,8 @@ class Hub:
         self.pending_network: dict[str, list] = {}
         # Members heard on MQTT (records or hello) since the last heartbeat (#281).
         self.seen: set[str] = set()
+        # Members heard on MQTT since the hub started (#384): pings are passed on only to these.
+        self.heard: set[str] = set()
         # Swarm messages (#300): a hard per-member cap, so a looping agent can't flood the bus.
         self.max_msgs_per_second = max_msgs_per_second
         self._msg_window: dict[str, tuple[int, int]] = {}   # agent -> (second, count)
@@ -84,6 +86,7 @@ class Hub:
             rec = decode_record(payload, agent)
             with self.lock:
                 self.seen.add(agent)
+                self.heard.add(agent)
                 return self.outbox.add(rec)
         except ValueError as exc:  # bad topic, bad JSON, agent mismatch, seq conflict
             self.dropped += 1
@@ -122,6 +125,7 @@ class Hub:
                 raise ValueError("not a swarm message (a communication record tagged swarm-message)")
             with self.lock:
                 self.seen.add(agent)
+                self.heard.add(agent)
                 return self.outbox.add(rec)
         except ValueError as exc:
             self.dropped += 1
@@ -139,6 +143,7 @@ class Hub:
             return False
         with self.lock:
             self.seen.add(agent)
+            self.heard.add(agent)
             if msg.get("network"):
                 self.pending_network[agent] = msg["network"]
         return True

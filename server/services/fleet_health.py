@@ -10,7 +10,9 @@ machine health are a member's self-reports (#348) and are labelled as such.
   newest ``INTERVAL_SAMPLE`` heartbeats. Unknown with fewer than two.
 * **status**: ``on_time``; ``late`` when last heard is more than 1.5 × the
   interval ago; ``silent`` past 2 ×; ``unknown`` without an interval;
-  ``never`` when nothing was ever heard.
+  ``never`` when nothing was ever heard. A member that runs only when used (ping
+  answer mode ``on_use``, #384) is ``idle`` instead of late, silent or unknown:
+  quiet is normal for it.
 * **health**: the newest ``health``-tagged self-report (a hub's machine health,
   #349) and the throttle alerts of the last 24 h; ``None`` when the member has
   never reported health.
@@ -60,6 +62,11 @@ def status_of(last_heard: datetime | None, interval_s: float | None, now: dateti
     if age > LATE_FACTOR * interval_s:
         return "late"
     return "on_time"
+
+
+def idle_or(status: str, ping_mode: str) -> str:
+    """``idle`` for an on-use member that is quiet (#384); otherwise ``status`` unchanged."""
+    return "idle" if ping_mode == "on_use" and status in ("late", "silent", "unknown") else status
 
 
 def kind_of(member: Member, role: str | None) -> str:
@@ -115,7 +122,7 @@ async def fleet(session: AsyncSession, *, now: datetime | None = None) -> dict:
         beats = await _heartbeats(session, m)
         last_beat = _aware(beats[0].received_at) if beats else None
         interval = interval_of([b.ts for b in beats])
-        p = await ping.status(session, m.name)
+        p = await ping.status(session, m.name, interval_s=interval)
         answered = _aware(datetime.fromisoformat(p["answered_at"])) if p.get("answered_at") else None
         heard = [t for t in (last_beat, _aware(last_record.get(m.id)), answered) if t is not None]
         last_heard = max(heard) if heard else None
@@ -126,7 +133,7 @@ async def fleet(session: AsyncSession, *, now: datetime | None = None) -> dict:
             "last_record": _iso(_aware(last_record.get(m.id))), "last_ping_reply": _iso(answered),
             "heartbeat": {"self_report": True, "interval_s": interval, "interval_source": "observed" if interval else None,
                           "samples": len(beats)},
-            "status": status_of(last_heard, interval, now),
+            "status": idle_or(status_of(last_heard, interval, now), p["mode"]["mode"]),
             "health": await _health(session, m, now),
             "specs": {s: v["value"] for s, v in specs.resolve(m).items() if s in ("hardware", "models", "software")},
             "spec_summary": specs.summary_line(m),

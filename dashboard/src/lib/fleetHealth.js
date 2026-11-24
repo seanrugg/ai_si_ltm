@@ -8,9 +8,10 @@ export const STATUS_TEXT = {
   silent: "Silent",
   unknown: "No interval yet",
   never: "Never heard",
+  idle: "Idle (runs when used)",
 };
 
-const STATUS_ORDER = { silent: 0, late: 1, never: 2, unknown: 3, on_time: 4 };
+const STATUS_ORDER = { silent: 0, late: 1, never: 2, unknown: 3, idle: 4, on_time: 5 };
 
 /** Tailwind text class for a status: colour as extra to the words. */
 export function statusClass(status) {

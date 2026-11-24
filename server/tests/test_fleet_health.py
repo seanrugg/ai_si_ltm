@@ -66,12 +66,17 @@ def test_status_follows_each_members_own_interval(mesh, db_exec):
 
 def test_last_heard_counts_records_and_unknown_without_heartbeats(mesh, db_exec):
     quiet, talker = mesh.member("quiet"), mesh.member("talker", kind="assistant")
+    worker = mesh.member("worker")
     talker.append("thought", summary="hello")
     talker.flush()
+    worker.append("thought", summary="hello")
+    worker.flush()
     rows = _rows(db_exec)
     assert rows["quiet"]["last_heard"] is None and rows["quiet"]["status"] == "never"
     assert rows["talker"]["last_heard"] == rows["talker"]["last_record"]
-    assert rows["talker"]["status"] == "unknown"
+    assert rows["worker"]["status"] == "unknown"
+    # An assistant without heartbeats runs only when used, so it reads idle (#384).
+    assert rows["talker"]["status"] == "idle"
     assert rows["talker"]["kind"] == "chat member"
     assert rows["quiet"]["kind"] == "robot"
 

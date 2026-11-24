@@ -1,9 +1,11 @@
-// Ask a member for a heartbeat (#356), and show whether it answered.
+// Ask a member for a heartbeat (#356), and show whether it answered. The help
+// says how this member can answer (#384); for a member that can't, the button is
+// off and the reason is visible text, not just a greyed-out button (508).
 import { useEffect, useState } from "react";
 import { api } from "../api/client.js";
 import HelpTip from "./HelpTip.jsx";
 import { PING_ABOUT } from "../lib/help.js";
-import { pingState } from "../lib/ping.js";
+import { offReason, pingHelp, pingState } from "../lib/ping.js";
 
 const POLL_MS = 5000;
 const STOP_AFTER_MS = 10 * 60 * 1000;
@@ -51,13 +53,20 @@ export default function PingButton({ name, initial }) {
   }
 
   const st = pingState(status);
+  const off = offReason(status);
+  const offId = `ping-off-${name}`;
   return (
     <span className="flex flex-wrap items-center gap-2 text-sm">
-      <button type="button" className="btn" onClick={ping} disabled={polling} aria-label={`Ping ${name}`}>
+      <button type="button" className="btn" onClick={ping} disabled={polling || Boolean(off)} aria-label={`Ping ${name}`}
+              aria-describedby={off ? offId : undefined}>
         {polling ? "Pinging…" : "Ping"}
       </button>
-      <HelpTip id={`ping-${name}`} label="About ping">{PING_ABOUT}</HelpTip>
-      {st.state !== "none" && <span role="status" className="text-paper-muted">{st.text}</span>}
+      <HelpTip id={`ping-${name}`} label="About ping">
+        {pingHelp(status)}
+        <span className="mt-1 block">{PING_ABOUT}</span>
+      </HelpTip>
+      {off && <span id={offId} className="text-paper-muted">{off}</span>}
+      {!off && st.state !== "none" && <span role="status" className="text-paper-muted">{st.text}</span>}
       {error && <span role="alert" className="text-warn">{error.message}</span>}
     </span>
   );

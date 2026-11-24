@@ -150,15 +150,29 @@ def load_config(env: Mapping[str, str]) -> HubConfig:
 
 
 def deliver_pings(hub, own, client, started_at: float, now: float) -> list[str]:
-    """Admin pings (#356): answer the hub's own with a heartbeat; pass members' on over MQTT."""
-    names = client.pings()
-    for agent in names:
+    """Admin pings (#356): answer the hub's own with a heartbeat; pass members' on over MQTT.
+
+    A member's ping is passed on only if the hub has heard that member on the bus
+    since it started (a hello or a record, #384). A ping message isn't retained,
+    so publishing it for a member that isn't subscribed would reach nobody; the
+    skip is logged instead. Returns the names answered or passed on.
+    """
+    heard = None
+    if getattr(hub, "heard", None) is not None:
+        with hub.lock:
+            heard = set(hub.heard)
+    done = []
+    for agent in client.pings():
         if agent == hub.name:
             hub.heartbeat(own, started_at, now, ping=True)
+        elif heard is not None and agent not in heard:
+            logging.info("Hub: admin ping for %s not passed on: not heard on the bus since the hub started", agent)
+            continue
         else:
             for prefix in hub.prefixes:
                 hub.publish(ping_topic(agent, prefix), b"", retain=False)
-    return names
+        done.append(agent)
+    return done
 
 
 def make_health_monitor(cfg: HubConfig, now: float, root: str = "/"):
