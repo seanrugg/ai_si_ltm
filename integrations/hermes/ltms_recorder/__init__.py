@@ -15,7 +15,7 @@ from pathlib import Path
 
 log = logging.getLogger("ltms_recorder")
 
-PLUGIN_VERSION = "0.2.1"
+PLUGIN_VERSION = "0.2.2"
 HOOKS = ("on_session_start", "post_tool_call", "on_session_end")
 ROLLUP_HOOKS = ("post_api_request", "api_request_error", "post_compaction")
 

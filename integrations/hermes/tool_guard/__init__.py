@@ -11,19 +11,30 @@ Hermes's contract (v0.23.3): ``pre_tool_call`` gets ``tool_name``, ``args``,
 ``{"action": "block", "message": ...}`` vetoes the call, and any plugin's
 block wins over an approval.
 
+**The bridge (#484).** When tool search is on (for example with ``-t mcp-<server>``),
+Hermes rewrites a call to a deferred tool into its ``tool_call`` bridge *before*
+the hooks run (``agent/turn_tool_validation.py``: ``_route_deferred_call``), so the
+hook sees ``tool_name="tool_call"`` and
+``args={"calls": [{"name": <real tool>, "arguments": {...}}]}``. The guard
+unwraps it the way Hermes's own ``tools/tool_labels.py`` does, checks every inner
+call, and blocks the whole bridge call if any inner call to a guarded tool is out
+of range or has arguments it can't read.
+
 Pure Python, no dependencies. Never raises: on any internal error the call is
 blocked (fail closed) only for tools that have limits; other tools are never
 touched.
 """
 from __future__ import annotations
 
+import json
 import logging
 import math
 from typing import Any
 
 log = logging.getLogger("tool_guard")
 
-PLUGIN_VERSION = "0.1.0"
+PLUGIN_VERSION = "0.2.0"
+BRIDGE_TOOL = "tool_call"
 
 # Defaults: VectorClaw's drive tool, which has no limits of its own.
 DEFAULT_LIMITS: dict[str, dict[str, float]] = {
@@ -68,6 +79,37 @@ def limits_for(tool_name: str, limits: dict[str, dict[str, float]]) -> dict[str,
     return limits.get(bare) if bare else None
 
 
+def _as_dict(value: Any) -> Any:
+    """Arguments as a dict when they arrive as JSON text; anything else unchanged."""
+    if isinstance(value, str):
+        try:
+            return json.loads(value.strip() or "{}")
+        except ValueError:
+            return value
+    return {} if value is None else value
+
+
+def calls_in(tool_name: str, args: Any) -> list[tuple[str, Any]]:
+    """The ``(tool name, arguments)`` pairs a hook call really runs.
+
+    A plain call is itself. A ``tool_call`` bridge call holds its real calls in
+    ``args["calls"]`` (or, in the single-call form, is ``{"name", "arguments"}``
+    itself), the same reading as Hermes's ``tools/tool_labels.py``.
+    """
+    args = _as_dict(args)
+    if tool_name != BRIDGE_TOOL:
+        return [(tool_name, args)]
+    if not isinstance(args, dict):
+        return [(BRIDGE_TOOL, args)]
+    entries = args.get("calls")
+    entries = entries if isinstance(entries, list) else [args]
+    out = []
+    for entry in entries:
+        entry = entry if isinstance(entry, dict) else {}
+        out.append((str(entry.get("name") or ""), _as_dict(entry.get("arguments"))))
+    return out
+
+
 def _fmt(n: float) -> str:
     return str(int(n)) if float(n).is_integer() else f"{n:g}"
 
@@ -106,22 +148,35 @@ class Guard:
         self.blocked = 0
 
     def on_pre_tool_call(self, tool_name: Any = None, args: Any = None, **_: Any) -> dict | None:
-        rule = None
+        name = str(tool_name or "")
+        bridged = name == BRIDGE_TOOL
+        reason = target = None
         try:
-            rule = limits_for(str(tool_name or ""), self.limits)
-            if not rule:
-                return None
-            reason = check(tool_name, args, self.limits)
+            for inner, inner_args in calls_in(name, args):
+                if bridged and inner == BRIDGE_TOOL:
+                    # A bridge call whose arguments can't be read could name a guarded
+                    # tool, and we can't tell: refuse it (fail closed). Hermes couldn't
+                    # run it either.
+                    reason, target = "the tool_call arguments could not be read", BRIDGE_TOOL
+                    break
+                if not limits_for(inner, self.limits):
+                    continue
+                why = check(inner, inner_args, self.limits)
+                if why:
+                    reason, target = why, inner
+                    break
         except Exception as exc:  # noqa: BLE001 - fail closed, but only for guarded tools
-            reason = f"tool_guard could not check the call ({type(exc).__name__})" if rule else None
+            if bridged or limits_for(name, self.limits):
+                reason, target = f"tool_guard could not check the call ({type(exc).__name__})", name
         if reason is None:
             return None
         self.blocked += 1
-        log.warning("tool_guard: blocked %s: %s", tool_name, reason)
+        via = f" (via {BRIDGE_TOOL})" if bridged and target != BRIDGE_TOOL else ""
+        log.warning("tool_guard: blocked %s%s: %s", target, via, reason)
         # "Error:" first, so a recorder that reads this as the tool result marks the call failed.
         return {"action": "block",
-                "message": f"Error: refused by tool_guard before {tool_name} ran: {reason}. "
-                           f"The robot did not move."}
+                "message": f"Error: refused by tool_guard before {target} ran: {reason}. "
+                           f"Nothing was run; the robot did not move."}
 
 
 def register(ctx) -> None:

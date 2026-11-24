@@ -112,3 +112,72 @@ def test_internal_error_fails_closed_only_for_guarded_tools(monkeypatch):
     monkeypatch.setattr(tool_guard, "check", lambda *a: 1 / 0)
     assert guard.on_pre_tool_call(tool_name="vector_drive", args={})["action"] == "block"
     assert guard.on_pre_tool_call(tool_name="terminal", args={}) is None
+
+
+# ---------------------------------------------------------------- #484: the tool_call bridge
+# Hermes v0.23.3 rewrites a deferred tool call before the hooks run
+# (agent/turn_tool_validation.py, _route_deferred_call):
+#   tool_name="tool_call", args=json.dumps({"calls": [{"name": <tool>, "arguments": {...}}]})
+import json as _json  # noqa: E402
+
+
+def _bridge(*calls, as_text=True):
+    body = {"calls": [{"name": n, "arguments": a} for n, a in calls]}
+    return _json.dumps(body) if as_text else body
+
+
+@pytest.mark.parametrize("as_text", [True, False])
+def test_bridged_out_of_range_drive_is_blocked(as_text):
+    guard = Guard(LIMITS)
+    out = guard.on_pre_tool_call(tool_name="tool_call",
+                                 args=_bridge(("mcp__vector__vector_drive", {"distance_mm": 500}), as_text=as_text))
+    assert out and out["action"] == "block"
+    assert "before mcp__vector__vector_drive ran" in out["message"]
+    assert "distance_mm=500" in out["message"]
+
+
+def test_bridged_in_range_and_other_tools_pass():
+    guard = Guard(LIMITS)
+    assert guard.on_pre_tool_call(tool_name="tool_call",
+                                  args=_bridge(("mcp__vector__vector_drive", {"distance_mm": 80}))) is None
+    assert guard.on_pre_tool_call(tool_name="tool_call",
+                                  args=_bridge(("mcp__vector__vector_say", {"text": "hi"}))) is None
+
+
+def test_one_bad_call_in_a_batch_blocks_the_batch():
+    guard = Guard(LIMITS)
+    out = guard.on_pre_tool_call(tool_name="tool_call", args=_bridge(
+        ("mcp__vector__vector_say", {"text": "hi"}),
+        ("mcp__vector__vector_drive", {"angle_deg": 360})))
+    assert out["action"] == "block" and "angle_deg=360" in out["message"]
+
+
+def test_single_call_form_and_text_arguments():
+    guard = Guard(LIMITS)
+    single = {"name": "mcp__vector__vector_drive", "arguments": _json.dumps({"distance_mm": 2000})}
+    assert guard.on_pre_tool_call(tool_name="tool_call", args=single)["action"] == "block"
+    ok = {"name": "mcp__vector__vector_drive", "arguments": '{"distance_mm": 50}'}
+    assert guard.on_pre_tool_call(tool_name="tool_call", args=ok) is None
+
+
+def test_unreadable_bridge_arguments_fail_closed():
+    guard = Guard(LIMITS)
+    assert guard.on_pre_tool_call(tool_name="tool_call", args="{not json")["action"] == "block"
+    bad_inner = _bridge(("mcp__vector__vector_drive", "far away"))
+    assert guard.on_pre_tool_call(tool_name="tool_call", args=bad_inner)["action"] == "block"
+    # An unreadable inner call to an unguarded tool is left to Hermes.
+    assert guard.on_pre_tool_call(tool_name="tool_call",
+                                  args=_bridge(("mcp__vector__vector_say", "hello"))) is None
+
+
+def test_empty_bridge_arguments_are_left_to_the_tool():
+    # Seen in a real run: the drive arrived with no arguments.
+    # Nothing to limit; VectorClaw itself refused ("distance_mm or angle_deg is required").
+    guard = Guard(LIMITS)
+    assert guard.on_pre_tool_call(tool_name="tool_call",
+                                  args=_bridge(("mcp__vector__vector_drive", {}))) is None
+
+
+def test_calls_in_reads_like_hermes():
+    assert tool_guard.calls_in("terminal", {"command": "ls"}) == [("terminal", {"command": "ls"})]
+    assert tool_guard.calls_in("tool_call", _bridge(("a", {"x": 1}), ("b", None))) == [("a", {"x": 1}), ("b", {})]

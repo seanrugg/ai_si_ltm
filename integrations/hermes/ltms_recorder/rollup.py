@@ -282,8 +282,13 @@ class Rollup:
                 c["sessions"]["completed"] += 1
         self._update(f)
 
-    def on_post_tool_call(self, tool_name: Any = None, result: Any = None, **_: Any) -> None:
-        from .recorder import looks_like_error
+    def on_post_tool_call(self, tool_name: Any = None, result: Any = None, args: Any = None,
+                          **_: Any) -> None:
+        from .recorder import looks_like_error, unwrap_bridge
+        try:
+            tool_name, _, _ = unwrap_bridge(str(tool_name or ""), args)  # count the real tool (#484)
+        except Exception:  # noqa: BLE001
+            pass
         failed = looks_like_error(result)
         reason = error_reason(result) if failed else None
 

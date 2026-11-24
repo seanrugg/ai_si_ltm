@@ -300,3 +300,42 @@ def test_import_error_names_the_module(monkeypatch, caplog, missing, hint):
     assert ctx.hooks == {}
     msg = " ".join(r.getMessage() for r in caplog.records)
     assert f"cannot import {missing}" in msg and hint in msg
+
+
+# ---------------------------------------------------------------- #484: calls through the tool_call bridge
+from ltms_recorder.recorder import unwrap_bridge  # noqa: E402
+
+
+def _bridge(*calls):
+    return json.dumps({"calls": [{"name": n, "arguments": a} for n, a in calls]})
+
+
+def test_bridged_call_is_recorded_as_the_real_tool_with_peers():
+    settings = resolve_settings({"peer_map": {"mcp__vector__": "vector-1"}})
+    summary, payload, header = tool_call_record(
+        tool_name="tool_call", args=_bridge(("mcp__vector__vector_say", {"text": "Hello"})),
+        result='{"status": "ok"}', task_id="t", duration_ms=1650, session_id="s", model="m", settings=settings)
+    assert summary == "mcp__vector__vector_say ok (1650 ms)"
+    assert payload["tool_name"] == "mcp__vector__vector_say"
+    assert payload["via"] == "tool_call" and "calls" not in payload
+    assert payload["args"] == {"text": "Hello"}
+    assert header["peers"] == ["vector-1"]
+
+
+def test_bridged_batch_keeps_bridge_name_and_lists_calls():
+    settings = resolve_settings({"peer_map": {"mcp__vector__": "vector-1", "mcp__arm__": "arm-1"}})
+    summary, payload, header = tool_call_record(
+        tool_name="tool_call",
+        args=_bridge(("mcp__vector__vector_status", {}), ("mcp__arm__move", {"j": 1})),
+        result="[]", task_id=None, duration_ms=10, session_id=None, model=None, settings=settings)
+    assert payload["tool_name"] == "tool_call"
+    assert payload["calls"] == ["mcp__vector__vector_status", "mcp__arm__move"]
+    assert header["peers"] == ["vector-1", "arm-1"]
+
+
+def test_unwrap_bridge_edge_cases():
+    assert unwrap_bridge("terminal", {"a": 1}) == ("terminal", {"a": 1}, [])
+    assert unwrap_bridge("tool_call", "{bad") == ("tool_call", "{bad", [])
+    one = {"name": "x", "arguments": '{"k": 2}'}
+    assert unwrap_bridge("tool_call", one) == ("x", {"k": 2}, ["x"])
+    assert unwrap_bridge("tool_call", {"calls": []}) == ("tool_call", {"calls": []}, [])

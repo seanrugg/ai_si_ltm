@@ -251,3 +251,10 @@ def test_hooks_never_raise(tmp_path):
     roll.on_post_tool_call(tool_name=None, result=object())
     roll.on_session_end()
     assert roll.counters["model_routes"]["custom/unknown"]["calls"] == 1
+
+
+def test_bridged_calls_count_under_the_real_tool(tmp_path):
+    roll = Rollup(tmp_path, plugin_version="0.2.2", today=Clock())
+    args = json.dumps({"calls": [{"name": "mcp__vector__vector_drive", "arguments": {"distance_mm": 50}}]})
+    roll.on_post_tool_call(tool_name="tool_call", args=args, result='{"status": "ok"}')
+    assert roll.counters["tool_calls"] == {"mcp__vector__vector_drive": {"ok": 1, "error": 0}}
