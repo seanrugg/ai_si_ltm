@@ -6,6 +6,9 @@ Everything else is in ``app_member.py`` (testable without App Lab).
 
 On the MCU side, the sketch sends ``mcu_status`` every second and expects a
 ``link`` call at least every 5 s; without one it shows "disconnected" by itself.
+
+With ``AGENT=on`` the optional on-board agent (#492, ``agent.py``) takes tasks from
+directives, swarm messages addressed to this member, and (``CONSOLE=on``) a local page.
 """
 from __future__ import annotations
 
@@ -38,7 +41,8 @@ if am.ensure_data_dir(DATA):
 telemetry = am.TelemetryWindow(60.0)
 Bridge.provide("mcu_status", telemetry.add)  # the sketch notifies this every second
 
-state = {"phase": "needs-settings", "node": None, "approval": None, "link_at": 0.0, "mcu_ok": True}
+state = {"phase": "needs-settings", "node": None, "approval": None, "link_at": 0.0, "mcu_ok": True,
+         "agent": None, "console": None}
 
 env = {**am.read_env_file(DATA / "member.env"), **{k: v for k, v in os.environ.items() if k.isupper()}}
 todo = am.problems(env)
@@ -57,11 +61,60 @@ else:
     threading.Thread(target=approval.run, name="approval", daemon=True).start()
 
 
-def start_member() -> None:
-    from cli_agent.member_main import MemberNode, load_config
+def make_agent(node):
+    """The on-board agent (#492), or None when AGENT is off or its settings are wrong."""
+    import agent as ag
 
     try:
-        node = MemberNode(load_config(S.member_env))
+        settings = ag.load_settings(S.member_env)
+    except ValueError as exc:
+        log.error("Agent settings: %s. The agent stays off.", exc)
+        return None
+    if not settings.enabled:
+        return None
+    from cli_agent.client import LTMSClient
+
+    recall_client = LTMSClient(S.server, key_path=str(S.key_path)) if S.server else None  # the worker's own
+
+    def recall(intent):
+        return recall_client.context(intent=intent)
+
+    host = ag.Host(S.name, node.submit, node.status, mcu=lambda name, value: Bridge.call(name, value, timeout=2),
+                   recall=recall if recall_client else None)
+    toolbox = ag.Toolbox(host, settings)
+    try:
+        if settings.backend == "openai":
+            backend = ag.OpenAIBackend(settings.url, settings.model, settings.api_key, settings.model_seconds)
+        else:
+            backend = ag.BrickBackend(ag.system_prompt(S.name, toolbox), settings.model, settings.model_seconds)
+    except Exception as exc:  # noqa: BLE001 - e.g. the LLM Brick isn't added to the app
+        log.error("Agent model backend %s failed: %s. The agent stays off.", settings.backend, exc)
+        return None
+    agent = ag.Agent(host, backend, settings, ag.Intake(S.name, settings))
+    if settings.console:
+        try:
+            state["console"] = ag.start_console(agent, settings, S.name)
+        except OSError as exc:
+            log.error("Agent console: %s", exc)
+    log.info("Agent on: backend %s, tasks from %s", settings.backend, ", ".join(sorted(settings.sources)))
+    return agent
+
+
+def start_member() -> None:
+    from cli_agent.directives import follow_by_default
+    from cli_agent.member_main import MemberNode, load_config
+
+    hooks: dict = {}  # the agent is made after start(): it needs the running node
+
+    def on_message(rec):
+        if "agent" in hooks:
+            hooks["agent"].on_message(rec)
+
+    def decide(stmt):
+        return hooks["agent"].decide(stmt) if "agent" in hooks else follow_by_default(stmt)
+
+    try:
+        node = MemberNode(load_config(S.member_env), on_message=on_message, decide=decide)
         node.start()
     except Exception as exc:  # noqa: BLE001 - bad settings: say so, keep the MCU fed
         log.error("Member start failed: %s", exc)
@@ -69,6 +122,11 @@ def start_member() -> None:
         return
     state["node"], state["phase"] = node, "member"
     log.info("Member running as %s", S.name)
+    agent = make_agent(node)
+    if agent is not None:
+        hooks["agent"] = agent
+        state["agent"] = agent
+        agent.start()
 
 
 def send_link() -> None:
@@ -105,6 +163,10 @@ def step() -> None:
 
 
 def shutdown() -> None:
+    if state["agent"] is not None:
+        state["agent"].stop()
+    if state["console"] is not None:
+        state["console"].shutdown()
     if state["approval"] is not None:
         state["approval"].stopping.set()
     if state["node"] is not None:
