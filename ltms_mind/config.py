@@ -1,0 +1,189 @@
+"""Mind settings: environment variables (or an env file passed with ``--env``).
+
+Every setting has a neutral default; nothing site-specific (AGENTS.md rule 10).
+See ``docs/mind.md`` for the full list.
+"""
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+
+# Agenda categories, in their fixed order (the epic, #338). The weight of each is
+# the most tasks of that kind one wake may take; 0 turns the category off.
+CATEGORIES = ("obligations", "verify", "predictions", "reflect", "study")
+DEFAULT_WEIGHTS = {"obligations": 3, "verify": 2, "predictions": 2, "reflect": 1, "study": 1}
+
+
+class ConfigError(ValueError):
+    pass
+
+
+def parse_duration(text: str) -> float:
+    """``90``, ``90s``, ``30m``, ``4h``, ``1d`` → seconds."""
+    t = (text or "").strip().lower()
+    if not t:
+        raise ConfigError("empty duration")
+    unit = {"s": 1, "m": 60, "h": 3600, "d": 86400}.get(t[-1])
+    num = t[:-1] if unit else t
+    try:
+        value = float(num) * (unit or 1)
+    except ValueError:
+        raise ConfigError(f"bad duration {text!r}: use e.g. 30m, 4h") from None
+    if value < 0:
+        raise ConfigError(f"bad duration {text!r}: negative")
+    return value
+
+
+def parse_weights(text: str | None) -> dict[str, int]:
+    """``obligations=3,verify=2`` → weights; unnamed categories keep their default."""
+    out = dict(DEFAULT_WEIGHTS)
+    for part in (text or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        name, _, val = part.partition("=")
+        name = name.strip()
+        if name not in CATEGORIES:
+            raise ConfigError(f"unknown agenda category {name!r}: one of {', '.join(CATEGORIES)}")
+        try:
+            out[name] = max(0, int(val))
+        except ValueError:
+            raise ConfigError(f"bad weight for {name}: {val!r}") from None
+    return out
+
+
+@dataclass(frozen=True)
+class DreamCondition:
+    """When the deep tasks may run (#339 comment): ``never``, ``always``,
+    ``window HH:MM-HH:MM`` (local time, plus ``day_dreams`` outside it),
+    or ``idle N`` (minutes without a decision or action, or charging)."""
+    mode: str = "never"
+    start_min: int = 0
+    end_min: int = 0
+    idle_min: int = 30
+
+    @classmethod
+    def parse(cls, text: str | None) -> "DreamCondition":
+        t = (text or "never").strip().lower()
+        if t in ("never", "always"):
+            return cls(t)
+        if t.startswith("window"):
+            rng = t[len("window"):].strip()
+            try:
+                a, b = rng.split("-")
+                return cls("window", _hhmm(a), _hhmm(b))
+            except (ValueError, ConfigError):
+                raise ConfigError(f"bad MIND_DREAM {text!r}: use window 01:00-05:00") from None
+        if t.startswith("idle"):
+            rest = t[len("idle"):].strip() or "30"
+            try:
+                return cls("idle", idle_min=int(rest))
+            except ValueError:
+                raise ConfigError(f"bad MIND_DREAM {text!r}: use idle 30 (minutes)") from None
+        raise ConfigError(f"bad MIND_DREAM {text!r}: never, always, window HH:MM-HH:MM or idle N")
+
+    def in_window(self, minute_of_day: int) -> bool:
+        if self.start_min <= self.end_min:
+            return self.start_min <= minute_of_day < self.end_min
+        return minute_of_day >= self.start_min or minute_of_day < self.end_min  # crosses midnight
+
+
+def _hhmm(s: str) -> int:
+    h, m = s.strip().split(":")
+    h, m = int(h), int(m)
+    if not (0 <= h < 24 and 0 <= m < 60):
+        raise ConfigError(f"bad time {s!r}")
+    return h * 60 + m
+
+
+@dataclass(frozen=True)
+class MindConfig:
+    server: str
+    key_path: str
+    state_path: str
+    brain: str = "none"
+    model_family: str | None = None
+    max_tasks: int = 5
+    weights: dict = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
+    brain_calls: int = 10
+    tokens: int = 20000
+    seconds: float = 300.0
+    daily_writes: int = 20
+    novelty: float = 0.92
+    corpus: int = 200
+    embedder: str = "auto"
+    dream: DreamCondition = DreamCondition()
+    day_dreams: int = 1
+    lookback_days: int = 7
+    study_query: str = ""
+    health: bool = True
+    paused: bool = False
+    place: str | None = None
+
+    @property
+    def outbox_path(self) -> str:
+        return self.state_path + ".outbox"
+
+    @property
+    def intro_path(self) -> str:
+        return self.state_path + ".introduced"
+
+
+def _on(v: str | None, default: bool) -> bool:
+    if v is None or v == "":
+        return default
+    return v.strip().lower() in ("1", "on", "yes", "true")
+
+
+def read_env_file(path: str) -> dict:
+    out: dict[str, str] = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            v = v.strip()
+            if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+                v = v[1:-1]
+            out[k.strip()] = v
+    return out
+
+
+def load(env: dict | None = None) -> MindConfig:
+    e = dict(os.environ if env is None else env)
+    server = e.get("LTMS_SERVER", "").strip()
+    key_path = e.get("LTMS_KEY_PATH", "").strip()
+    if not server:
+        raise ConfigError("LTMS_SERVER is required (e.g. https://ltms.example.org)")
+    if not key_path:
+        raise ConfigError("LTMS_KEY_PATH is required: the member's key file")
+    state = e.get("MIND_STATE_PATH", "").strip() or os.path.splitext(key_path)[0] + ".mind.json"
+    try:
+        return MindConfig(
+            server=server.rstrip("/"),
+            key_path=key_path,
+            state_path=state,
+            brain=e.get("MIND_BRAIN", "none").strip().lower() or "none",
+            model_family=(e.get("MIND_MODEL_FAMILY", "").strip().lower() or None),
+            max_tasks=max(0, int(e.get("MIND_MAX_TASKS", "5") or 5)),
+            weights=parse_weights(e.get("MIND_WEIGHTS")),
+            brain_calls=max(0, int(e.get("MIND_BRAIN_CALLS", "10") or 10)),
+            tokens=max(0, int(e.get("MIND_TOKENS", "20000") or 20000)),
+            seconds=parse_duration(e.get("MIND_SECONDS", "300") or "300"),
+            daily_writes=max(0, int(e.get("MIND_DAILY_WRITES", "20") or 20)),
+            novelty=float(e.get("MIND_NOVELTY", "0.92") or 0.92),
+            corpus=max(1, int(e.get("MIND_CORPUS", "200") or 200)),
+            embedder=e.get("MIND_EMBEDDER", "auto").strip().lower() or "auto",
+            dream=DreamCondition.parse(e.get("MIND_DREAM")),
+            day_dreams=max(0, int(e.get("MIND_DAY_DREAMS", "1") or 1)),
+            lookback_days=max(1, int(e.get("MIND_LOOKBACK_DAYS", "7") or 7)),
+            study_query=e.get("MIND_STUDY_QUERY", "").strip(),
+            health=_on(e.get("MIND_HEALTH"), True),
+            paused=_on(e.get("MIND_PAUSED"), False),
+            place=e.get("MIND_PLACE", "").strip() or None,
+        )
+    except ValueError as exc:
+        if isinstance(exc, ConfigError):
+            raise
+        raise ConfigError(str(exc)) from None
