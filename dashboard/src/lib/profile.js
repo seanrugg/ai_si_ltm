@@ -81,6 +81,28 @@ export function niceMax(max) {
   return [1, 2, 5, 10].map((m) => m * p).find((v) => v >= max);
 }
 
+/**
+ * Whole-number y-axis for count charts (#385): `{ max, ticks }`.
+ * A maximum of 0–4 gets a tick at every whole number (0, 1, … max, at least 0, 1).
+ * Above that, the step is the smallest 1, 2 or 5 times a power of ten that needs
+ * at most four intervals, and the axis top is the next multiple of that step.
+ * Ticks are always distinct whole numbers, so labels never repeat.
+ */
+export function countTicks(max) {
+  const top = Math.ceil(Number(max) > 0 ? Number(max) : 0);
+  if (top <= 4) {
+    const end = Math.max(1, top);
+    return { max: end, ticks: Array.from({ length: end + 1 }, (_, i) => i) };
+  }
+  let step = 1;
+  for (let p = 1; ; p *= 10) {
+    const found = [1, 2, 5].map((m) => m * p).find((s) => Math.ceil(top / s) <= 4);
+    if (found) { step = found; break; }
+  }
+  const end = Math.ceil(top / step) * step;
+  return { max: end, ticks: Array.from({ length: end / step + 1 }, (_, i) => i * step) };
+}
+
 /** Index of the daily bucket containing `ts` (buckets are sorted ISO days), or -1. */
 export function bucketIndex(daily, ts) {
   const day = String(ts).slice(0, 10);
