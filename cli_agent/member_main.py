@@ -195,6 +195,27 @@ def log_message(rec: dict) -> None:
     logging.info("Member: message from %s to %s: %s", rec["agent"], to, rec.get("summary"))
 
 
+def drain_directives(fleet_msgs: "queue.Queue", directives) -> int:
+    """Hand every fleet-topic message waiting to the directive handler (#306, #490).
+
+    Main thread only: the handler signs its acks through the member's link. Each
+    outcome is logged; a message that breaks the handler is logged and skipped, so
+    a bad directive never stops the member. Returns how many were handled.
+    """
+    handled = 0
+    while True:
+        try:
+            payload = fleet_msgs.get_nowait()
+        except queue.Empty:
+            return handled
+        try:
+            result = directives.on_message(payload)
+            logging.info("Member: directive message: %s", result)
+        except Exception:  # noqa: BLE001 - a bad directive must not stop the member
+            logging.exception("Member: directive handling failed")
+        handled += 1
+
+
 def drain_messages(messages: "queue.Queue", name: str, prefix: str, handler=log_message) -> int:
     """Decode and hand on every swarm message waiting (main thread only). Never raises."""
     handled = 0
@@ -400,6 +421,7 @@ def main(poll=None) -> None:
         while running:
             drain_acks(link, acks)
             drain_messages(messages, name, prefix, on_swarm_message)
+            drain_directives(fleet_msgs, directives)
             if resend_wanted.is_set():
                 resend_wanted.clear()
                 link.resend_pending()

@@ -259,3 +259,97 @@ def test_send_message_validates_text(tmp_path):
             link.send_message(bad)
     rec = link.send_message("to two", to="vector")
     assert rec["peers"] == ["vector"]
+
+
+# ------------------------------------------------------------------ directives (#490)
+def _directive(fleet, did="d-0001", text="Dock by 22:00"):
+    import json
+    from cli_agent.directives import DOMAIN
+
+    statement = json.dumps({"id": did, "text": text, "scope": {"all": True}})
+    sig = fleet.sign(DOMAIN.encode() + statement.encode()).signature.hex()
+    return json.dumps({"kind": "directive", "id": did, "statement": statement, "signature": sig,
+                       "signer": "fleet"}).encode()
+
+
+def _fleet_queue(*payloads):
+    """Fleet-topic messages through the member's own on_message, as the broker delivers them."""
+    fleet = queue.Queue()
+    on_message = make_on_message(queue.Queue(), queue.Queue(), threading.Event(), fleet)
+    for i, payload in enumerate(payloads):
+        on_message(None, None, types.SimpleNamespace(topic=f"sw-1a2b3c4d/fleet/d-{i}", payload=payload))
+    return fleet
+
+
+def test_member_acknowledges_a_fleet_directive(tmp_path):
+    from cli_agent.agent import verify_chain
+    from cli_agent.directives import DirectiveHandler
+    from cli_agent.member_main import drain_directives
+
+    fleet = generate_key()
+    key, link, _sent, outbox = _make_link(tmp_path)
+    handler = DirectiveHandler(link, lambda: fleet.verify_key.encode().hex(), str(tmp_path / "directives.json"))
+    msgs = _fleet_queue(_directive(fleet))
+    assert msgs.qsize() == 1
+
+    assert drain_directives(msgs, handler) == 1
+    recs = outbox.pending("z3-r0", 100)
+    assert [r["tags"] for r in recs] == [["directive-ack"], ["directive-ack"]]
+    assert [r["payload"]["status"] for r in recs] == ["received", "accepted"]
+    assert all(r["payload"]["directive"] == "d-0001" for r in recs)
+    ok, msg = verify_chain(recs, bytes(key.verify_key))
+    assert ok, msg
+
+    # A retained re-delivery after a reconnect isn't acknowledged twice.
+    assert drain_directives(_fleet_queue(_directive(fleet)), handler) == 1
+    assert len(outbox.pending("z3-r0", 100)) == 2
+
+
+def test_member_declines_when_its_behaviour_says_so(tmp_path):
+    from cli_agent.directives import Decision, DirectiveHandler
+    from cli_agent.member_main import drain_directives
+
+    fleet = generate_key()
+    _key, link, _sent, outbox = _make_link(tmp_path)
+    handler = DirectiveHandler(link, lambda: fleet.verify_key.encode().hex(), str(tmp_path / "d.json"),
+                               decide=lambda stmt: Decision.decline("outside my safety envelope"))
+    drain_directives(_fleet_queue(_directive(fleet)), handler)
+    last = outbox.pending("z3-r0", 100)[-1]
+    assert last["payload"] == {"directive": "d-0001", "status": "declined", "reason": "outside my safety envelope"}
+
+
+def test_bad_directives_are_logged_and_the_member_keeps_going(tmp_path, caplog):
+    import logging
+
+    from cli_agent.directives import DirectiveHandler
+    from cli_agent.member_main import drain_directives
+
+    fleet, impostor = generate_key(), generate_key()
+    _key, link, _sent, outbox = _make_link(tmp_path)
+    handler = DirectiveHandler(link, lambda: fleet.verify_key.encode().hex(), str(tmp_path / "d.json"))
+    msgs = _fleet_queue(_directive(impostor, did="d-bad"), b"not json", _directive(fleet, did="d-good"))
+    with caplog.at_level(logging.INFO):
+        assert drain_directives(msgs, handler) == 3
+    statuses = [(r["tags"], (r.get("payload") or {}).get("status")) for r in outbox.pending("z3-r0", 100)]
+    assert statuses == [(["directive-invalid"], None), (["directive-ack"], "received"),
+                        (["directive-ack"], "accepted")]
+    assert "directive message: invalid" in caplog.text and "directive message: unreadable" in caplog.text
+
+    class Broken:
+        def on_message(self, payload):
+            raise RuntimeError("boom")
+
+    with caplog.at_level(logging.ERROR):
+        assert drain_directives(_fleet_queue(b"{}", b"{}"), Broken()) == 2  # both tried, none fatal
+    assert "directive handling failed" in caplog.text
+
+
+def test_the_member_loop_drains_directives():
+    """main() calls drain_directives every pass, right after the swarm messages (#490)."""
+    import inspect
+
+    from cli_agent import member_main
+
+    src = inspect.getsource(member_main.main)
+    assert "drain_directives(fleet_msgs, directives)" in src
+    assert src.index("drain_messages(messages") < src.index("drain_directives(fleet_msgs")
