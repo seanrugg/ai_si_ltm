@@ -5,7 +5,7 @@ import HelpTip from "../../components/HelpTip.jsx";
 import { COUNT_ACT, COUNT_COMM, COUNT_LEARN, COUNT_SELF_REPORT, COUNT_SENSE } from "../../lib/help.js";
 import { CategoryLine, MemberMark } from "../../components/visual.jsx";
 import { heartbeatSwell } from "../../lib/light.js";
-import { bucketIndex, dayTotal, niceMax, percent, stackDay, wipesOf } from "../../lib/profile.js";
+import { bucketIndex, countTicks, dayTotal, percent, stackDay, wipesOf } from "../../lib/profile.js";
 import { CATEGORIES, NEUTRAL, kindOf } from "../../lib/visual.js";
 import { memberWithRole } from "../Profile.jsx";
 
@@ -202,7 +202,7 @@ const PAD = { l: 44, r: 8, t: 22, b: 28 };
 
 export function Trend({ daily, wipes }) {
   const [asTable, setAsTable] = useState(false);
-  const max = niceMax(Math.max(0, ...daily.map(dayTotal)));
+  const { max, ticks } = countTicks(Math.max(0, ...daily.map(dayTotal)));
   const plotW = W - PAD.l - PAD.r;
   const plotH = H - PAD.t - PAD.b;
   const step = daily.length ? plotW / daily.length : plotW;
@@ -237,10 +237,10 @@ export function Trend({ daily, wipes }) {
              aria-label={`Records per ${weekly ? "week" : "day"}, stacked by category. Use View as table for the numbers.`}>
           <text x={12} y={PAD.t + plotH / 2} fill="currentColor" fontSize="11" className="text-paper-muted"
                 transform={`rotate(-90 12 ${PAD.t + plotH / 2})`} textAnchor="middle">records</text>
-          {[0, max / 2, max].map((v) => (
+          {ticks.map((v) => (
             <g key={v}>
               <line x1={PAD.l} x2={W - PAD.r} y1={y(v)} y2={y(v)} stroke="#26344F" strokeWidth="1" />
-              <text x={PAD.l - 6} y={y(v) + 4} fontSize="11" textAnchor="end" fill="#93A0B8">{Math.round(v)}</text>
+              <text x={PAD.l - 6} y={y(v) + 4} fontSize="11" textAnchor="end" fill="#93A0B8">{v.toLocaleString()}</text>
             </g>
           ))}
           {daily.map((d, i) => (
