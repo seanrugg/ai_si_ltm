@@ -1,5 +1,5 @@
 name: tool_guard
-version: 0.1.0
+version: 0.2.0
 description: >-
   Refuses tool calls whose numeric arguments are out of range, before the tool
   runs (for example a robot drive of 2000 mm). Limits are settings; the default

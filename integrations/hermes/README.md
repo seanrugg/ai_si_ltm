@@ -19,6 +19,7 @@ The model never sees the member's key.
 | Session ends | `event` "Hermes session completed: N tool calls, M errors" | `hermes,session` | the counts, `completed`, `interrupted` |
 
 - **`ok`** is a best guess. Hermes has no separate error flag, so a result counts as an error when it is a JSON object with a truthy `error`, `success: false`, `ok: false` or `isError: true`, or text that starts with `Error`.
+- **The `tool_call` bridge.** With tool search on, Hermes runs MCP tools through its `tool_call` bridge, and the hooks see the bridge. A bridge call that runs one tool is recorded as **that tool**, with its own arguments and `"via": "tool_call"` in the payload. A bridge call that runs several keeps the name `tool_call` and lists them in `calls`. `peer_map` and the rollup use the real tool names.
 - **`peers`.** When a tool name matches a `peer_map` prefix, the record's `peers` names the member the tool acted on. The action then also counts for that robot: on its profile (Top peers), in Conversation, in the xAPI export, and on its Timeline with **Include records naming this member** checked.
 - **Limits.**
   - `result_raw` is cut to `max_result_bytes` (default 8192), with `result_truncated: true`.
@@ -165,6 +166,7 @@ plugins:
           vector_drive: {distance_mm: 100, angle_deg: 90, speed: 100}   # the default
 ```
 
+- **Calls through the `tool_call` bridge.** With tool search on (for example `hermes chat -t mcp-<server>`), Hermes rewrites a call to an MCP tool into its `tool_call` bridge *before* the hooks run: the hook sees `tool_call` with `{"calls": [{"name": "mcp__vector__vector_drive", "arguments": {…}}]}`. The guard unwraps it and checks every inner call. One bad call blocks the whole bridge call, and so does a bridge call whose arguments it can't read.
 - **Rejected values:** a value that isn't a finite number (text, `true`, infinity) is refused too.
 - **Missing arguments** aren't checked: the tool's own defaults apply.
 - **Fail-closed:** if the guard itself fails while checking a guarded tool, it blocks the call. Other tools are never touched.

@@ -158,6 +158,42 @@ def peers_for(tool_name: str, peer_map: dict[str, str]) -> list[str] | None:
     return [best[1]] if best else None
 
 
+BRIDGE_TOOL = "tool_call"
+
+
+def unwrap_bridge(tool_name: str, args: Any) -> tuple[str, Any, list[str]]:
+    """``(name, args, inner names)`` for what a hook call really ran (#484).
+
+    With tool search on, Hermes rewrites a deferred tool call into its
+    ``tool_call`` bridge before the hooks run:
+    ``args={"calls": [{"name": <real tool>, "arguments": {...}}]}``. One inner
+    call is recorded as that tool with its own arguments; several keep the
+    bridge name and list the inner names. Any other call is returned as is.
+    """
+    if tool_name != BRIDGE_TOOL:
+        return tool_name, args, []
+    parsed = args
+    if isinstance(parsed, str):
+        try:
+            parsed = json.loads(parsed.strip() or "{}")
+        except ValueError:
+            return tool_name, args, []
+    if not isinstance(parsed, dict):
+        return tool_name, args, []
+    entries = parsed.get("calls")
+    entries = entries if isinstance(entries, list) else [parsed]
+    names = [str(e.get("name")) for e in entries if isinstance(e, dict) and e.get("name")]
+    if len(entries) == 1 and len(names) == 1:
+        inner = entries[0].get("arguments")
+        if isinstance(inner, str):
+            try:
+                inner = json.loads(inner.strip() or "{}")
+            except ValueError:
+                pass
+        return names[0], inner, names
+    return tool_name, args, names
+
+
 def clip_summary(text: str) -> str:
     return text if len(text) <= MAX_SUMMARY else text[: MAX_SUMMARY - 1] + "…"
 
@@ -173,7 +209,12 @@ def tool_call_record(
     model: str | None,
     settings: dict[str, Any],
 ) -> tuple[str, dict[str, Any], dict[str, Any]]:
-    """Build ``(summary, payload, header)`` for one tool call. Never over the limits."""
+    """Build ``(summary, payload, header)`` for one tool call. Never over the limits.
+
+    A ``tool_call`` bridge call is recorded as the tool it ran (see ``unwrap_bridge``).
+    """
+    bridge_name = tool_name
+    tool_name, args, inner_names = unwrap_bridge(tool_name, args)
     ok = not looks_like_error(result)
     ms = duration_ms if isinstance(duration_ms, (int, float)) and not isinstance(duration_ms, bool) else None
     timing = f" ({int(ms)} ms)" if ms is not None else ""
@@ -188,6 +229,10 @@ def tool_call_record(
         "model": model,
         "record_mode": settings["record_mode"],
     }
+    if inner_names:
+        payload["via"] = bridge_name
+        if tool_name == bridge_name:
+            payload["calls"] = inner_names[:20]
     if settings["record_mode"] == "full":
         safe_args = json_safe(redact(args, settings["redact_keys"]))
         args_bytes = _json_bytes(safe_args)
@@ -212,7 +257,11 @@ def tool_call_record(
         payload["dropped_for_size"] = True
 
     header: dict[str, Any] = {"tags": list(TOOL_TAGS)}
-    peers = peers_for(tool_name, settings["peer_map"])
+    peers: list[str] = []
+    for name in inner_names or [tool_name]:
+        for member in peers_for(name, settings["peer_map"]) or []:
+            if member not in peers:
+                peers.append(member)
     if peers:
         header["peers"] = peers
     return summary, payload, header
