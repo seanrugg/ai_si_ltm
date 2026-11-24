@@ -55,6 +55,13 @@ the sidecar records what happens like any other event.
 | `wirepod` | a wire-pod server's UI and debug logs (`/api/get_logs`, `/api/get_debug_logs`) | what it heard and the intent matched (`perception`), intent parameters, custom intents and LLM requests (`event`, the request refs the heard), LLM replies (`communication`, refs the request, with `model` and `runs_on`) |
 | `vector_sdk` | the robot's SDK event stream (`wirepod_vector_sdk`), watching only | wake word, user intents, faces (`event` / `perception`), episodes of held, cliff, falling, on charger, charging, button, touch, animating and wheels moving (`event` start/end), pose (one sensed `telemetry,pose` record per window and frame, `kind: pose`, frame `vector-odom:<origin id>`), one sensed `telemetry,body` record per sensor group per window, one `internal,telemetry,body-health` self-report per window; on connect, the spec sheet (`report_specs`: board, SDK and firmware versions, animation and trigger **counts**) |
 
+**A frozen SDK stream (`vector_sdk`, #486).** The SDK connection can stop delivering new state without any error. On Vector this happened when another SDK client (VectorClaw, through Hermes) took control. The sidecar kept sampling the last values, the deadbands saw no change, and hours of a moving robot looked like rest. A live Vector never reports **bit-identical** IMU, touch `raw` and proximity `signal_quality` for long: they jitter even on the charger. So when all of them stay exactly the same for `VECTOR_STALE_SECONDS` (default 10; `0` turns it off), the adapter does three things:
+- signs one `event` **`body stream stale`** (tags `body,stream-stale`, with `unchanged_s`);
+- drops the connection and reconnects 2 s later;
+- on reconnecting, signs **`body stream resumed`** (`outage_s`).
+
+While stale, and whenever the last charger reading is more than three battery polls old, Vector isn't treated as resting, so a frozen stream can't hide behind the 30-minute resting heartbeat. Gaps now show on the Timeline as a stale/resumed pair instead of looking like calm.
+
 Each adapter's module docstring lists the exact source lines and SDK names it
 was written against (wire-pod commit `dc6ae0c`, `wirepod_vector_sdk` 0.8.1),
 so a change upstream can be checked.
