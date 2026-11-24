@@ -636,3 +636,84 @@ def test_vector_resting_follows_the_charger_platform():
     assert v.resting() is True
     from adapters.wirepod import WirePodLogs
     assert WirePodLogs("http://pod").resting() is False  # the default
+
+
+# ---------------------------------------------------------------- #486: a frozen SDK stream
+def _live_robot(seed=0.0):
+    from types import SimpleNamespace as NS
+    return NS(left_wheel_speed_mmps=0.0, right_wheel_speed_mmps=0.0,
+              accel=NS(x=-5523.08 + seed, y=-64.07, z=8957.6), gyro=NS(x=0.0004 + seed / 1e6, y=-0.0007, z=-0.0005),
+              head_angle_rad=0.1, lift_height_mm=32.0,
+              touch=NS(last_sensor_reading=NS(raw_touch_value=4500 + seed, is_being_touched=False)),
+              proximity=NS(last_sensor_reading=NS(distance=NS(distance_mm=56), signal_quality=0.0072 + seed / 1e5,
+                                                  unobstructed=True, found_object=False, is_lift_in_fov=False)))
+
+
+def test_a_still_but_live_robot_is_never_stale():
+    # 22 Nov 2026, docked: every IMU sample differed in the low bits.
+    from adapters.vector_sdk import StaleStream  # noqa: F401
+    v = VectorSDK(stale_seconds=10)
+    got = []
+    for i in range(60):
+        v.on_body(got.append, _live_robot(seed=i * 1e-3), now=float(i))
+    assert not [g for g in got if g.kind == "record"]
+
+
+def test_bit_identical_live_channels_mean_a_frozen_stream():
+    from adapters.vector_sdk import StaleStream
+    v = VectorSDK(stale_seconds=10)
+    got = []
+    robot = _live_robot()
+    for i in range(10):
+        v.on_body(got.append, robot, now=float(i))  # 0..9 s: not yet
+    with pytest.raises(StaleStream):
+        v.on_body(got.append, robot, now=10.0)
+    (rec,) = [g for g in got if g.kind == "record"]
+    assert rec.type == "event" and rec.summary == "body stream stale"
+    assert "stream-stale" in rec.tags and rec.payload["unchanged_s"] == 10.0
+    # Only once per outage, even if it's seen again before the reconnect.
+    v.mark_stale(got.append, 20.0)
+    assert len([g for g in got if g.kind == "record"]) == 1
+
+
+def test_stale_stream_stops_resting_and_resume_reports_the_outage(monkeypatch):
+    from types import SimpleNamespace as NS
+    v = VectorSDK(stale_seconds=10)
+    got = []
+    v.on_battery(got.append, NS(battery_volts=4.0, battery_level=2, is_charging=True, is_on_charger_platform=True),
+                 now=100.0)
+    assert v.resting(now=101.0) is True
+    clock = [1000.0]
+    monkeypatch.setattr("adapters.vector_sdk.time.time", lambda: clock[0])
+    v.mark_stale(got.append, 10.0)
+    assert v.resting(now=101.0) is False  # stale: never "resting" on old state
+    clock[0] = 1600.0
+    v.mark_resumed(got.append)
+    resumed = [g for g in got if g.kind == "record"][-1]
+    assert "stream-resumed" in resumed.tags and resumed.payload["outage_s"] == 600.0
+    v.mark_resumed(got.append)  # a normal connect: nothing to report
+    assert len([g for g in got if g.kind == "record"]) == 2
+
+
+def test_an_old_charger_reading_does_not_count_as_resting():
+    from types import SimpleNamespace as NS
+    v = VectorSDK(battery_seconds=30)
+    v.on_battery(lambda i: None, NS(battery_volts=4.0, battery_level=2, is_charging=True,
+                                    is_on_charger_platform=True), now=0.0)
+    assert v.resting(now=90.0) is True    # three polls
+    assert v.resting(now=91.0) is False   # older than that
+
+
+def test_stale_check_off_and_without_live_channels():
+    from types import SimpleNamespace as NS
+    v = VectorSDK(stale_seconds=0)
+    for i in range(30):
+        v.on_body(lambda i: None, _live_robot(), now=float(i))  # disabled: never raises
+    v2 = VectorSDK(stale_seconds=10)
+    for i in range(30):
+        v2.on_body(lambda i: None, NS(head_angle_rad=0.1), now=float(i))  # nothing to compare: never stale
+
+
+def test_stale_seconds_from_env():
+    assert VectorSDK.from_env({"VECTOR_STALE_SECONDS": "25"}).watch.stale_seconds == 25.0
+    assert VectorSDK.from_env({}).watch.stale_seconds == 10.0

@@ -79,9 +79,21 @@ through ``on_specs`` (the sidecar sets it to ``report_specs``).
 Not available from the SDK, so not recorded: Vector's stimulation level, which
 animation is playing.
 
+**Stale stream (#486).** The SDK connection can stop delivering new state without
+raising anything: on 23 Nov 2026 it froze after another SDK client (VectorClaw)
+drove Vector off the charger. The sidecar kept sampling the last values, the
+deadbands saw "no change", and 20 minutes of exploring looked like rest. A live
+robot never reports *bit-identical* IMU, touch ``raw`` and proximity
+``signal_quality`` for long; those channels jitter even at rest. When all of
+them stay exactly the same for ``VECTOR_STALE_SECONDS`` (default 10; 0 = off), the
+adapter signs one ``body stream stale`` event, drops the connection and reconnects
+at once. After reconnecting it signs ``body stream resumed`` with the outage
+length. A battery reading older than three polls no longer counts as "on the
+charger", so a stale stream can't keep the 30-minute resting heartbeat.
+
 Settings: VECTOR_SERIAL (optional; the SDK's default robot otherwise),
 VECTOR_BODY_SECONDS, VECTOR_FLAG_SECONDS, VECTOR_DEBOUNCE_SECONDS,
-VECTOR_FACE_GAP_SECONDS, VECTOR_BATTERY_SECONDS.
+VECTOR_FACE_GAP_SECONDS, VECTOR_BATTERY_SECONDS, VECTOR_STALE_SECONDS.
 """
 from __future__ import annotations
 
@@ -106,6 +118,51 @@ STATES = {
 }
 STATUS_FLAGS = tuple(f for flags in STATES.values() for f in flags if f != "is_touched")
 DEBOUNCE_SECONDS = 0.5
+STALE_SECONDS = 10.0
+# Channels that jitter on a live robot even at rest (#448, #486): bit-identical for
+# STALE_SECONDS means the SDK stopped delivering state.
+LIVE_CHANNELS = {"imu": ("accel_x", "accel_y", "accel_z", "gyro_x", "gyro_y", "gyro_z"),
+                 "touch": ("raw",), "proximity": ("signal_quality",)}
+
+
+class StaleStream(Exception):
+    """The SDK stream stopped changing; reconnect (#486)."""
+
+
+class StreamWatch:
+    """Tells a frozen SDK stream from a still robot (#486).
+
+    ``update(groups, now)`` takes one ``sensor_values`` reading. It returns the
+    seconds the live channels have been bit-identical, once that reaches
+    ``stale_seconds`` (else None). With no live channels to compare it never
+    calls a stream stale.
+    """
+
+    def __init__(self, stale_seconds: float = STALE_SECONDS):
+        self.stale_seconds = stale_seconds
+        self.last: tuple | None = None
+        self.since: float | None = None
+
+    @staticmethod
+    def fingerprint(groups: dict[str, dict]) -> tuple | None:
+        vals = tuple((g, c, groups[g][c]) for g, cs in LIVE_CHANNELS.items() if g in groups
+                     for c in cs if c in groups[g])
+        return vals or None
+
+    def reset(self) -> None:
+        self.last = self.since = None
+
+    def update(self, groups: dict[str, dict], now: float) -> float | None:
+        if self.stale_seconds <= 0:
+            return None
+        fp = self.fingerprint(groups)
+        if fp is None:
+            return None
+        if fp != self.last:
+            self.last, self.since = fp, now
+            return None
+        frozen = now - (self.since if self.since is not None else now)
+        return frozen if frozen >= self.stale_seconds else None
 
 
 class EpisodeTracker:
@@ -337,7 +394,8 @@ class VectorSDK(Adapter):
                        "on_charger_platform": 0}
 
     def __init__(self, serial: str | None = None, body_seconds: float = 1.0, face_gap_seconds: float = 10.0,
-                 battery_seconds: float = 30.0, flag_seconds: float = 0.1, debounce_seconds: float = DEBOUNCE_SECONDS):
+                 battery_seconds: float = 30.0, flag_seconds: float = 0.1, debounce_seconds: float = DEBOUNCE_SECONDS,
+                 stale_seconds: float = STALE_SECONDS):
         self.serial = serial or None
         self.body_seconds = body_seconds
         self.face_gap_seconds = face_gap_seconds
@@ -351,6 +409,9 @@ class VectorSDK(Adapter):
         # On the charger, from the battery poll (#449). A plain bool: the SDK
         # thread writes it and the sidecar's loop reads it, so no lock is needed.
         self._on_charger = False
+        self._battery_at: float | None = None  # monotonic time of the last on-charger reading (#486)
+        self.watch = StreamWatch(stale_seconds)
+        self._stale_at: float | None = None  # wall time the stream was found stale; None while healthy
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -359,7 +420,8 @@ class VectorSDK(Adapter):
         return cls(env.get("VECTOR_SERIAL"), float(env.get("VECTOR_BODY_SECONDS", "1")),
                    float(env.get("VECTOR_FACE_GAP_SECONDS", "10")), float(env.get("VECTOR_BATTERY_SECONDS", "30")),
                    float(env.get("VECTOR_FLAG_SECONDS", "0.1")),
-                   float(env.get("VECTOR_DEBOUNCE_SECONDS", str(DEBOUNCE_SECONDS))))
+                   float(env.get("VECTOR_DEBOUNCE_SECONDS", str(DEBOUNCE_SECONDS))),
+                   float(env.get("VECTOR_STALE_SECONDS", str(STALE_SECONDS))))
 
     # -- mapping (pure; called from SDK callbacks) ---------------------------
     def on_wake_word(self, emit: Emit, msg=None) -> None:
@@ -399,28 +461,69 @@ class VectorSDK(Adapter):
         if flicker:
             emit(Item("flicker", values=flicker))
 
-    def on_body(self, emit: Emit, robot) -> None:
-        """One body reading: pose (#407) and one sample per sensor group (#408)."""
+    def on_body(self, emit: Emit, robot, now: float | None = None) -> None:
+        """One body reading: pose (#407) and one sample per sensor group (#408).
+
+        Raises ``StaleStream`` (after signing ``body stream stale``) when the live
+        channels have been bit-identical for ``stale_seconds`` (#486).
+        """
+        groups = sensor_values(robot)
+        frozen = self.watch.update(groups, time.monotonic() if now is None else now)
+        if frozen is not None:
+            self.mark_stale(emit, frozen)
+            raise StaleStream(f"no new state for {frozen:.0f} s")
         pose = pose_values(robot)
         if pose:
             emit(Item("body", values=pose))
-        for group, values in sensor_values(robot).items():
+        for group, values in groups.items():
             modality, unit = GROUPS[group]
             emit(Item("sample", values=values,
                       sensor={"sensor": group, "modality": modality, "unit": unit,
                               "deadband": DEADBANDS.get(group, {})}))
 
-    def on_battery(self, emit: Emit, state) -> None:
+    def on_battery(self, emit: Emit, state, now: float | None = None) -> None:
         """One battery poll: the health item, and whether Vector is on the charger (#449)."""
         health = battery_values(state)
         if isinstance(health.get("on_charger_platform"), bool):
             self._on_charger = health["on_charger_platform"]
+            self._battery_at = time.monotonic() if now is None else now
         if health:
             emit(Item("health", values=health))
 
-    def resting(self) -> bool:
-        """Docked: on the charger platform, per the last battery reading (False before the first)."""
-        return self._on_charger
+    def resting(self, now: float | None = None) -> bool:
+        """Docked: on the charger platform, per the last battery reading (False before the first).
+
+        A reading older than three battery polls doesn't count (#486), and nor does
+        anything while the stream is stale.
+        """
+        if not self._on_charger or self._stale_at is not None:
+            return False
+        if self._battery_at is None:
+            return True
+        age = (time.monotonic() if now is None else now) - self._battery_at
+        return age <= 3 * self.battery_seconds
+
+    def mark_stale(self, emit: Emit, frozen_s: float) -> None:
+        """Sign ``body stream stale`` once per outage, and stop trusting old state (#486)."""
+        if self._stale_at is not None:
+            return
+        self._stale_at = time.time()
+        self._on_charger = False
+        logging.warning("vector_sdk: no new state for %.0f s; reconnecting", frozen_s)
+        emit(Item("record", "event", "body stream stale", ["body", "stream-stale"],
+                  {"source": "vector-sdk", "unchanged_s": round(frozen_s, 1),
+                   "channels": sorted(f"{g}.{c}" for g, cs in LIVE_CHANNELS.items() for c in cs)}))
+
+    def mark_resumed(self, emit: Emit) -> None:
+        """After a reconnect: sign ``body stream resumed`` with the outage length (#486)."""
+        self.watch.reset()
+        if self._stale_at is None:
+            return
+        outage = time.time() - self._stale_at
+        self._stale_at = None
+        logging.info("vector_sdk: state flowing again after %.0f s", outage)
+        emit(Item("record", "event", "body stream resumed", ["body", "stream-resumed"],
+                  {"source": "vector-sdk", "outage_s": round(outage, 1)}))
 
     def on_connected(self, robot) -> None:
         """Report the spec sheet once per connection, if the sidecar asked for it."""
@@ -445,11 +548,14 @@ class VectorSDK(Adapter):
 
     def _run(self, emit: Emit) -> None:
         while not self._stop.is_set():
+            wait = 30
             try:
                 self._connect_and_watch(emit)
+            except StaleStream:
+                wait = 2  # the robot is there; only our stream froze (#486)
             except Exception as exc:  # noqa: BLE001 - robot asleep or out of range: retry
                 logging.warning("vector_sdk: %s; retrying in 30 s", exc)
-            self._stop.wait(30)
+            self._stop.wait(wait)
 
     def _connect_and_watch(self, emit: Emit) -> None:
         import anki_vector  # wirepod_vector_sdk; imported here so tests need no SDK
@@ -476,6 +582,7 @@ class VectorSDK(Adapter):
             except Exception as exc:  # noqa: BLE001 - specs are best effort
                 logging.info("vector_sdk: specs report failed: %s", exc)
 
+            self.mark_resumed(emit)
             next_body = next_battery = 0.0
             while not self._stop.is_set():
                 now = time.monotonic()
