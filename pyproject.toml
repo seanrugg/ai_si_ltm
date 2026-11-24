@@ -46,6 +46,6 @@ ltms_contract = ["vectors.json"]
 server = ["migrations/sql/*.sql"]  # issue #97: migration SQL shipped with the package
 
 [tool.pytest.ini_options]
-testpaths = ["server/tests", "examples/robot-sidecar/tests", "tests/mind"]
+testpaths = ["server/tests", "examples/robot-sidecar/tests", "tests/mind", "examples/app-lab-member/tests"]
 addopts = "-q"
 filterwarnings = ["ignore::DeprecationWarning"]

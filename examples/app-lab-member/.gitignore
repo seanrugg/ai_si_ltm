@@ -1,0 +1,4 @@
+# Made on the board or by make-app.sh: never commit
+data/
+python/vendor/
+dist/
