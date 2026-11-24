@@ -3,8 +3,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import React from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import Profile from "./Profile.jsx";
+import { Trend } from "./profile/Overview.jsx";
 import { api } from "../api/client.js";
-import { dayTotal, nextTab, niceMax, rangeOf, stackDay, tabOf, wipesOf } from "../lib/profile.js";
+import { countTicks, dayTotal, nextTab, niceMax, rangeOf, stackDay, tabOf, wipesOf } from "../lib/profile.js";
 
 vi.mock("../api/client.js", () => ({ api: vi.fn() }));
 afterEach(() => cleanup());
@@ -66,6 +67,29 @@ describe("pure helpers", () => {
     expect(niceMax(7)).toBe(10);
     expect(niceMax(0)).toBe(1);
     expect(wipesOf([{ action: "memory_wipe", ts: "t", detail: "wipe 3" }])).toEqual([{ ts: "t", generation: 3 }]);
+  });
+  it("count axes use whole-number ticks only (#385)", () => {
+    expect(countTicks(1)).toEqual({ max: 1, ticks: [0, 1] });
+    expect(countTicks(0)).toEqual({ max: 1, ticks: [0, 1] });
+    expect(countTicks(3)).toEqual({ max: 3, ticks: [0, 1, 2, 3] });
+    expect(countTicks(4)).toEqual({ max: 4, ticks: [0, 1, 2, 3, 4] });
+    expect(countTicks(5)).toEqual({ max: 6, ticks: [0, 2, 4, 6] });
+    expect(countTicks(37)).toEqual({ max: 40, ticks: [0, 10, 20, 30, 40] });
+    expect(countTicks(1234).ticks).toEqual([0, 500, 1000, 1500]);
+    for (let m = 0; m <= 5000; m += m < 60 ? 1 : 37) {
+      const { max, ticks } = countTicks(m);
+      expect(new Set(ticks).size).toBe(ticks.length);
+      ticks.forEach((t) => expect(Number.isInteger(t)).toBe(true));
+      expect(ticks[0]).toBe(0);
+      expect(ticks.at(-1)).toBe(max);
+      expect(max).toBeGreaterThanOrEqual(m);
+      expect(ticks.length).toBeLessThanOrEqual(5);
+    }
+  });
+  it("Activity trend labels a max of 1 as 0, 1 with no duplicate (#385)", () => {
+    const { container } = render(React.createElement(Trend, { daily: [{ day: "2026-11-13", ...zero, comm: 1 }, { day: "2026-11-14", ...zero }], wipes: [] }));
+    const labels = [...container.querySelectorAll("text[text-anchor='end']")].map((t) => t.textContent);
+    expect(labels).toEqual(["0", "1"]);
   });
 });
 
