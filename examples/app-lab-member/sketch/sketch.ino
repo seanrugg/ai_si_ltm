@@ -20,6 +20,14 @@
 //
 // On the VENTUNO Q, RGB LED 1 (red is Zephyr's error LED) and LED 4 (red is the CAN state
 // LED) are left alone. Handlers use provide_safe, so they run between loop() passes.
+//
+// The on-board agent (#492, off unless AGENT=on) may ask for two things, and the MCU decides:
+//   agent_light(state)  0 off, 1 busy, 2 attention, 3 done. Shown on RGB LED 3 if the board
+//                       defines LED3_R/G/B; refused (false) on boards without a spare LED.
+//   agent_icon(icon)    0 blank, 1 check, 2 question, 3 heart, 4 dot, on the LED matrix;
+//                       refused on boards without one.
+// Both are refused while "disconnected" is showing (that state always wins), and for any
+// value out of range. No actuation: lights and icons only.
 
 #include <Arduino_RouterBridge.h>
 
@@ -41,7 +49,9 @@ uint32_t linkLost = 0;
 unsigned long lastStatusMs = 0;
 uint32_t loopMaxUs = 0;
 bool matrixReady = false;
-int shownIcon = -1;
+int shownIcon = -2;  // nothing drawn yet (-1 is the X)
+int agentIcon = 0;   // 0 blank
+int agentLight = 0;  // 0 off
 
 #if defined(HAS_RGB_STATUS)
 // bit 0 red, bit 1 green, bit 2 blue
@@ -53,19 +63,63 @@ void setStatusRgb(int bits) {
 }
 #endif
 
+#if defined(LED3_R) && defined(LED3_G) && defined(LED3_B)
+#define HAS_AGENT_LIGHT 1
+#endif
+
 #if defined(HAS_MATRIX)
 const char *X_ICON[8] = {"  #       #  ", "   #     #   ", "    #   #    ", "     # #     ",
                          "      #      ", "     # #     ", "    #   #    ", "   #     #   "};
-void showIcon(int which) {  // 0 blank, 1 X
+// Agent icons (index = agent_icon value; 0 is blank)
+const char *AGENT_ICONS[5][8] = {
+  {"             ", "             ", "             ", "             ",
+   "             ", "             ", "             ", "             "},
+  {"             ", "          #  ", "         #   ", "        #    ",
+   "   #   #     ", "    # #      ", "     #       ", "             "},   // check
+  {"     ###     ", "    #   #    ", "        #    ", "       #     ",
+   "      #      ", "      #      ", "             ", "      #      "},   // question
+  {"             ", "   ## ##     ", "  #######    ", "  #######    ",
+   "   #####     ", "    ###      ", "     #       ", "             "},   // heart
+  {"             ", "             ", "             ", "     ###     ",
+   "     ###     ", "     ###     ", "             ", "             "},   // dot
+};
+const int AGENT_ICON_COUNT = 5;
+
+// which: -1 = the X (disconnected), otherwise an agent icon index
+void showIcon(int which) {
   if (!matrixReady || which == shownIcon) return;
   uint8_t frame[8][13];
   for (int y = 0; y < 8; y++)
-    for (int x = 0; x < 13; x++)
-      frame[y][x] = (which == 1 && X_ICON[y][x] == '#') ? 1 : 0;
+    for (int x = 0; x < 13; x++) {
+      char c = (which < 0) ? X_ICON[y][x] : AGENT_ICONS[which][y][x];
+      frame[y][x] = (c == '#') ? 1 : 0;
+    }
   matrix.renderBitmap(frame, 8, 13);
   shownIcon = which;
 }
 #endif
+
+bool onAgentIcon(int icon) {
+#if defined(HAS_MATRIX)
+  if (disconnected || !matrixReady || icon < 0 || icon >= AGENT_ICON_COUNT) return false;
+  agentIcon = icon;
+  return true;
+#else
+  (void)icon;
+  return false;  // no display on this board
+#endif
+}
+
+bool onAgentLight(int state) {
+#if defined(HAS_AGENT_LIGHT)
+  if (disconnected || state < 0 || state > 3) return false;
+  agentLight = state;
+  return true;
+#else
+  (void)state;
+  return false;  // no spare LED on this board
+#endif
+}
 
 bool onLink(int state) {
   if (state < LINK_STARTING || state > LINK_OFFLINE) return false;
@@ -90,6 +144,11 @@ void setup() {
 #endif
   Bridge.begin();
   Bridge.provide_safe("link", onLink);
+  Bridge.provide_safe("agent_light", onAgentLight);
+  Bridge.provide_safe("agent_icon", onAgentIcon);
+#if defined(HAS_AGENT_LIGHT)
+  pinMode(LED3_R, OUTPUT); pinMode(LED3_G, OUTPUT); pinMode(LED3_B, OUTPUT);
+#endif
 }
 
 void loop() {
@@ -124,7 +183,15 @@ void loop() {
   digitalWrite(LED_BUILTIN, on ? HIGH : LOW);
 #endif
 #if defined(HAS_MATRIX)
-  showIcon(disconnected ? 1 : 0);
+  showIcon(disconnected ? -1 : agentIcon);
+#endif
+#if defined(HAS_AGENT_LIGHT)
+  // Agent light (RGB LED 3, active-low like LED 2): busy blue blink, attention yellow, done green.
+  int a = disconnected ? 0 : agentLight;
+  bool r = a == 2, g = a == 2 || a == 3, b = a == 1 && slow;
+  digitalWrite(LED3_R, r ? LOW : HIGH);
+  digitalWrite(LED3_G, g ? LOW : HIGH);
+  digitalWrite(LED3_B, b ? LOW : HIGH);
 #endif
 
   if (now - lastStatusMs >= 1000) {

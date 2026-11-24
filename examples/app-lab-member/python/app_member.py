@@ -52,6 +52,29 @@ MQTT_PASSWORD=
 # The swarm's topic id (sw-xxxxxxxx). Leave empty to look it up from LTMS after approval.
 SWARM_TOPIC_ID=
 HEARTBEAT_SECONDS=600
+\
+
+# --- on-board agent (#492) ---
+# on: this board takes tasks and works on them with a model. Every step is signed.
+AGENT=off
+# brick (App Lab's Large Language Model Brick; add it to the app first), openai (any
+# OpenAI-compatible URL, e.g. a llama.cpp or Ollama server), or off
+AGENT_BACKEND=brick
+AGENT_URL=
+AGENT_MODEL=
+AGENT_API_KEY=
+# Where tasks may come from: any of directives, swarm, console
+AGENT_TASKS_FROM=directives,swarm
+AGENT_MAX_STEPS=6
+AGENT_QUEUE=5
+AGENT_PER_SENDER_HOUR=6
+AGENT_SAY_PER_TASK=2
+AGENT_MODEL_SECONDS=120
+# A local web page for typing tasks. It has NO login: anyone who can reach the port can
+# give this board tasks. Off by default.
+CONSOLE=off
+CONSOLE_BIND=127.0.0.1
+CONSOLE_PORT=7070
 """
 
 PLACEHOLDERS = {"LTMS_SERVER": "https://ltms.example.org", "MQTT_HOST": "hub.local"}
