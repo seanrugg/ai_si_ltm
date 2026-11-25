@@ -27,7 +27,9 @@ python3 - "$WHEEL" "$APP/python/vendor" <<'PY'
 import sys, zipfile
 wheel, dest = sys.argv[1], sys.argv[2]
 with zipfile.ZipFile(wheel) as z:
-    names = [n for n in z.namelist() if n.split("/")[0] in ("ltms_contract", "cli_agent")]
+    # The packages, and the wheel's metadata so importlib.metadata reports the harness version.
+    names = [n for n in z.namelist()
+             if n.split("/")[0] in ("ltms_contract", "cli_agent") or n.split("/")[0].endswith(".dist-info")]
     z.extractall(dest, names)
 print(f"vendored {len(names)} files from {wheel.rsplit('/', 1)[-1]}")
 PY
