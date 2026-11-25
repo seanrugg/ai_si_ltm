@@ -717,3 +717,73 @@ def test_stale_check_off_and_without_live_channels():
 def test_stale_seconds_from_env():
     assert VectorSDK.from_env({"VECTOR_STALE_SECONDS": "25"}).watch.stale_seconds == 25.0
     assert VectorSDK.from_env({}).watch.stale_seconds == 10.0
+
+
+# ---------------------------------------------------------------- #498: renewing a stale stream
+def _stale_adapter():
+    from adapters.vector_sdk import StaleStream
+    v = VectorSDK(stale_seconds=10)
+    got = []
+    robot = _live_robot()
+    for i in range(10):
+        v.on_body(got.append, robot, now=float(i))
+    with pytest.raises(StaleStream):
+        v.on_body(got.append, robot, now=10.0)
+    return v, got, robot
+
+
+def test_a_still_frozen_reconnect_signs_nothing_and_goes_stale_again_quietly():
+    from adapters.vector_sdk import StaleStream
+    v, got, robot = _stale_adapter()
+    before = len(got)
+    # The reconnected stream gives the same frozen values (23-24 Nov 2026: 23 hours of them).
+    for i in range(20, 30):
+        v.on_body(got.append, robot, now=float(i))
+    assert len(got) == before  # no samples, no pose, no "resumed" from a frozen stream
+    with pytest.raises(StaleStream):
+        v.on_body(got.append, robot, now=30.0)
+    assert len([g for g in got if g.kind == "record"]) == 1  # still the one "stale" record
+
+
+def test_resumed_is_signed_only_when_state_actually_flows(monkeypatch):
+    v, got, robot = _stale_adapter()
+    clock = [5000.0]
+    monkeypatch.setattr("adapters.vector_sdk.time.time", lambda: clock[0])
+    v._stale_at = 4000.0
+    assert v.next_retry() == 2.0 and v.next_retry() == 4.0  # two reconnects so far
+    v.on_body(got.append, robot, now=50.0)  # first reading on the new connection: a baseline
+    assert not [g for g in got if g.kind == "record" and "stream-resumed" in g.tags]
+    v.on_body(got.append, _live_robot(seed=1e-3), now=51.0)  # a live channel moved
+    (resumed,) = [g for g in got if g.kind == "record" and "stream-resumed" in g.tags]
+    assert resumed.payload["outage_s"] == 1000.0 and resumed.payload["reconnects"] == 2
+    assert [g for g in got[-6:] if g.kind == "sample"]  # readings flow again, from the live reading
+    assert v.retry_seconds == 2.0 and v._stale_at is None
+
+
+def test_backoff_doubles_to_the_cap_and_a_battery_change_wakes_it():
+    from types import SimpleNamespace as NS
+    v, got, robot = _stale_adapter()
+    v.stale_retry_max = 30.0
+    assert [v.next_retry() for _ in range(6)] == [2.0, 4.0, 8.0, 16.0, 30.0, 30.0]
+    off = NS(battery_volts=3.9, battery_level=2, is_charging=False, is_on_charger_platform=False)
+    v.on_battery(got.append, off, now=1.0)
+    v.on_battery(got.append, off, now=31.0)
+    assert v.wake is False  # nothing changed while stale
+    v.on_battery(got.append, NS(battery_volts=3.8, battery_level=2, is_charging=True,
+                                is_on_charger_platform=True), now=61.0)  # docked: Vector is awake
+    assert v.wake is True
+    assert v.next_retry() == 2.0 and v.wake is False  # reconnect now, backoff reset
+    assert any(g.kind == "health" for g in got)  # battery health still signs while stale
+
+
+def test_battery_changes_while_healthy_do_not_wake():
+    from types import SimpleNamespace as NS
+    v = VectorSDK()
+    v.on_battery(lambda i: None, NS(battery_level=2, is_charging=False, is_on_charger_platform=False))
+    v.on_battery(lambda i: None, NS(battery_level=1, is_charging=False, is_on_charger_platform=False))
+    assert v.wake is False
+
+
+def test_stale_retry_max_from_env():
+    assert VectorSDK.from_env({"VECTOR_STALE_RETRY_MAX_SECONDS": "60"}).stale_retry_max == 60.0
+    assert VectorSDK.from_env({}).stale_retry_max == 30.0

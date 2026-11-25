@@ -86,14 +86,30 @@ deadbands saw "no change", and 20 minutes of exploring looked like rest. A live
 robot never reports *bit-identical* IMU, touch ``raw`` and proximity
 ``signal_quality`` for long; those channels jitter even at rest. When all of
 them stay exactly the same for ``VECTOR_STALE_SECONDS`` (default 10; 0 = off), the
-adapter signs one ``body stream stale`` event, drops the connection and reconnects
-at once. After reconnecting it signs ``body stream resumed`` with the outage
-length. A battery reading older than three polls no longer counts as "on the
-charger", so a stale stream can't keep the 30-minute resting heartbeat.
+adapter signs one ``body stream stale`` event, drops the connection and reconnects.
+A battery reading older than three polls no longer counts as "on the charger", so
+a stale stream can't keep the 30-minute resting heartbeat.
+
+**Renewing a stale stream (#498).** A reconnect alone proves nothing: the new
+stream can be frozen too (Vector asleep or low on battery), and on 23–24 Nov a
+frozen stream sent the same readings for 23 hours. So after a stale stream:
+
+- no body or pose readings are signed until a live channel actually **changes** on
+  the new connection; only then is ``body stream resumed`` signed (``outage_s``,
+  ``reconnects``). Until then the record shows silence, not old values;
+- if the new stream stays bit-identical for ``VECTOR_STALE_SECONDS`` too, the
+  adapter reconnects again, waiting 2 s, then doubling up to
+  ``VECTOR_STALE_RETRY_MAX_SECONDS`` (default 30). No extra stale records;
+- the battery poll is a direct request, not part of the stream, so it stays live.
+  While stale, any change in battery level, charging or charger (Vector woke up,
+  was docked or picked up) reconnects at once and resets the backoff to 2 s.
+
+Battery health keeps signing throughout, since it is read live.
 
 Settings: VECTOR_SERIAL (optional; the SDK's default robot otherwise),
 VECTOR_BODY_SECONDS, VECTOR_FLAG_SECONDS, VECTOR_DEBOUNCE_SECONDS,
-VECTOR_FACE_GAP_SECONDS, VECTOR_BATTERY_SECONDS, VECTOR_STALE_SECONDS.
+VECTOR_FACE_GAP_SECONDS, VECTOR_BATTERY_SECONDS, VECTOR_STALE_SECONDS,
+VECTOR_STALE_RETRY_MAX_SECONDS.
 """
 from __future__ import annotations
 
@@ -119,6 +135,8 @@ STATES = {
 STATUS_FLAGS = tuple(f for flags in STATES.values() for f in flags if f != "is_touched")
 DEBOUNCE_SECONDS = 0.5
 STALE_SECONDS = 10.0
+STALE_RETRY_SECONDS = 2.0       # first reconnect after a frozen stream
+STALE_RETRY_MAX_SECONDS = 30.0  # backoff cap while it stays frozen
 # Channels that jitter on a live robot even at rest (#448, #486): bit-identical for
 # STALE_SECONDS means the SDK stopped delivering state.
 LIVE_CHANNELS = {"imu": ("accel_x", "accel_y", "accel_z", "gyro_x", "gyro_y", "gyro_z"),
@@ -395,7 +413,7 @@ class VectorSDK(Adapter):
 
     def __init__(self, serial: str | None = None, body_seconds: float = 1.0, face_gap_seconds: float = 10.0,
                  battery_seconds: float = 30.0, flag_seconds: float = 0.1, debounce_seconds: float = DEBOUNCE_SECONDS,
-                 stale_seconds: float = STALE_SECONDS):
+                 stale_seconds: float = STALE_SECONDS, stale_retry_max: float = STALE_RETRY_MAX_SECONDS):
         self.serial = serial or None
         self.body_seconds = body_seconds
         self.face_gap_seconds = face_gap_seconds
@@ -412,6 +430,12 @@ class VectorSDK(Adapter):
         self._battery_at: float | None = None  # monotonic time of the last on-charger reading (#486)
         self.watch = StreamWatch(stale_seconds)
         self._stale_at: float | None = None  # wall time the stream was found stale; None while healthy
+        self._probe: tuple | None = None  # (fingerprint, time) of the first reading on a post-stale connection
+        self._stale_battery: tuple | None = None  # (level, charging, on charger) last seen while stale
+        self.wake = False  # battery changed while stale: reconnect now
+        self.stale_retry_max = max(stale_retry_max, STALE_RETRY_SECONDS)
+        self.retry_seconds = STALE_RETRY_SECONDS
+        self.reconnects = 0  # reconnects in the current outage
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -421,7 +445,8 @@ class VectorSDK(Adapter):
                    float(env.get("VECTOR_FACE_GAP_SECONDS", "10")), float(env.get("VECTOR_BATTERY_SECONDS", "30")),
                    float(env.get("VECTOR_FLAG_SECONDS", "0.1")),
                    float(env.get("VECTOR_DEBOUNCE_SECONDS", str(DEBOUNCE_SECONDS))),
-                   float(env.get("VECTOR_STALE_SECONDS", str(STALE_SECONDS))))
+                   float(env.get("VECTOR_STALE_SECONDS", str(STALE_SECONDS))),
+                   float(env.get("VECTOR_STALE_RETRY_MAX_SECONDS", str(STALE_RETRY_MAX_SECONDS))))
 
     # -- mapping (pure; called from SDK callbacks) ---------------------------
     def on_wake_word(self, emit: Emit, msg=None) -> None:
@@ -466,9 +491,17 @@ class VectorSDK(Adapter):
 
         Raises ``StaleStream`` (after signing ``body stream stale``) when the live
         channels have been bit-identical for ``stale_seconds`` (#486).
+
+        After a stale stream, a new connection isn't trusted on sight: nothing is
+        sampled until a live channel actually changes, and only then is ``body
+        stream resumed`` signed. If they stay bit-identical for another
+        ``stale_seconds``, ``StaleStream`` is raised again (no second stale record).
         """
         groups = sensor_values(robot)
-        frozen = self.watch.update(groups, time.monotonic() if now is None else now)
+        now = time.monotonic() if now is None else now
+        if self._stale_at is not None and not self._probe_live(emit, groups, now):
+            return  # still proving the stream is live: sign no readings from it
+        frozen = self.watch.update(groups, now)
         if frozen is not None:
             self.mark_stale(emit, frozen)
             raise StaleStream(f"no new state for {frozen:.0f} s")
@@ -481,9 +514,35 @@ class VectorSDK(Adapter):
                       sensor={"sensor": group, "modality": modality, "unit": unit,
                               "deadband": DEADBANDS.get(group, {})}))
 
+    def _probe_live(self, emit: Emit, groups: dict[str, dict], now: float) -> bool:
+        """While stale: True once the live channels change (state is flowing again)."""
+        fp = StreamWatch.fingerprint(groups)
+        if fp is None or self.watch.stale_seconds <= 0:
+            self.mark_resumed(emit)  # nothing to compare: trust the new connection
+            return True
+        if self._probe is None:
+            self._probe = (fp, now)
+            return False
+        if fp == self._probe[0]:
+            if now - self._probe[1] >= self.watch.stale_seconds:
+                raise StaleStream(f"still no new state {now - self._probe[1]:.0f} s after reconnecting")
+            return False
+        self.mark_resumed(emit)
+        return True
+
     def on_battery(self, emit: Emit, state, now: float | None = None) -> None:
-        """One battery poll: the health item, and whether Vector is on the charger (#449)."""
+        """One battery poll: the health item, and whether Vector is on the charger (#449).
+
+        The battery poll is a direct request, not the state stream, so it stays
+        live when the stream freezes. While stale, a change in level, charging or
+        charger (Vector woke, was docked or picked up) sets ``wake``: reconnect now.
+        """
         health = battery_values(state)
+        if self._stale_at is not None:
+            seen = tuple(health.get(k) for k in ("battery_level", "charging", "on_charger_platform"))
+            if self._stale_battery is not None and seen != self._stale_battery:
+                self.wake = True
+            self._stale_battery = seen
         if isinstance(health.get("on_charger_platform"), bool):
             self._on_charger = health["on_charger_platform"]
             self._battery_at = time.monotonic() if now is None else now
@@ -508,6 +567,7 @@ class VectorSDK(Adapter):
         if self._stale_at is not None:
             return
         self._stale_at = time.time()
+        self._stale_battery = None
         self._on_charger = False
         logging.warning("vector_sdk: no new state for %.0f s; reconnecting", frozen_s)
         emit(Item("record", "event", "body stream stale", ["body", "stream-stale"],
@@ -517,13 +577,28 @@ class VectorSDK(Adapter):
     def mark_resumed(self, emit: Emit) -> None:
         """After a reconnect: sign ``body stream resumed`` with the outage length (#486)."""
         self.watch.reset()
+        self._probe = None
         if self._stale_at is None:
             return
         outage = time.time() - self._stale_at
-        self._stale_at = None
-        logging.info("vector_sdk: state flowing again after %.0f s", outage)
+        reconnects, self.reconnects = self.reconnects, 0
+        self._stale_at = self._stale_battery = None
+        self.wake = False
+        self.retry_seconds = STALE_RETRY_SECONDS
+        logging.info("vector_sdk: state flowing again after %.0f s (%d reconnects)", outage, reconnects)
         emit(Item("record", "event", "body stream resumed", ["body", "stream-resumed"],
-                  {"source": "vector-sdk", "outage_s": round(outage, 1)}))
+                  {"source": "vector-sdk", "outage_s": round(outage, 1), "reconnects": reconnects}))
+
+    def next_retry(self) -> float:
+        """Seconds to wait before reconnecting after ``StaleStream``: 2 s, doubling to
+        ``stale_retry_max`` while the stream stays frozen; 2 s again after a wake."""
+        if self.wake:
+            self.wake = False
+            self.retry_seconds = STALE_RETRY_SECONDS
+        wait = self.retry_seconds
+        self.retry_seconds = min(self.retry_seconds * 2, self.stale_retry_max)
+        self.reconnects += 1
+        return wait
 
     def on_connected(self, robot) -> None:
         """Report the spec sheet once per connection, if the sidecar asked for it."""
@@ -551,8 +626,9 @@ class VectorSDK(Adapter):
             wait = 30
             try:
                 self._connect_and_watch(emit)
-            except StaleStream:
-                wait = 2  # the robot is there; only our stream froze (#486)
+            except StaleStream as exc:
+                wait = self.next_retry()  # the robot answers; only our stream froze (#486)
+                logging.info("vector_sdk: %s; reconnecting in %.0f s", exc, wait)
             except Exception as exc:  # noqa: BLE001 - robot asleep or out of range: retry
                 logging.warning("vector_sdk: %s; retrying in 30 s", exc)
             self._stop.wait(wait)
@@ -582,7 +658,10 @@ class VectorSDK(Adapter):
             except Exception as exc:  # noqa: BLE001 - specs are best effort
                 logging.info("vector_sdk: specs report failed: %s", exc)
 
-            self.mark_resumed(emit)
+            # A fresh connection: if the last one went stale, on_body proves this
+            # one live (a live channel changes) before signing "resumed".
+            self.watch.reset()
+            self._probe = None
             next_body = next_battery = 0.0
             while not self._stop.is_set():
                 now = time.monotonic()
@@ -596,4 +675,6 @@ class VectorSDK(Adapter):
                         self.on_battery(emit, robot.get_battery_state())
                     except Exception as exc:  # noqa: BLE001
                         logging.info("vector_sdk: battery read failed: %s", exc)
+                    if self.wake:
+                        raise StaleStream("battery state changed while the stream was stale")
                 self._stop.wait(self.flag_seconds)
