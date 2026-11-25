@@ -62,6 +62,11 @@ the sidecar records what happens like any other event.
 
 While stale, and whenever the last charger reading is more than three battery polls old, Vector isn't treated as resting, so a frozen stream can't hide behind the 30-minute resting heartbeat. Gaps now show on the Timeline as a stale/resumed pair instead of looking like calm.
 
+**Renewing it.** A reconnect isn't trusted on sight, because the new stream can be frozen too (Vector asleep or low on battery). After a stale stream:
+- no body or pose readings are signed until a live channel actually changes on the new connection; only then is **`body stream resumed`** signed (`outage_s`, `reconnects`). Until then the Timeline shows silence, never old values;
+- if the new stream is frozen too, the adapter reconnects again after 2 s, doubling up to `VECTOR_STALE_RETRY_MAX_SECONDS` (default 30), without more stale records;
+- the battery poll is a direct request that stays live, so battery health keeps signing. A change in battery level, charging or charger while stale (Vector woke, was docked or picked up) reconnects at once and resets the wait to 2 s.
+
 Each adapter's module docstring lists the exact source lines and SDK names it
 was written against (wire-pod commit `dc6ae0c`, `wirepod_vector_sdk` 0.8.1),
 so a change upstream can be checked.
