@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HOLO, THEMES, contrast, getTheme, setTheme } from "./theme.js";
+import { HOLO, THEMES, VILLAIN, contrast, currentTheme, getTheme, onThemeChange, setTheme } from "./theme.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -19,6 +19,31 @@ describe("Holo contrast", () => {
   });
 });
 
+describe("Villain contrast (#509)", () => {
+  it("text and status colors on every Villain surface meet 4.5:1", () => {
+    for (const text of ["paper", "paper-muted", "paper-faint", "led", "ok", "warn", "bad"]) {
+      for (const surface of ["ink", "ink-raised", "ink-hover"]) {
+        expect(contrast(VILLAIN[text], VILLAIN[surface]), `${text} on ${surface}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+  it("ink text on the green primary button meets 4.5:1", () => {
+    expect(contrast(VILLAIN.ink, VILLAIN.led)).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe("theme change events (#509)", () => {
+  it("tells subscribers about a change, and stops after unsubscribe", () => {
+    const seen = [];
+    const off = onThemeChange((e) => seen.push(e.detail));
+    setTheme("villain");
+    expect(currentTheme()).toBe("villain");
+    off();
+    setTheme("classic");
+    expect(seen).toEqual(["villain"]);
+  });
+});
+
 describe("setTheme / getTheme", () => {
   it("sets data-theme and remembers it", () => {
     expect(getTheme()).toBe("classic");
@@ -26,7 +51,7 @@ describe("setTheme / getTheme", () => {
     expect(document.documentElement.getAttribute("data-theme")).toBe("holo");
     expect(getTheme()).toBe("holo");
     expect(setTheme("bogus")).toBe("classic");
-    expect(THEMES.map((t) => t.key)).toEqual(["classic", "holo"]);
+    expect(THEMES.map((t) => t.key)).toEqual(["classic", "holo", "villain"]);
   });
   it("still works when localStorage is unavailable", () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("blocked"); });

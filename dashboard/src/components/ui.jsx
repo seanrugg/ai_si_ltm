@@ -1,5 +1,7 @@
 // Small shared pieces. Keep pages consistent by reusing these.
+import { useState } from "react";
 import { hashColors, shortHash } from "../lib/format.js";
+import { useVoice } from "../lib/voice.js";
 
 export function HashStrip({ hash, label, className = "" }) {
   const colors = hashColors(hash);
@@ -52,8 +54,17 @@ export function StatusBadge({ status }) {
   );
 }
 
+// A themed voice (#509) adds an aria-hidden flourish; the status text stays plain.
 export function Loading({ what = "Loading" }) {
-  return <p className="py-8 text-sm text-paper-muted" role="status">{what}…</p>;
+  const voice = useVoice();
+  const [seed] = useState(Math.random);
+  const flourish = voice.pick("loading", seed);
+  return (
+    <p className="py-8 text-sm text-paper-muted" role="status">
+      {what}…
+      {flourish && <span aria-hidden="true" className="voice-line ml-2">{flourish}</span>}
+    </p>
+  );
 }
 
 export function ErrorNote({ error, onRetry }) {
@@ -71,9 +82,13 @@ export function ErrorNote({ error, onRetry }) {
 }
 
 export function EmptyState({ title, children }) {
+  const voice = useVoice();
+  const [seed] = useState(Math.random);
+  const flourish = voice.pick("empty", seed);
   return (
     <div className="py-12 text-center">
       <p className="text-lg">{title}</p>
+      {flourish && <p aria-hidden="true" className="voice-line mt-1 text-sm">{flourish}</p>}
       {children && <div className="mx-auto mt-2 max-w-md text-sm text-paper-muted">{children}</div>}
     </div>
   );

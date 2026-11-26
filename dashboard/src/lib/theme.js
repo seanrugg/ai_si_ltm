@@ -3,6 +3,9 @@
 export const THEMES = [
   { key: "classic", label: "Classic" },
   { key: "holo", label: "Holo" },
+  // An homage to MF DOOM (#509): steel-silver type and green highlights on a
+  // near-black plate. Its copy voice lives in lib/voice.js.
+  { key: "villain", label: "Villain" },
 ];
 export const DEFAULT_THEME = "classic";
 const KEY = "ltms.theme";
@@ -13,6 +16,16 @@ export const HOLO = {
   paper: "#e2eaf5", "paper-muted": "#8aa4c2", "paper-faint": "#6c86a6",
   led: "#00e5ff", "led-dim": "#0a7f91", ok: "#00ff9d", warn: "#ffb547", bad: "#ff6b6b",
 };
+
+// Villain's palette, for the contrast test (it mirrors src/index.css).
+export const VILLAIN = {
+  ink: "#07090a", "ink-raised": "#101416", "ink-line": "#2a3236", "ink-hover": "#172024",
+  paper: "#e4e7ea", "paper-muted": "#aab2b9", "paper-faint": "#8c959d",
+  led: "#3be37f", "led-dim": "#1d7a45", ok: "#9ff0c0", warn: "#e8b04a", bad: "#ff6f6f",
+};
+
+/** Fired on window when the theme changes, so themed copy can re-render. */
+export const THEME_EVENT = "ltms:theme";
 
 function valid(name) {
   return THEMES.some((t) => t.key === name) ? name : DEFAULT_THEME;
@@ -31,12 +44,24 @@ export function getTheme() {
 export function setTheme(name) {
   const theme = valid(name);
   document.documentElement.setAttribute("data-theme", theme);
+  window.dispatchEvent(new CustomEvent(THEME_EVENT, { detail: theme }));
   try {
     window.localStorage.setItem(KEY, theme);
   } catch {
     // storage unavailable (private mode, blocked): the theme still applies for this visit
   }
   return theme;
+}
+
+/** The theme on the page right now (what setTheme last applied). */
+export function currentTheme() {
+  return valid(document.documentElement.getAttribute("data-theme"));
+}
+
+/** Call `fn` whenever the theme changes; returns an unsubscribe function. */
+export function onThemeChange(fn) {
+  window.addEventListener(THEME_EVENT, fn);
+  return () => window.removeEventListener(THEME_EVENT, fn);
 }
 
 /** WCAG relative luminance of "#rrggbb". */
