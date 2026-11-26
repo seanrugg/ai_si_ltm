@@ -45,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ltms_mind: no key file at {cfg.key_path} (LTMS_KEY_PATH); enroll the member first", file=sys.stderr)
         return 2
     try:
-        brain = brains.make(cfg.brain)
+        brain = brains.make(cfg.brain, cfg)
     except ValueError as exc:
         print(f"ltms_mind: {exc}", file=sys.stderr)
         return 2

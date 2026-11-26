@@ -1,0 +1,1 @@
+Review another member's lesson. It was written by a different model family, which is why you are asked. Check it against its cited evidence in the data. Propose one "review" with payload {"verdict": "verified" | "refuted" | "unsure", "reasons": "..."}. Use "verified" only when the evidence supports the lesson; "unsure" when the evidence is missing or doesn't decide it.

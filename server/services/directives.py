@@ -194,6 +194,39 @@ async def declines_since(session, since: datetime | None) -> int:
     return sum(1 for v in latest.values() if v == "declined")
 
 
+async def for_member(session, member, now: datetime | None = None) -> list[dict]:
+    """Directives for a member that reaches LTMS only over HTTPS (#341): the ones
+    addressed to its swarm or to all swarms, open or cancelled in the last 7 days.
+
+    Each item is the message a hub would publish on the swarm bus (#305):
+    ``{"kind": "directive", "id", "statement", "signature", "signer", "issued_by"}``,
+    or ``{"kind": "cancel", "id", "statement", "signature"}``. The member verifies
+    the signature itself (``cli_agent.directives``), so the server's word isn't
+    trusted for what a directive says. Expired ones aren't listed.
+    """
+    from server.services import swarms
+
+    now = now or _now()
+    current = await swarms.open_membership(session, member.id)
+    swarm_id = current.swarm_id if current is not None else None
+    scope = Directive.scope_swarm_id.is_(None)
+    if swarm_id is not None:
+        scope = scope | (Directive.scope_swarm_id == swarm_id)
+    since = now - timedelta(days=7)
+    out = []
+    for d in await session.scalars(select(Directive).where(scope).order_by(Directive.issued_at)):
+        st = status_of(d, now)
+        if st == "open":
+            out.append({"kind": "directive", "id": str(d.id), "statement": d.statement, "signature": d.signature,
+                        "signer": d.signer or "fleet", "issued_by": d.issued_by})
+        elif st == "cancelled" and d.cancel_statement and d.cancelled_at is not None:
+            at = d.cancelled_at if d.cancelled_at.tzinfo else d.cancelled_at.replace(tzinfo=timezone.utc)
+            if at >= since:
+                out.append({"kind": "cancel", "id": str(d.id), "statement": d.cancel_statement,
+                            "signature": d.cancel_signature})
+    return out
+
+
 async def list_all(session, limit: int = 100) -> list[dict]:
     rows = list(await session.scalars(select(Directive).order_by(Directive.issued_at.desc()).limit(limit)))
     acks = await acknowledgements(session, rows)

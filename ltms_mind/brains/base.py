@@ -14,9 +14,11 @@ from typing import Any
 
 # What a proposal is for. The gate's purpose rule passes only these; a proposal
 # that only summarises something has no kind here and is dropped (#338).
-KINDS = ("lesson", "answer", "review", "prediction", "prediction-check", "question")
+KINDS = ("lesson", "answer", "review", "prediction", "prediction-check", "question", "report")
 VERDICTS = ("verified", "refuted", "unsure")
 CHECK_OUTCOMES = ("true", "false", "unclear")
+# A report on an accepted directive (#341). "couldnt" is an honest outcome, not a good one.
+REPORT_STATUSES = ("done", "partial", "couldnt")
 
 # The record each kind becomes (docs/mind.md, "Record conventions"). No contract change.
 RECORD = {
@@ -26,6 +28,7 @@ RECORD = {
     "prediction": ("thought", ["prediction"]),
     "prediction-check": ("thought", ["prediction-check"]),
     "question": ("communication", ["question"]),
+    "report": ("communication", ["directive-report"]),
 }
 
 
@@ -33,7 +36,7 @@ RECORD = {
 class Task:
     """One agenda item and its inputs, fetched by the loop."""
     category: str            # obligations | verify | predictions | reflect | study
-    kind: str                # answer | review | check | reflect | study
+    kind: str                # directive | answer | review | check | reflect | study
     key: str                 # what it is about, e.g. "agent:seq" or "dataset/item"
     text: str                # the task, in words, for a model
     inputs: dict = field(default_factory=dict)  # records, items, observed values
@@ -77,3 +80,10 @@ class Brain:
 
     def propose(self, task: Task, context: Context) -> list[Proposal]:
         raise NotImplementedError
+
+    def decide(self, directive: dict, context: Context) -> tuple[bool, str | None] | None:
+        """Whether to follow a verified directive (#341): ``(True, None)``, or
+        ``(False, reason)``. ``None`` means "no view": the loop follows it, because
+        directives are followed by default. A brain that calls a model sets
+        ``last_tokens`` here too."""
+        return None

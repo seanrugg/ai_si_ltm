@@ -1,7 +1,8 @@
 """The agenda: candidate work built from real signals, in a fixed order (#338).
 
-1. **obligations**: questions and messages addressed to me, and questions put to
-   my whole swarm, that nobody from me has answered yet.
+1. **obligations**: directives I accepted and haven't reported on as done or
+   couldn't (#341), then questions and messages addressed to me, and questions
+   put to my whole swarm, that nobody from me has answered yet.
 2. **verify**: lessons by members of a *different* model family that nobody has
    reviewed yet.
 3. **predictions**: my predictions past ``check_after`` with no check yet.
@@ -100,13 +101,14 @@ def numeric_measure(rec: dict) -> dict | None:
 class Agenda:
     def __init__(self, client, *, me: str, swarm: dict | None, family: str | None, now: datetime,
                  since: datetime | None, lookback_days: int, corpus: int, study_query: str,
-                 read_items: set[str]) -> None:
+                 read_items: set[str], directives: list[dict] | None = None) -> None:
         self.client, self.me, self.swarm, self.family, self.now = client, me, swarm, family, now
         self.lookback = now - timedelta(days=lookback_days)
         self.since = since or self.lookback
         self.corpus, self.study_query, self.read_items = corpus, study_query, read_items
         self.roster = {m.get("name") for m in (swarm or {}).get("roster") or []} - {None}
         self.families = roster_families(swarm)
+        self.directives = directives or []
 
     def _records(self, **params) -> list[dict]:
         params.setdefault("limit", self.corpus)
@@ -120,14 +122,42 @@ class Agenda:
         return rec.get("agent") in self.roster
 
     # ------------------------------------------------------------------ categories
+    def directive_tasks(self) -> list[Task]:
+        """Accepted directives with no ``done`` or ``couldnt`` report of mine yet."""
+        if not self.directives:
+            return []
+        closed, partial = set(), {}
+        for r in self._records(agent=self.me, tag="directive-report"):
+            pl = r.get("payload") or {}
+            if pl.get("status") in ("done", "couldnt"):
+                closed.add(pl.get("directive"))
+            elif pl.get("directive"):
+                partial.setdefault(pl["directive"], []).append(r.get("summary") or "")
+        tasks = []
+        for d in self.directives:
+            if d["id"] in closed:
+                continue
+            stmt = d["statement"]
+            issuer = stmt.get("issued_by")
+            who = f"your swarm leader {issuer}" if d.get("signer") == "leader" else f"the fleet ({issuer})"
+            tasks.append(Task("obligations", "directive", d["id"],
+                              f"You accepted a directive from {who}: {stmt.get('text', '')}. Do what you can "
+                              "toward it with what you know, then report: done, partial, or couldnt (with "
+                              "the reason). Ask a swarm member for help with a question if that would get it done.",
+                              {"directive": stmt, "ack": d["ack"], "signer": d.get("signer"),
+                               "issuer": issuer if issuer in self.roster else None,
+                               "earlier_reports": partial.get(d["id"], [])[:5]}))
+        return tasks
+
     def obligations(self) -> list[Task]:
+        tasks = self.directive_tasks()
         answered = set()
         for r in self._records(agent=self.me, tag="answer", from_=iso(self.lookback)):
             answered |= ref_keys(r)
         inbox = [r for r in self._records(peer=self.me, from_=iso(self.since)) if r.get("agent") != self.me]
         inbox += [r for r in self._records(tag="question", from_=iso(self.since))
                   if r.get("agent") != self.me and self._in_swarm(r) and not r.get("peers")]
-        seen, tasks = set(), []
+        seen = set()
         for r in sorted(inbox, key=lambda r: r.get("ts") or ""):
             k = key_of(r)
             if k in seen or k in answered or SKIP_INBOX_TAGS & set(r.get("tags") or []):

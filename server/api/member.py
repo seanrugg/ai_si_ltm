@@ -101,6 +101,16 @@ async def leader_decide(directive_id: str, action: str, request: Request,
                                                await session.get(Member, auth.member_id), directive_id, action)
 
 
+@router.get("/members/me/directives")
+async def my_directives(request: Request, auth: MemberAuth = Depends(current_member)) -> dict:
+    """Open directives for my swarm or all swarms, and recent cancels, as signed
+    bus messages (#341). For members with no hub between them and LTMS."""
+    from server.services import directives
+
+    async with transaction(request) as session:
+        return {"directives": await directives.for_member(session, await session.get(Member, auth.member_id))}
+
+
 @router.get("/fleet-key")
 async def get_fleet_key(request: Request) -> dict:
     """The fleet's public key (#303), to verify directives. Public: it's a public key."""
