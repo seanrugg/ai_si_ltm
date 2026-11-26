@@ -221,8 +221,8 @@ class Approval:
         self.ready = threading.Event()
         self.stopping = threading.Event()
         self.phase, self.detail = "starting", ""
-        if self.approved_file.exists():
-            self.ready.set()
+        self.approved = self.approved_file.exists()
+        if self.approved:
             self.phase = "approved"
 
     def _set(self, phase: str, detail: str = "") -> None:
@@ -268,12 +268,28 @@ class Approval:
             return
         self.approved_file.write_text(json.dumps({"at": time.time(), "permissions": tok.get("permissions")}))
         self._set("approved", f"signed in with {tok.get('permissions')}")
-        self.ready.set()
+        self.approved = True
+
+    def report_specs(self) -> None:
+        """Tell LTMS what this board is (#332), once per start, before the member starts, so the
+        swarm roster (and the introduction built from it) shows real hardware. Best effort."""
+        try:
+            from cli_agent import hardware
+            sheet = hardware.spec_sheet(hardware.detect(str(self.s.data_dir)), "app-lab-member")
+            if self.client.report_specs(sheet) is not None:
+                log.info("spec sheet reported (%s)", ", ".join(sorted(sheet)))
+        except Exception:  # noqa: BLE001 - specs never stop the member
+            log.exception("spec sheet not reported")
 
     def run(self) -> None:
-        while not self.ready.is_set() and not self.stopping.is_set():
+        """Until approved (or told to stop), then report the spec sheet and set ``ready``."""
+        while not self.approved and not self.stopping.is_set():
             self.once()
-            self.stopping.wait(self.wait)
+            if not self.approved:
+                self.stopping.wait(self.wait)
+        if self.approved and not self.stopping.is_set():
+            self.report_specs()
+            self.ready.set()
 
 
 # ---------------------------------------------------------------------------- MCU telemetry

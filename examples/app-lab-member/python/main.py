@@ -29,7 +29,9 @@ from arduino.app_utils import App, Bridge  # noqa: E402
 
 import app_member as am  # noqa: E402
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+# force=True: without it, basicConfig() did nothing under App Lab (no app lines in the Python
+# pane on a VENTUNO Q), most likely because the root logger already had a handler.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s", force=True)
 for noisy in ("httpx", "httpcore"):
     logging.getLogger(noisy).setLevel(logging.WARNING)
 log = logging.getLogger("app-lab-member")

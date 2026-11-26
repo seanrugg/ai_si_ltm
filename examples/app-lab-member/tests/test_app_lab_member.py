@@ -98,8 +98,9 @@ class FakeResp:
 
 
 class FakeClient:
-    def __init__(self, enroll_status=202, approved_after=1):
-        self.posts, self.logins = [], 0
+    def __init__(self, enroll_status=202, approved_after=1, specs_fail=False):
+        self.posts, self.logins, self.specs = [], 0, []
+        self.specs_fail = specs_fail
         self.enroll_status, self.approved_after = enroll_status, approved_after
         client = self
 
@@ -108,6 +109,12 @@ class FakeClient:
                 client.posts.append((path, json))
                 return FakeResp(client.enroll_status, {"error": {"code": "enrollment_closed", "message": "no"}})
         self.http = Http()
+
+    def report_specs(self, sheet):
+        if self.specs_fail:
+            raise RuntimeError("server down")
+        self.specs.append(sheet)
+        return sheet
 
     def login(self):
         from cli_agent.client import LTMSError
@@ -133,13 +140,35 @@ def test_nothing_is_sent_until_enroll_is_requested(tmp_path):
 def test_enroll_once_then_wait_for_approval(tmp_path):
     s = _settings(tmp_path, ENROLL="request")
     c = FakeClient(approved_after=1)
-    a = am.Approval(s, c, "ab" * 32, "note")
+    a = am.Approval(s, c, "ab" * 32, "note", wait=0)
     a.once()
-    assert len(c.posts) == 1 and a.phase == "pending-approval" and not a.ready.is_set()
+    assert len(c.posts) == 1 and a.phase == "pending-approval" and not a.approved
     a.once()
-    assert len(c.posts) == 1 and a.phase == "approved" and a.ready.is_set()
-    # a restart after approval goes straight to the member
-    assert am.Approval(s, FakeClient(), "ab" * 32, "note").ready.is_set()
+    assert len(c.posts) == 1 and a.phase == "approved" and a.approved
+    assert not a.ready.is_set() and c.specs == []  # ready only once the spec sheet was tried (run)
+
+
+def test_run_reports_the_spec_sheet_before_the_member_starts(tmp_path):
+    s = _settings(tmp_path, ENROLL="request")
+    c = FakeClient(approved_after=1)
+    a = am.Approval(s, c, "ab" * 32, "note", wait=0)
+    a.run()
+    assert a.ready.is_set() and len(c.specs) == 1
+    sheet = c.specs[0]
+    assert sheet["software"]["harness"] == "app-lab-member" and "hardware" in sheet
+    # after a restart: already approved, so no enrollment or sign-in, but the specs again
+    again = FakeClient()
+    b = am.Approval(s, again, "ab" * 32, "note", wait=0)
+    assert b.approved and not b.ready.is_set()
+    b.run()
+    assert b.ready.is_set() and again.posts == [] and again.logins == 0 and len(again.specs) == 1
+
+
+def test_a_failed_spec_report_never_stops_the_member(tmp_path, caplog):
+    s = _settings(tmp_path, ENROLL="request")
+    a = am.Approval(s, FakeClient(approved_after=0, specs_fail=True), "ab" * 32, "note", wait=0)
+    a.run()
+    assert a.ready.is_set() and "spec sheet not reported" in caplog.text
 
 
 def test_a_known_name_is_not_an_error_and_a_refusal_stops(tmp_path):
@@ -166,7 +195,13 @@ def test_enrollment_and_approval_against_the_server(tmp_path, http, admin):
     assert row["public_key"] == pub
     assert admin.post(f"/api/admin/members/{row['id']}/approve", json={"scope": None}).status_code == 200
     a.once()
-    assert a.ready.is_set() and json.loads((s.data_dir / "approved.json").read_text())["permissions"]
+    assert a.approved and json.loads((s.data_dir / "approved.json").read_text())["permissions"]
+    a.run()  # reports the spec sheet, then ready
+    assert a.ready.is_set()
+    specs = admin.get(f"/api/admin/members/{row['id']}/specs").json()
+    sheet = specs["specs"]  # resolved: {section: {"value": ..., "source": ...}}
+    assert sheet["software"]["value"]["harness"] == "app-lab-member" and sheet["software"]["source"] == "declared"
+    assert sheet["hardware"]["value"]
 
 
 # ------------------------------------------------------------------ MCU telemetry and link state
