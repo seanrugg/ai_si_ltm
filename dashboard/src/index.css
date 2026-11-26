@@ -67,6 +67,53 @@
     font-weight: 400;
     letter-spacing: 2.5px;
   }
+  /* Villain (#509), an homage to MF DOOM: a near-black steel plate, brushed-
+     silver type, green highlights. Display headings go ALL CAPS. */
+  [data-theme="villain"] {
+    --c-ink: 7 9 10;              /* #07090a */
+    --c-ink-raised: 16 20 22;     /* #101416 */
+    --c-ink-line: 42 50 54;       /* #2a3236 */
+    --c-ink-hover: 23 32 36;      /* #172024 */
+    --c-paper: 228 231 234;       /* #e4e7ea */
+    --c-paper-muted: 170 178 185; /* #aab2b9 */
+    --c-paper-faint: 140 149 157; /* #8c959d */
+    --c-led: 59 227 127;          /* #3be37f */
+    --c-led-dim: 29 122 69;       /* #1d7a45 */
+    --c-ok: 159 240 192;          /* #9ff0c0 */
+    --c-warn: 232 176 74;         /* #e8b04a */
+    --c-bad: 255 111 111;         /* #ff6f6f */
+    --font-sans: "DM Sans";
+    --font-mono: "JetBrains Mono";
+    --font-display: "Bebas Neue";
+    --steel: linear-gradient(180deg, #f4f6f8 0%, #c9ced4 45%, #9aa3ab 55%, #e4e7ea 100%);
+  }
+  [data-theme="villain"] body {
+    background-color: rgb(var(--c-ink));
+    background-image:
+      radial-gradient(ellipse at 50% -10%, rgba(59, 227, 127, 0.07), transparent 55%),
+      repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.012) 0 1px, transparent 1px 3px);
+    background-attachment: fixed;
+  }
+  [data-theme="villain"] h1, [data-theme="villain"] h2, [data-theme="villain"] .brand {
+    font-family: var(--font-display), system-ui, sans-serif;
+    font-weight: 400;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    background: var(--steel);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  /* Nav group headers are h2s: keep them small and readable, not chrome. */
+  [data-theme="villain"] nav h2 { background: none; color: rgb(var(--c-paper-muted)); font-family: var(--font-sans), sans-serif; letter-spacing: 0.05em; }
+  [data-theme="villain"] h1 { border-bottom: 2px solid rgb(var(--c-led) / 0.6); padding-bottom: 2px; }
+  [data-theme="villain"] .brand { font-size: 1.6rem; line-height: 1.1; }
+  [data-theme="villain"] .brand .voice-line { -webkit-text-fill-color: initial; }
+  @media (forced-colors: active) {
+    [data-theme="villain"] h1, [data-theme="villain"] h2, [data-theme="villain"] .brand {
+      background: none; color: CanvasText;
+    }
+  }
   html { color-scheme: dark; }
   body { @apply font-sans antialiased; }
   :focus-visible { @apply outline outline-2 outline-offset-2 outline-led; }
@@ -84,6 +131,23 @@
                   placeholder:text-paper-faint focus:border-led focus:outline-none; }
   .panel { @apply rounded-lg border border-ink-line bg-ink-raised; }
   .hash { @apply font-mono text-xs text-paper-muted; }
+  /* A theme's voice line (#509, lib/voice.js): decorative, always beside plain text. */
+  .voice-line { @apply font-mono text-led; letter-spacing: 0.04em; }
+
+  /* Villain plates (#509): a steel hairline on top and four rivets. */
+  [data-theme="villain"] .panel, [data-theme="villain"] .viz-frame, [data-theme="villain"] .holo-table-wrap {
+    box-shadow: inset 0 1px 0 rgba(228, 231, 234, 0.14), 0 6px 18px rgba(0, 0, 0, 0.45);
+  }
+  [data-theme="villain"] .panel {
+    background-image:
+      radial-gradient(circle at 8px 8px, #6b747c 1.5px, transparent 2.5px),
+      radial-gradient(circle at calc(100% - 8px) 8px, #6b747c 1.5px, transparent 2.5px),
+      radial-gradient(circle at 8px calc(100% - 8px), #6b747c 1.5px, transparent 2.5px),
+      radial-gradient(circle at calc(100% - 8px) calc(100% - 8px), #6b747c 1.5px, transparent 2.5px);
+  }
+  [data-theme="villain"] .btn-primary { box-shadow: 0 0 0 rgba(59, 227, 127, 0); transition: box-shadow 160ms; }
+  [data-theme="villain"] .btn-primary:hover { box-shadow: 0 0 14px rgba(59, 227, 127, 0.45); }
+  [data-theme="villain"] .viz-title, [data-theme="villain"] .holo-table caption { @apply text-paper; }
 
   /* Holo Light visualization frame (#400): a radius-lg panel around a void stage. */
   .viz-frame { @apply border border-ink-line bg-ink-raised; border-radius: var(--radius-lg); overflow: hidden; }

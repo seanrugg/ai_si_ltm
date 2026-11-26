@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAdmin } from "../App.jsx";
 import { api } from "../api/client.js";
+import { useVoice } from "../lib/voice.js";
 
 export default function Login() {
   const { username, setUsername } = useAdmin();
@@ -13,6 +14,8 @@ export default function Login() {
   const [form, setForm] = useState({ username: "", password: "" });
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const voice = useVoice();
+  const lead = voice.say("loginLead", null);
 
   if (username) return <Navigate to={back} replace />;
 
@@ -34,10 +37,11 @@ export default function Login() {
   return (
     <main className="flex min-h-screen items-center justify-center px-4">
       <form onSubmit={submit} className="panel w-full max-w-sm p-6">
-        <h1 className="text-xl font-bold">
+        <h1 className="brand text-xl font-bold">
           FLTMS<span className="ml-2 inline-block h-2 w-2 rounded-full bg-led align-middle" aria-hidden="true" />
         </h1>
         <p className="mb-6 mt-1 text-sm text-paper-muted">A Multi-Swarm Fleet Management System for Hybrid Agentic and Physical AI mesh networks. Administrator sign-in.</p>
+        {lead && <p aria-hidden="true" className="voice-line -mt-4 mb-6 text-sm">{lead}</p>}
         <label className="mb-3 block text-sm">
           Username
           <input
@@ -65,7 +69,7 @@ export default function Login() {
           </p>
         )}
         <button className="btn btn-primary w-full justify-center" disabled={busy}>
-          {busy ? "Signing in…" : "Sign in"}
+          {busy ? voice.say("signingIn", "Signing in…") : "Sign in"}
         </button>
       </form>
     </main>

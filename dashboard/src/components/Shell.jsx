@@ -3,6 +3,7 @@ import { Link, NavLink, useLocation } from "react-router-dom";
 import { useAdmin } from "../App.jsx";
 import { api } from "../api/client.js";
 import { THEMES, getTheme, setTheme } from "../lib/theme.js";
+import { useVoice } from "../lib/voice.js";
 import {
   GROUPS, OVERVIEW, dismissChecklist, getDirectivesSeen, groupBadge, groupOf, groupOpen, isChecklistDismissed,
   itemBadge, loadGroupChoices, saveGroupChoices, setDirectivesSeen, setupDone,
@@ -184,13 +185,16 @@ export default function Shell({ children }) {
   const location = useLocation();
   // Re-checked on every navigation (so a badge clears after an approval) and every 30 s.
   const status = useNavStatus(location.pathname);
+  const voice = useVoice();
+  const tagline = voice.say("tagline", null);
 
   return (
     <div className="min-h-screen md:grid md:grid-cols-[13rem_1fr]">
       <aside className="border-b border-ink-line bg-ink-raised md:min-h-screen md:border-b-0 md:border-r">
         <div className="flex items-center justify-between px-4 py-4">
-          <span className="text-lg font-bold">
+          <span className="brand text-lg font-bold">
             FLTMS<span className="ml-2 inline-block h-2 w-2 rounded-full bg-led align-middle" aria-hidden="true" />
+            {tagline && <span aria-hidden="true" className="voice-line block text-xs font-normal">{tagline}</span>}
           </span>
           <button className="btn md:hidden" aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}>
             Menu
@@ -200,9 +204,9 @@ export default function Shell({ children }) {
           <Nav status={status} onPick={() => setMenuOpen(false)} />
           <div className="mt-6 border-t border-ink-line px-3 pt-4 text-sm text-paper-muted">
             <ThemeSelect />
-            <p className="mt-3">Signed in as {username}</p>
+            <p className="mt-3">{voice.say("signedInAs", "Signed in as {name}", { name: username })}</p>
             <button className="mt-2 underline hover:text-paper" onClick={logout}>
-              Sign out
+              {voice.say("signOut", "Sign out")}
             </button>
           </div>
         </div>
