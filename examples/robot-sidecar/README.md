@@ -97,6 +97,16 @@ Everything else here only records. This is the exception, because Vector doesn't
 
 **To try it:** set `VECTOR_HOME_AFTER_MINUTES=2`, restart the sidecar and take Vector off the dock. Within about 2–3 minutes he should drive back, and the Timeline should show the energy events, the command and outcome `docked`. Then set it back to 45.
 
+## The robot's mind (#519)
+
+The robot takes part in the fleet's mind and dream cycles as itself: its mind runs **inside the sidecar**, on the robot's key, so nothing new joins the fleet. Off unless `SIDECAR_MIND_SECONDS` is set (e.g. `1h`).
+
+- **It dreams while resting** (Vector: on the charger, by the live battery poll), thinking with `MIND_BRAIN`. Use `local` with the model the voice bridge already uses (wire-pod's Knowledge Graph setting: Ollama's URL, ending `/v1`, and model name). That's when the model isn't busy answering him.
+- **Awake, it does duties only**, with no model: read the charter, introduce itself, acknowledge directives, and one cycle record per wake.
+- It runs on its own thread, because a model call can take minutes, and the sidecar's loop signs its records into the robot's chain. If `ltms_mind` can't be loaded, the sidecar logs it and keeps recording.
+- **It never drives the robot.** It proposes records (lessons, answers, reviews); commands stay with the energy reflex and directives.
+- `MIND_HEALTH` is off by default (the host machine isn't the robot), and its state is `mind.json` beside `MEMBER_STATE_PATH`. Every other `MIND_*` setting applies (docs/mind.md).
+
 ## Setup
 
 1. On the host, as the service user: create the robot's key and enroll it as

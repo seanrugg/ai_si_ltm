@@ -466,6 +466,43 @@ def build_adapters(env) -> list[Adapter]:
     return out
 
 
+def build_mind(env, client, adapters):
+    """The robot's mind inside the sidecar (#519), or None unless ``SIDECAR_MIND_SECONDS`` is set.
+
+    It runs on its own thread (``ltms_mind.embed.ThreadedMind``): a model call can
+    take minutes, and the sidecar's loop must keep signing body records. Its
+    records are signed by that loop into the robot's own chain (``pump``), so the
+    robot's key keeps one writer.
+
+    - **Dreams while resting** (Vector: on the charger, from the live battery
+      poll), with the brain in ``MIND_BRAIN`` (``local``: the model the robot's
+      voice bridge already uses). That's when the model is free.
+    - **Awake, duties only** (no model): read the charter, introduce, acknowledge
+      directives, the cycle record.
+    - ``MIND_HEALTH`` defaults to off: the host machine's disk and load aren't the
+      robot's. ``MIND_STATE_PATH`` defaults to ``mind.json`` beside
+      ``MEMBER_STATE_PATH``.
+
+    It never drives the robot: it only proposes records. Commands stay with the
+    energy reflex (#513) and directives.
+    """
+    from ltms_mind.embed import ThreadedMind, embedded_config, parse_every
+
+    every = parse_every(env, "SIDECAR_MIND_SECONDS", 0.0)
+    if every <= 0:
+        return None
+    from ltms_mind.brains.none import NoBrain
+
+    state_dir = os.path.dirname(os.path.abspath(env.get("MEMBER_STATE_PATH", "member-head.json")))
+    cfg = embedded_config(env, state_dir, defaults={"MIND_HEALTH": "off", "MIND_EMBEDDER": "lexical"})
+    resting = [a for a in adapters if type(a).resting is not Adapter.resting]
+    mind = ThreadedMind(cfg, every, client, awake_brain=NoBrain(),
+                        dream_when=(lambda: any(a.resting() for a in resting)) if resting else None)
+    logging.info("Sidecar: mind every %ss, brain %s%s", int(every), mind.dream_brain.name,
+                 ", dreams while resting" if resting else "")
+    return mind
+
+
 def main() -> None:
     import time
 
@@ -479,6 +516,7 @@ def main() -> None:
     sidecar = Sidecar(adapters, float(env.get("BODY_SECONDS", "30")), time.monotonic(),
                       heartbeat_seconds=float(env.get("BODY_HEARTBEAT_SECONDS", "600")),
                       rest_heartbeat_seconds=float(env.get("BODY_REST_HEARTBEAT_SECONDS", "1800")))
+    client = None
     if env.get("LTMS_SERVER") and env.get("LTMS_KEY_PATH"):
         client = LTMSClient(env["LTMS_SERVER"], key_path=env["LTMS_KEY_PATH"])
         # The robot's AI runs off board (in the bridge), so the profile shows it as Hybrid (#185).
@@ -486,10 +524,27 @@ def main() -> None:
         for a in adapters:
             if hasattr(a, "on_specs"):
                 a.on_specs = client.report_specs  # the robot's spec sheet, once connected (#408)
+    mind = None
+    if client is not None:
+        try:
+            mind = build_mind(env, client, adapters)
+        except Exception:  # noqa: BLE001 - ltms_mind missing or misconfigured: the robot is still recorded
+            logging.exception("Sidecar: mind not started")
+
+    def poll(link, now: float) -> int:
+        n = sidecar.poll(link, now)
+        if mind is not None:
+            n += mind.pump(link)  # the mind's records, signed here into the robot's chain
+        return n
+
     sidecar.start()
+    if mind is not None:
+        mind.start()
     try:
-        member_main.main(poll=sidecar.poll)
+        member_main.main(poll=poll)
     finally:
+        if mind is not None:
+            mind.stop()
         sidecar.stop()
 
 

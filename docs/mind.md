@@ -235,8 +235,17 @@ needs:
 - `embedded_config(env, state_dir, …)`: a `MindConfig` from the host's settings,
   with the mind's state beside the host's.
 
-The hub (#344, below) is the first host; Vector's sidecar (#519), the Ventuno Q's
-App Lab member (#520) and Hermes (#521) follow.
+Hosts that may only sign from their own main thread (the member process, the
+robot sidecar) use `ThreadedMind`: the mind thinks on its own thread, because a
+model call can take minutes, and the host's loop signs its records
+(`mind.pump(link)` on every pass). `ThreadedMind` can also choose per wake
+whether to dream (`dream_when`, e.g. "on the charger") and use a different brain
+awake (`awake_brain`, e.g. `NoBrain()`), so a robot's shared model is only
+used while it rests.
+
+Hosts so far: the hub (#344, below; no brain) and Vector's robot sidecar (#519;
+see `examples/robot-sidecar/README.md`). The Ventuno Q's App Lab member (#520)
+and Hermes (#521) follow.
 
 ## The Claude Code brain (#341)
 
