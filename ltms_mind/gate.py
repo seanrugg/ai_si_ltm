@@ -4,6 +4,8 @@
 2. **purpose**: it does something (answers, reviews, predicts, checks, asks, or
    teaches a lesson). A summary alone has no kind and fails here.
 3. **evidence**: ``refs`` to records or dataset ``sources``. Questions are exempt.
+   Every ``refs`` value must be a record key, ``<agent>:<seq>`` (or a list of
+   them); anything else, like a prompt's placeholder copied back, is ``bad_ref`` (#525).
 4. **novelty**: not a near-duplicate (cosine >= threshold) of my or my swarm's
    recent records, or of something already accepted this wake.
 5. **budget**: the daily write cap (checked by the loop with ``Budget``).
@@ -25,9 +27,13 @@ log = logging.getLogger("ltms_mind.gate")
 BAD_PROPOSAL = "bad_proposal"
 NO_PURPOSE = "no_purpose"
 NO_EVIDENCE = "no_evidence"
+BAD_REF = "bad_ref"
 DUPLICATE = "duplicate"
 OVER_BUDGET = "over_budget"
-REASONS = (BAD_PROPOSAL, NO_PURPOSE, NO_EVIDENCE, DUPLICATE, OVER_BUDGET)
+REASONS = (BAD_PROPOSAL, NO_PURPOSE, BAD_REF, NO_EVIDENCE, DUPLICATE, OVER_BUDGET)
+
+# A record key: the contract's member name, a colon, a sequence number from 1.
+REF_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}:[1-9][0-9]*$")
 
 MAX_SUMMARY = 500
 
@@ -128,6 +134,22 @@ def shape_error(p: Proposal) -> str | None:
     return None
 
 
+def ref_error(refs) -> str | None:
+    """None if every ``refs`` value is a record key (``<agent>:<seq>``) or a list of them."""
+    if refs is None:
+        return None
+    if not isinstance(refs, dict):
+        return "refs must be an object"
+    for k, v in refs.items():
+        values = v if isinstance(v, list) else [v]
+        if not values:
+            return f"refs.{k} is empty"
+        for x in values:
+            if not isinstance(x, str) or not REF_RE.match(x):
+                return f"refs.{k} must be <agent>:<seq>, got {str(x)[:40]!r}"
+    return None
+
+
 class Gate:
     def __init__(self, embedder, threshold: float, corpus: list[str]) -> None:
         self.embedder, self.threshold = embedder, threshold
@@ -140,6 +162,8 @@ class Gate:
             return NO_PURPOSE
         if shape_error(p):
             return BAD_PROPOSAL
+        if ref_error(p.refs):
+            return BAD_REF
         if p.kind != "question" and not (p.refs or p.sources):
             return NO_EVIDENCE
         vec = self.embedder.embed([p.summary])[0]
