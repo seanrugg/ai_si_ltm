@@ -4,7 +4,8 @@
 
 - **Duties** (every wake, cheap): sign in, send anything left in the outbox, read
   the charter if it's unread, introduce myself once per swarm, report health
-  when it changes.
+  when it changes, and acknowledge directives (#341: received, then accepted or
+  declined with a reason; followed by default).
 - **Mode**: *dreaming* when the brain can dream and the dream condition holds;
   otherwise *awake*. Awake wakes only answer what's addressed to me and check
   numeric predictions. Dreaming wakes open a ``DreamCycle`` (#240) and also
@@ -29,6 +30,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 from cli_agent.client import DreamCycle
+from cli_agent.directives import Decision
 from cli_agent.introductions import INTRO_TAG, Introducer
 
 from ltms_mind import gate as gate_mod
@@ -36,6 +38,7 @@ from ltms_mind.agenda import Agenda, iso, parse_ts
 from ltms_mind.brains.base import RECORD, Brain, Context, Proposal, Task
 from ltms_mind.budget import Budget
 from ltms_mind.config import MindConfig
+from ltms_mind.directives import CLOSED_REPORTS, MindDirectives
 
 log = logging.getLogger("ltms_mind")
 
@@ -162,7 +165,7 @@ class Mind:
         self.state = State(cfg.state_path)
 
     # ------------------------------------------------------------------ duties
-    def _duties(self, tok: dict, counts: Counter) -> dict | None:
+    def _duties(self, tok: dict, counts: Counter, decide=None) -> tuple[dict | None, list[dict]]:
         status = tok.get("charter")
         if isinstance(status, dict) and status.get("read") is False:
             if self.client.read_charter() is not None:
@@ -182,7 +185,38 @@ class Mind:
                              payload={"levels": levels, "previous": before})
                 self.state["health"] = levels
                 counts["health_reported"] += 1
-        return swarm
+        self._swarm_name = (swarm or {}).get("name")
+        open_directives = []
+        if decide is not None:
+            open_directives = self._directives(decide).run(swarm, counts, self.now())
+        return swarm, open_directives
+
+    def _directives(self, decide) -> MindDirectives:
+        return MindDirectives(self.client, self.state, self.cfg.state_path + ".directives", self._append, decide)
+
+    def _decider(self, budget: Budget):
+        """Directives are followed by default: the brain may decline with a reason, and
+        no view, a failure or no budget left means follow."""
+        has_view = type(self.brain).decide is not Brain.decide  # only a brain with a view costs a call
+
+        def decide(stmt: dict) -> Decision:
+            if not has_view or budget.can_call():
+                return Decision(True)
+            ctx = Context(member=self.client.name, swarm=getattr(self, "_swarm_name", None),
+                          family=self.cfg.model_family, now=iso(self.now()), mode="awake")
+            try:
+                view = self.brain.decide(stmt, ctx)
+            except Exception as exc:  # noqa: BLE001 - a broken brain never blocks a directive
+                log.warning("brain couldn't decide on directive %s: %s", stmt.get("id"), exc)
+                view = None
+            budget.charge(getattr(self.brain, "last_tokens", 0))
+            if not view:
+                return Decision(True)
+            accept, reason = view
+            if accept or not (isinstance(reason, str) and reason.strip()):
+                return Decision(True)
+            return Decision.decline(reason.strip()[:500])
+        return decide
 
     def _send_intro(self, text: str, payload: dict, reply_to: str | None) -> dict:
         header = {"summary": text, "tags": [INTRO_TAG]}
@@ -262,6 +296,13 @@ class Mind:
             p.refs = {**(p.refs or {}), ref: task.key}
         if p.kind == "answer" and task.inputs.get("asker"):
             p.peers = [task.inputs["asker"]]
+        if task.kind == "directive":
+            # Everything done for a directive points at my acceptance of it.
+            p.refs = {**(p.refs or {}), "acts_on": task.inputs["ack"]}
+            if p.kind == "report":
+                p.payload = {**(p.payload or {}), "directive": task.key}
+                issuer = task.inputs.get("issuer")
+                p.peers = [issuer] if issuer else []
         return p
 
     def _run_tasks(self, tasks: list[Task], ctx: Context, gate: gate_mod.Gate, budget: Budget,
@@ -304,6 +345,8 @@ class Mind:
                     continue
                 self._write(task, p, cycle)
                 budget.wrote()
+                if p.kind == "report" and (p.payload or {}).get("status") in CLOSED_REPORTS:
+                    self._directives(None).close(task.key)
                 counts["written"] = counts.get("written", 0) + 1
 
     def _corpus(self, swarm: dict | None) -> list[str]:
@@ -334,23 +377,25 @@ class Mind:
         duty["outbox_restored"] = len(self.client.outbox)
         self._flush(duty)
         self.client.auto_read_charter = True
-        swarm = self._duties(tok, duty)
+        paused = self.cfg.paused or bool((tok.get("mind") or {}).get("paused"))
+        written_today = (self.state.get("writes") or {}).get(now.astimezone().date().isoformat(), 0)
+        budget = Budget(calls=self.cfg.brain_calls, tokens=self.cfg.tokens, seconds=self.cfg.seconds,
+                        daily_writes=self.cfg.daily_writes, written_today=written_today, clock=self.monotonic)
+        # A paused mind leaves directives unacknowledged until it resumes, rather than
+        # declining them for good.
+        swarm, open_directives = self._duties(tok, duty, None if paused else self._decider(budget))
         counts["duties"] = {k: v for k, v in duty.items() if v}
 
-        paused = self.cfg.paused or bool((tok.get("mind") or {}).get("paused"))
         if paused:
             counts["paused"] = True
             self._cycle_event(counts)
             return self._finish(now, counts)
 
         dreaming = self._dream_due(now)
-        written_today = (self.state.get("writes") or {}).get(now.astimezone().date().isoformat(), 0)
-        budget = Budget(calls=self.cfg.brain_calls, tokens=self.cfg.tokens, seconds=self.cfg.seconds,
-                        daily_writes=self.cfg.daily_writes, written_today=written_today, clock=self.monotonic)
         agenda = Agenda(self.client, me=self.client.name, swarm=swarm, family=self.cfg.model_family, now=now,
                         since=parse_ts(self.state.get("last_cycle")), lookback_days=self.cfg.lookback_days,
                         corpus=self.cfg.corpus, study_query=self.cfg.study_query,
-                        read_items=set(self.state.get("read_items") or []))
+                        read_items=set(self.state.get("read_items") or []), directives=open_directives)
         tasks = agenda.build(weights=self.cfg.weights, max_tasks=self.cfg.max_tasks, dreaming=dreaming)
         counts["tasks"] = len(tasks)
         ctx = Context(member=self.client.name, swarm=(swarm or {}).get("name"), family=self.cfg.model_family,

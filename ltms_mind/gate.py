@@ -17,7 +17,7 @@ import math
 import re
 from collections import Counter
 
-from ltms_mind.brains.base import CHECK_OUTCOMES, KINDS, VERDICTS, Proposal
+from ltms_mind.brains.base import CHECK_OUTCOMES, KINDS, REPORT_STATUSES, VERDICTS, Proposal
 
 log = logging.getLogger("ltms_mind.gate")
 
@@ -116,6 +116,13 @@ def shape_error(p: Proposal) -> str | None:
             return f"a prediction check needs payload.outcome: {', '.join(CHECK_OUTCOMES)}"
     if p.kind == "question" and not p.peers:
         return "a question needs peers: who it is put to"
+    if p.kind == "report":
+        if not (p.refs or {}).get("acts_on") or not (p.payload or {}).get("directive"):
+            return "a report needs refs.acts_on and payload.directive"
+        if (p.payload or {}).get("status") not in REPORT_STATUSES:
+            return f"a report needs payload.status: {', '.join(REPORT_STATUSES)}"
+        if p.payload["status"] == "couldnt" and not p.payload.get("reason"):
+            return "a 'couldnt' report needs payload.reason"
     if len(p.sources or []) > 16:
         return "at most 16 sources"
     return None

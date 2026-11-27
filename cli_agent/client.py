@@ -296,6 +296,11 @@ class LTMSClient:
             log.warning("fleet key lookup failed: %s", exc)
             return None
 
+    def my_directives(self) -> list[dict]:
+        """Open directives for this member's swarm (or all swarms), and recent cancels, as the
+        signed messages a hub would publish (#341). For members with no hub. Raises on error."""
+        return list(self._call("GET", "/api/members/me/directives").get("directives") or [])
+
     def pings(self) -> list[str]:
         """Pending admin pings (#356): this member's name if it was pinged, plus (for a hub)
         pinged members of its swarm. Fetching marks them delivered. Never raises."""

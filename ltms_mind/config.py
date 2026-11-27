@@ -119,6 +119,11 @@ class MindConfig:
     health: bool = True
     paused: bool = False
     place: str | None = None
+    # The Claude Code brain (#341)
+    claude_bin: str = "claude"
+    claude_model: str | None = None
+    claude_timeout: float = 180.0
+    claude_max_usd: float | None = None
 
     @property
     def outbox_path(self) -> str:
@@ -127,6 +132,11 @@ class MindConfig:
     @property
     def intro_path(self) -> str:
         return self.state_path + ".introduced"
+
+    @property
+    def brain_workdir(self) -> str:
+        """An empty working directory for a model brain's process (#341)."""
+        return self.state_path + ".workdir"
 
 
 def _on(v: str | None, default: bool) -> bool:
@@ -159,13 +169,16 @@ def load(env: dict | None = None) -> MindConfig:
     if not key_path:
         raise ConfigError("LTMS_KEY_PATH is required: the member's key file")
     state = e.get("MIND_STATE_PATH", "").strip() or os.path.splitext(key_path)[0] + ".mind.json"
+    brain = e.get("MIND_BRAIN", "none").strip().lower() or "none"
+    family = e.get("MIND_MODEL_FAMILY", "").strip().lower() or ("claude" if brain == "claude-code" else None)
+    max_usd = e.get("MIND_CLAUDE_MAX_USD", "").strip()
     try:
         return MindConfig(
             server=server.rstrip("/"),
             key_path=key_path,
             state_path=state,
-            brain=e.get("MIND_BRAIN", "none").strip().lower() or "none",
-            model_family=(e.get("MIND_MODEL_FAMILY", "").strip().lower() or None),
+            brain=brain,
+            model_family=family,
             max_tasks=max(0, int(e.get("MIND_MAX_TASKS", "5") or 5)),
             weights=parse_weights(e.get("MIND_WEIGHTS")),
             brain_calls=max(0, int(e.get("MIND_BRAIN_CALLS", "10") or 10)),
@@ -182,6 +195,10 @@ def load(env: dict | None = None) -> MindConfig:
             health=_on(e.get("MIND_HEALTH"), True),
             paused=_on(e.get("MIND_PAUSED"), False),
             place=e.get("MIND_PLACE", "").strip() or None,
+            claude_bin=e.get("MIND_CLAUDE_BIN", "").strip() or "claude",
+            claude_model=e.get("MIND_CLAUDE_MODEL", "").strip() or None,
+            claude_timeout=parse_duration(e.get("MIND_CLAUDE_TIMEOUT", "180") or "180"),
+            claude_max_usd=float(max_usd) if max_usd else None,
         )
     except ValueError as exc:
         if isinstance(exc, ConfigError):

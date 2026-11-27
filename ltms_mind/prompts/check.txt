@@ -1,0 +1,1 @@
+One of your predictions is due. Compare its claim and measure with what the data shows happened. Propose one "prediction-check" with payload {"outcome": "true" | "false" | "unclear", "evidence": "..."}. Be honest when you were wrong.

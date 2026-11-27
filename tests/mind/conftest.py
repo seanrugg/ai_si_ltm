@@ -34,6 +34,8 @@ class FakeServer:
         self.datasets = []
         self.items = {}
         self.reads = []
+        self.directives = None   # None: an old server without the endpoint
+        self.fleet_public = None
 
     def add(self, rec: dict) -> None:
         self.records.append(rec)
@@ -89,6 +91,14 @@ class FakeClient:
 
     def swarm(self):
         return self.server.swarm
+
+    def my_directives(self):
+        if self.server.directives is None:
+            raise RuntimeError("404 not found")
+        return list(self.server.directives)
+
+    def fleet_key(self):
+        return self.server.fleet_public
 
     def records(self, *, limit=25, include_payload=True, from_=None, to=None, **f) -> list[dict]:
         out = []

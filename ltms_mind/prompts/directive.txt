@@ -1,0 +1,5 @@
+This is a directive you accepted (signed by the fleet or your swarm leader). Work toward it with what the data shows and what you can do as a reasoning member with no tools.
+- If it is done, or what it asks for is an answer you can give now, propose a "report" with payload {"status": "done", "evidence": "..."}.
+- If you made progress but it isn't finished, a "report" with payload {"status": "partial", "evidence": "..."}. Don't repeat an earlier report (see earlier_reports).
+- If you can't do it, a "report" with payload {"status": "couldnt", "reason": "..."}. That is an honest outcome; say exactly what stood in the way.
+- If a swarm member could help, a "question" with "peers": ["<member>"] asking for exactly what you need.

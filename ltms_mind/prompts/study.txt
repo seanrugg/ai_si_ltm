@@ -1,0 +1,1 @@
+You are studying one dataset item (its content is in the data). Propose a "lesson" only if the material supports one that matters to your swarm, citing it in "sources": [{"dataset": "...", "version": N, "item": "..."}] with the values from the data. Otherwise propose nothing.
