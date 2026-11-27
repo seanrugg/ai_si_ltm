@@ -1,6 +1,7 @@
 """Member spec sheet (#332): hardware, language models and software, as the device
 reports them, with an admin's per-field overrides. Member metadata, not a record.
 
+A device report replaces the sections it sends and keeps the ones it leaves out.
 ``resolve()`` merges field by field (admin over declared) and labels each section
 with its source. A report that changes anything is audited (``specs_change``)
 with what changed; an identical re-report writes nothing.
@@ -86,8 +87,9 @@ def _models(v) -> list[dict]:
     return out
 
 
-def validate(body, *, patch: bool = False) -> dict:
-    """The spec sheet in canonical form. ``patch``: fields may be null (clear an override)."""
+def validate(body, *, patch: bool = False, clear: bool = False) -> dict:
+    """The spec sheet in canonical form. ``patch``: fields may be null (clear an override).
+    ``clear``: a whole section may be null (a device report clearing that section)."""
     if not isinstance(body, dict):
         _bad("expected an object")
     try:
@@ -100,7 +102,7 @@ def validate(body, *, patch: bool = False) -> dict:
     for k, v in body.items():
         if k not in SECTIONS:
             _bad(f"unknown section {k!r}")
-        if v is None and patch:
+        if v is None and (patch or clear):
             out[k] = None
         elif k == "hardware":
             out[k] = _fields(v, HARDWARE, "hardware", allow_null=patch)
@@ -118,9 +120,16 @@ def _changed_sections(old: dict, new: dict) -> list[str]:
 
 
 async def report(session, member: Member, body, *, actor: str | None = None) -> dict:
-    """The device reports its spec sheet (replaces what it reported before)."""
-    new = validate(body)
+    """The device reports its spec sheet, section by section.
+
+    A section in the report replaces that section; a section left out keeps what
+    was reported before; a section sent as null is cleared. So reports from
+    different parts of a device (its spec sheet, its cognition models) don't
+    erase each other.
+    """
+    sent = validate(body, clear=True)
     old = member.specs_declared or {}
+    new = {s: v for s, v in {**old, **sent}.items() if v is not None}
     changed = _changed_sections(old, new)
     member.specs_reported_at = datetime.now(timezone.utc)
     if changed:

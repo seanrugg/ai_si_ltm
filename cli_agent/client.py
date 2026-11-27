@@ -252,6 +252,9 @@ class LTMSClient:
     def report_specs(self, specs: dict) -> dict | None:
         """Report this device's spec sheet (#332): hardware, models, software, notes.
 
+        Sections left out keep what was reported before (e.g. the models from
+        ``report_cognition``); send a section as None to clear it.
+
         An identical re-report changes nothing on the server. Never raises; returns
         the resolved spec sheet, or None.
         """
