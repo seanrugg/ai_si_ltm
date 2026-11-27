@@ -30,8 +30,8 @@ Ollama brain's units come with #340.
 **One writer per key.** The mind signs with the member's key and sends over
 HTTPS. Don't run it beside another process that signs with the **same** key
 (for example `ltms-member` on MQTT): two writers fork the chain, and the server
-rejects one of them. Give the mind its own member, or (later) run it inside the
-member process through the embeddable member (#491).
+rejects one of them. Give the mind its own member, or run it inside the process
+that already signs for the key, as the hub does (below).
 
 ## Settings
 
@@ -260,6 +260,41 @@ Tokens counted are input, output and cache writes; cache reads aren't charged.
 
 To stop it: `launchctl bootout gui/$(id -u)/com.ltms.mind.claude-code`. To pause
 it without stopping it, set `MIND_PAUSED=on` (or the server's pause, #342).
+
+## On a hub (#344)
+
+A hub runs its own mind **inside the hub process** (`ltms_mind/hub.py`), so the
+hub's key keeps one writer: no separate service, timer or key. The harness never
+imports the mind; the hub loads it as an extension named in its settings:
+
+```
+HUB_EXTENSIONS=ltms_mind.hub:extension
+```
+
+Every `HUB_MIND_SECONDS` (default 900; `0` = off) the hub wakes the mind in
+no-brain mode. Reads go through the hub's `LTMSClient`. Writes are signed into the hub's
+own chain (`LinkedClient`) and delivered by the hub's outbox with its heartbeat,
+so the mind keeps no outbox of its own.
+
+- **Duties:** sign in, read the charter when due, introduce itself to its swarm
+  once, acknowledge directives (followed: with no brain there's no reason to
+  decline), and one `Mind cycle` event per wake.
+- **No machine health from the mind:** `hub_health` (#349) already reports disk,
+  temperature, memory and throttling, so `MIND_HEALTH` defaults to off here.
+- **Relay health on change** (`cli_agent/hub_relay.py`, part of the hub itself,
+  so it runs with or without the mind), checked every hub tick. One `event`
+  tagged `internal,health,relay,<check>` when a check changes and the new state
+  has held for `HUB_RELAY_HOLD_SECONDS` (default 60); nothing while it stays.
+  Each refs the previous event for the same check (`refs.previous`).
+
+| Check | States | From |
+|---|---|---|
+| `backlog` | `ok` / `high` | records waiting in the hub's outbox, over `HUB_BACKLOG_MAX` (default 500) |
+| `bus` | `up` / `down` | the MQTT connection |
+| `relay` | `ok` / `failing` | whether relaying to LTMS worked on the last tick |
+
+`MIND_STATE_PATH` defaults to `hub-mind.json` beside the hub's state file. Any
+other `MIND_*` setting applies, except `MIND_BRAIN` (always `none` on a hub).
 
 ## State
 

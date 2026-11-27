@@ -254,11 +254,16 @@ def report_own_specs(ltms_client, cfg) -> None:
         logging.exception("Hub: spec sheet not reported")
 
 
-def make_on_connect(swarm):
-    """``swarm`` is one topic prefix or a list of them (topic ID first, then a legacy name)."""
+def make_on_connect(swarm, bus: dict | None = None):
+    """``swarm`` is one topic prefix or a list of them (topic ID first, then a legacy name).
+
+    ``bus``, if given, gets ``bus["up"] = True`` on every connect (#344).
+    """
     prefixes = [swarm] if isinstance(swarm, str) else list(swarm)
 
     def on_connect(client, userdata, flags, reason_code, properties) -> None:
+        if bus is not None:
+            bus["up"] = True
         try:
             topics = []
             for prefix in prefixes:
@@ -270,6 +275,51 @@ def make_on_connect(swarm):
             logging.exception("Hub: on_connect failed")
 
     return on_connect
+
+
+@dataclass(frozen=True)
+class HubContext:
+    """What a hub extension gets (#344): the hub's own client, chain and lock."""
+    env: Mapping[str, str]
+    client: object      # the hub's LTMSClient (reads; signs nothing itself)
+    link: object        # the hub's own MemberLink: sign into the hub's chain with ``link.append``
+    lock: object        # hold it while calling ``link.append``
+    state_path: str     # the hub's state file; extensions keep their state beside it
+    started_at: float   # monotonic time the hub started
+
+
+def load_extensions(spec: str, ctx: HubContext) -> list:
+    """``HUB_EXTENSIONS``: comma-separated ``module:factory``. Each factory gets a
+    ``HubContext`` and returns an object with ``tick(now)``, or None to stay off.
+
+    The harness depends on no extension: they're named in settings and imported
+    here by name. One that fails to load is logged and skipped; the hub runs on.
+    """
+    import importlib
+
+    out = []
+    for item in (x.strip() for x in spec.split(",")):
+        if not item:
+            continue
+        module, _, factory = item.partition(":")
+        try:
+            ext = getattr(importlib.import_module(module), factory or "extension")(ctx)
+        except Exception:  # noqa: BLE001 - a broken extension never stops the hub
+            logging.exception("Hub: extension %s not loaded", item)
+            continue
+        if ext is not None:
+            out.append(ext)
+            logging.info("Hub: extension %s loaded", item)
+    return out
+
+
+def make_on_disconnect(bus: dict):
+    """Marks the MQTT bus down (#344); paho reconnects on its own."""
+    def on_disconnect(client, userdata, flags, reason_code, properties) -> None:
+        bus["up"] = False
+        logging.warning("Hub: MQTT disconnected (reason %s)", reason_code)
+
+    return on_disconnect
 
 
 def main() -> None:
@@ -306,7 +356,22 @@ def main() -> None:
     health = make_health_monitor(cfg, started_at)
     if health is not None:
         logging.info("Hub: machine health every %ss (state file %s)", int(cfg.health_seconds), cfg.health_state_path)
-    mqtt_client.on_connect = make_on_connect(hub.prefixes)
+
+    # Relay health on change (#344), and any extensions (e.g. the hub's mind), in this
+    # process so the hub's key keeps one writer.
+    from cli_agent.hub_relay import RelayWatch
+    relay = RelayWatch.from_env(os.environ)
+    extensions = load_extensions(os.environ.get("HUB_EXTENSIONS", ""), HubContext(
+        env=os.environ, client=ltms_client, link=own, lock=hub.lock, state_path=cfg.state_path,
+        started_at=started_at))
+    bus = {"up": None}  # None until the first connect: no event for the start-up wait
+
+    def sign_own(type: str, **kw) -> dict:
+        with hub.lock:
+            return own.append(type, **kw)
+
+    mqtt_client.on_connect = make_on_connect(hub.prefixes, bus)
+    mqtt_client.on_disconnect = make_on_disconnect(bus)
     mqtt_client.on_message = make_on_message(hub)
     if cfg.mqtt_username is not None:
         mqtt_client.username_pw_set(cfg.mqtt_username, cfg.mqtt_password)
@@ -346,7 +411,17 @@ def main() -> None:
                     record_health(own, *health.poll(now))
                 except Exception:  # noqa: BLE001 - health must never stop relaying
                     logging.exception("Hub: health reading failed")
-            hub.tick()
+            result = hub.tick()
+            try:
+                relay.record(sign_own, relay.observe(now, backlog=outbox.count(), bus_up=bus["up"],
+                                                     relay_ok=result is not None))
+            except Exception:  # noqa: BLE001 - health must never stop relaying
+                logging.exception("Hub: relay health failed")
+            for ext in extensions:
+                try:
+                    ext.tick(now)
+                except Exception:  # noqa: BLE001 - an extension must never stop relaying
+                    logging.exception("Hub: extension %s failed", type(ext).__name__)
             if hub.stuck:
                 for agent, info in hub.stuck.items():
                     logging.warning(

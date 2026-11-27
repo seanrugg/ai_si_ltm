@@ -81,6 +81,10 @@ class Outbox:
         self.conn.commit()
         return cur.rowcount
 
+    def count(self) -> int:
+        """Records waiting for an acknowledgement, all agents together (the hub's backlog, #344)."""
+        return int(self.conn.execute("SELECT COUNT(*) FROM outbox").fetchone()[0])
+
     def last(self, agent: str) -> dict | None:
         row = self.conn.execute(
             "SELECT record FROM outbox WHERE agent = ? ORDER BY seq DESC LIMIT 1",
