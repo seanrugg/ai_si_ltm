@@ -80,6 +80,23 @@ What isn't available, and so isn't recorded:
   Numbers are never parsed from speech.
 - **The robot's stimulation level.** The SDK doesn't expose it.
 
+## Energy reflex: the sidecar's one command (#513)
+
+Everything else here only records. This is the exception, because Vector doesn't go back to his charger on his own, and battery level 1 comes only minutes before he powers off (23–25 Nov 2026: level 1 after about 75–115 minutes off the dock, powered off within minutes each time; #506).
+
+- **Trigger:** `VECTOR_HOME_AFTER_MINUTES` (default 45) off the dock, measured from the battery poll's charger flag, which stays live when the SDK stream freezes; or battery level 1, whichever comes first. `0` turns the reflex off.
+- **Steps, one per battery poll:** take behavior control, `drive_on_charger`, release control. If he's still off the dock at the next poll, once more. Then Vector says "I need my charger." and the sidecar signs a question to the whole swarm. Then nothing more.
+- **Never** while he's held or falling, or while a command is still running.
+- **On the record:**
+  - an `event` tagged `body,energy` when the state or step changes (`ok`, `low-soon`, `low`; `go-home`, `retry`, `help`), with time off the dock, battery level and odometry frame;
+  - an `action` tagged `body,energy,command` for each command, with `outcome` `success` or `failed`;
+  - a `communication` tagged `question,energy,help` for the help request (no `peers`: the whole swarm);
+  - an `event` tagged `body,energy,energy-outcome` when he's docked again: `docked` (after a go-home), `rescued` (after a help request), `powered-off` (the stream went stale first), or `not-needed`.
+
+  Each refs the episode's first energy event.
+
+**To try it:** set `VECTOR_HOME_AFTER_MINUTES=2`, restart the sidecar and take Vector off the dock. Within about 2–3 minutes he should drive back, and the Timeline should show the energy events, the command and outcome `docked`. Then set it back to 45.
+
 ## Setup
 
 1. On the host, as the service user: create the robot's key and enroll it as

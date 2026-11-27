@@ -265,6 +265,8 @@ class Sidecar:
             header["refs"] = refs
         if item.at is not None:
             header["ts"] = iso_ts(at)
+        if item.outcome:
+            header["outcome"] = item.outcome
         rec = link.append(item.type, payload=item.payload, **{k: v for k, v in header.items() if v})
         if item.key and isinstance(rec, dict) and rec.get("agent") and rec.get("seq") is not None:
             self.ids[item.key] = f"{rec['agent']}:{rec['seq']}"
