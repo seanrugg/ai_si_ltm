@@ -9,8 +9,9 @@ fields come from that package: ``anki_vector/events.py`` (``Events``),
 Everything outside the event stream is read with ``getattr`` and skipped when
 absent, so an SDK without it records less, never a made-up value.
 
-The adapter only **watches**: it never requests behavior control, so Vector
-behaves as Vector. Configure the SDK the usual way first
+The adapter **watches**, with one exception: the energy reflex (#513, below and
+``adapters/vector_energy.py``). Apart from that it never requests behavior
+control, so Vector behaves as Vector. Configure the SDK the usual way first
 (``python -m anki_vector.configure``); this adapter needs no secrets of its own.
 
 Records (one per event):
@@ -106,10 +107,21 @@ frozen stream sent the same readings for 23 hours. So after a stale stream:
 
 Battery health keeps signing throughout, since it is read live.
 
+**Energy reflex (#513): the sidecar's only command.** Vector doesn't go home on his
+own, and level 1 comes only minutes before he powers off. After
+``VECTOR_HOME_AFTER_MINUTES`` (default 45; ``0`` turns it off) off the dock, by the
+battery poll's charger flag, or at battery level 1, the adapter takes behavior
+control, calls ``drive_on_charger`` and releases control; once more if he's still
+off the dock at the next poll; then Vector says "I need my charger." and a swarm
+question is signed. Never while he's held or falling. Every step is a record:
+``body,energy`` events, ``action`` records for each command with its outcome, and
+an ``energy-outcome`` event when he's docked again (``docked``, ``rescued``,
+``powered-off``, ``not-needed``). Details in ``adapters/vector_energy.py``.
+
 Settings: VECTOR_SERIAL (optional; the SDK's default robot otherwise),
 VECTOR_BODY_SECONDS, VECTOR_FLAG_SECONDS, VECTOR_DEBOUNCE_SECONDS,
 VECTOR_FACE_GAP_SECONDS, VECTOR_BATTERY_SECONDS, VECTOR_STALE_SECONDS,
-VECTOR_STALE_RETRY_MAX_SECONDS.
+VECTOR_STALE_RETRY_MAX_SECONDS, VECTOR_HOME_AFTER_MINUTES.
 """
 from __future__ import annotations
 
@@ -119,6 +131,13 @@ import time
 from typing import Callable
 
 from adapters.base import Adapter, Emit, Item
+from adapters.vector_energy import (
+    ASK_HELP,
+    GO_HOME,
+    HELP_TEXT,
+    HOME_AFTER_SECONDS,
+    EnergyReflex,
+)
 
 # state -> the SDK's RobotStatus flags for it (any on: the state is on)
 STATES = {
@@ -355,6 +374,42 @@ def battery_values(state) -> dict:
     return v
 
 
+def run_command(energy: EnergyReflex, emit: Emit, robot, command: str, control_timeout: float = 10.0) -> None:
+    """Run one energy command under behavior control, then tell the reflex how it went (#513).
+
+    The adapter connects with ``behavior_control_level=None`` (watch only), but
+    0.8.1 opens the behavior-control stream on every connection
+    (``connection.py``, ``Connection._connect``: ``self._open_connections()``), so
+    control can be taken later: ``robot.conn.request_control(timeout=…)`` (raises
+    ``VectorControlTimeoutException`` if it isn't granted) and given back with
+    ``robot.conn.release_control(timeout=…)``. ``robot.behavior.drive_on_charger()``
+    (``behavior.py``) finds the charger by its marker and backs onto it;
+    ``robot.behavior.say_text()`` speaks. Both need control. Control is always
+    released, so Vector's own behaviors take over again straight away.
+    """
+    ok, detail = False, None
+    try:
+        robot.conn.request_control(timeout=control_timeout)
+        try:
+            if command == GO_HOME:
+                result = robot.behavior.drive_on_charger()
+            elif command == ASK_HELP:
+                result = robot.behavior.say_text(HELP_TEXT)
+            else:
+                raise ValueError(f"unknown energy command {command!r}")
+            ok = True
+            detail = str(getattr(result, "result", "") or "")[:200] or None
+        finally:
+            try:
+                robot.conn.release_control(timeout=control_timeout)
+            except Exception as exc:  # noqa: BLE001 - Vector takes control back on his own anyway
+                logging.info("vector_sdk: release control: %s", exc)
+    except Exception as exc:  # noqa: BLE001 - no control, no connection: the next poll decides
+        detail = f"{type(exc).__name__}: {exc}"[:200]
+        logging.warning("vector_sdk: energy %s failed: %s", command, detail)
+    energy.done(emit, command, ok, detail)
+
+
 def status_flags(robot) -> dict[str, bool]:
     st = getattr(robot, "status", None)
     return {f: bool(getattr(st, f)) for f in STATUS_FLAGS if st is not None and hasattr(st, f)}
@@ -413,8 +468,14 @@ class VectorSDK(Adapter):
 
     def __init__(self, serial: str | None = None, body_seconds: float = 1.0, face_gap_seconds: float = 10.0,
                  battery_seconds: float = 30.0, flag_seconds: float = 0.1, debounce_seconds: float = DEBOUNCE_SECONDS,
-                 stale_seconds: float = STALE_SECONDS, stale_retry_max: float = STALE_RETRY_MAX_SECONDS):
+                 stale_seconds: float = STALE_SECONDS, stale_retry_max: float = STALE_RETRY_MAX_SECONDS,
+                 home_after_s: float = HOME_AFTER_SECONDS):
         self.serial = serial or None
+        # The sidecar's one command (#513): go home after too long off the dock.
+        self.energy = EnergyReflex(home_after_s)
+        self._level: int | None = None   # battery level, from the last poll
+        self._frame: str | None = None   # odometry frame, from the last pose
+        self._command: threading.Thread | None = None
         self.body_seconds = body_seconds
         self.face_gap_seconds = face_gap_seconds
         self.battery_seconds = battery_seconds
@@ -446,7 +507,8 @@ class VectorSDK(Adapter):
                    float(env.get("VECTOR_FLAG_SECONDS", "0.1")),
                    float(env.get("VECTOR_DEBOUNCE_SECONDS", str(DEBOUNCE_SECONDS))),
                    float(env.get("VECTOR_STALE_SECONDS", str(STALE_SECONDS))),
-                   float(env.get("VECTOR_STALE_RETRY_MAX_SECONDS", str(STALE_RETRY_MAX_SECONDS))))
+                   float(env.get("VECTOR_STALE_RETRY_MAX_SECONDS", str(STALE_RETRY_MAX_SECONDS))),
+                   60 * float(env.get("VECTOR_HOME_AFTER_MINUTES", str(HOME_AFTER_SECONDS / 60))))
 
     # -- mapping (pure; called from SDK callbacks) ---------------------------
     def on_wake_word(self, emit: Emit, msg=None) -> None:
@@ -507,6 +569,7 @@ class VectorSDK(Adapter):
             raise StaleStream(f"no new state for {frozen:.0f} s")
         pose = pose_values(robot)
         if pose:
+            self._frame = pose.get("pose_frame")
             emit(Item("body", values=pose))
         for group, values in groups.items():
             modality, unit = GROUPS[group]
@@ -543,11 +606,32 @@ class VectorSDK(Adapter):
             if self._stale_battery is not None and seen != self._stale_battery:
                 self.wake = True
             self._stale_battery = seen
+        if _number(health.get("battery_level")):
+            self._level = int(health["battery_level"])
         if isinstance(health.get("on_charger_platform"), bool):
             self._on_charger = health["on_charger_platform"]
             self._battery_at = time.monotonic() if now is None else now
         if health:
             emit(Item("health", values=health))
+
+    def on_energy(self, emit: Emit, robot, now: float | None = None) -> str | None:
+        """After a battery poll: feed the energy reflex, and start its command if it gives one (#513).
+
+        Only the battery poll's charger flag counts (a live request, #498). No
+        command while Vector is held or falling (the episode tracker's state), or while one is
+        still running. Returns the command started, if any.
+        """
+        if self._battery_at is None:
+            return None
+        on = self.episodes.on  # the current state, including one already on at connect
+        blocked = bool(on.get("held") or on.get("falling"))
+        command = self.energy.poll(emit, self._on_charger, self._level, blocked, self._frame,
+                                   time.monotonic() if now is None else now)
+        if command:
+            self._command = threading.Thread(target=run_command, args=(self.energy, emit, robot, command),
+                                             name=f"vector-{command}", daemon=True)
+            self._command.start()
+        return command
 
     def resting(self, now: float | None = None) -> bool:
         """Docked: on the charger platform, per the last battery reading (False before the first).
@@ -567,6 +651,7 @@ class VectorSDK(Adapter):
         if self._stale_at is not None:
             return
         self._stale_at = time.time()
+        self.energy.stream_stale()
         self._stale_battery = None
         self._on_charger = False
         logging.warning("vector_sdk: no new state for %.0f s; reconnecting", frozen_s)
@@ -638,7 +723,8 @@ class VectorSDK(Adapter):
         from anki_vector.events import Events
         from anki_vector.user_intent import UserIntent
 
-        # behavior_control_level=None: watch only, never take control from Vector.
+        # behavior_control_level=None: watch only. The energy reflex (#513) takes
+        # control briefly, by request, and always gives it back.
         with anki_vector.Robot(self.serial, behavior_control_level=None, enable_face_detection=True) as robot:
             robot.events.subscribe(lambda r, event_type, event: self.on_wake_word(emit), Events.wake_word)
 
@@ -675,6 +761,7 @@ class VectorSDK(Adapter):
                         self.on_battery(emit, robot.get_battery_state())
                     except Exception as exc:  # noqa: BLE001
                         logging.info("vector_sdk: battery read failed: %s", exc)
+                    self.on_energy(emit, robot)
                     if self.wake:
                         raise StaleStream("battery state changed while the stream was stale")
                 self._stop.wait(self.flag_seconds)

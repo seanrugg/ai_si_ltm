@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
 
-RECORD_TYPES = ("perception", "event", "communication")
+RECORD_TYPES = ("perception", "event", "communication", "action")  # action: a command the sidecar ran (#513)
 KINDS = ("record", "body", "sample", "health", "flicker")
 
 
@@ -24,6 +24,8 @@ class Item:
       name to such a key (``{"start": "ep:held:3"}``), and the sidecar turns it
       into ``"<agent>:<seq>"`` when it signs. A key it hasn't signed is dropped.
       ``at`` (epoch seconds) is when it happened, if not when it was emitted.
+      ``outcome`` (an ``action`` only): the contract's outcome, e.g. ``success``
+      or ``failed``.
     - ``body``: flat ``{name: value}``; pose values (``pose_*``) become the
       sensed pose record (#407), the rest a sensed ``body`` group.
     - ``sample``: one reading of one sensor group (``sensor`` names it:
@@ -50,6 +52,7 @@ class Item:
     key: str | None = None
     refs: dict[str, str] | None = None
     at: float | None = None
+    outcome: str | None = None
 
     def __post_init__(self):
         if self.kind == "record":
