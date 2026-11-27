@@ -11,6 +11,9 @@ uses. This module is what such a host needs:
   brain (any of ``ltms_mind.brains``), never raising into the host.
 - ``embedded_config``: a ``MindConfig`` from the host's settings, with the
   mind's state kept beside the host's.
+- ``ThreadedMind`` and ``HostQueue``: for hosts that may only sign from their
+  own main thread (the member process, the robot sidecar): the mind thinks on
+  its own thread, and the host's loop signs its records (``pump``).
 
 A host gives it four things: its client (reads), a function that signs into its
 chain, its chain head, and the lock it holds while signing.
@@ -134,3 +137,124 @@ class EmbeddedMind:
         except Exception:  # the mind must never stop its host
             log.exception("%s wake failed", self.label)
             return None
+
+
+class HostQueue:
+    """Signs on the host's own thread (#519).
+
+    Some hosts (the member process, the robot sidecar) may only touch their chain
+    from their main thread, and a model call can take minutes, so the mind runs
+    on its own thread. Its writes go into this queue (``sign`` blocks until
+    signed), and the host's loop calls ``pump(link)`` on every pass to sign them
+    into its own chain. ``head`` is the chain head as of the last pump.
+    """
+
+    def __init__(self, timeout: float = 120.0) -> None:
+        import queue
+        self._q: queue.Queue = queue.Queue()
+        self.timeout = timeout
+        from ltms_contract import GENESIS_HASH
+        self.head: dict = {"seq": 0, "hash": GENESIS_HASH}  # until the first pump
+
+    def sign(self, type: str, **kw) -> dict:
+        from concurrent.futures import Future
+
+        fut: Future = Future()
+        self._q.put((type, kw, fut))
+        return fut.result(timeout=self.timeout)  # TimeoutError if the host stopped pumping
+
+    def pump(self, link) -> int:
+        """On the host's thread: sign everything queued. Returns how many were signed."""
+        import queue
+        n = 0
+        self.head = link.head
+        while True:
+            try:
+                type, kw, fut = self._q.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                fut.set_result(link.append(type, **kw))
+                n += 1
+            except Exception as exc:  # noqa: BLE001 - handed back to the mind's thread
+                fut.set_exception(exc)
+        self.head = link.head
+        return n
+
+
+class ThreadedMind:
+    """A member's mind on its own thread, signing through the host's loop (#519).
+
+    - ``brain`` thinks when the mind dreams; ``awake_brain`` (default: the same)
+      is used for awake wakes. A robot passes ``NoBrain()`` here, so its model is
+      only used while it dreams.
+    - ``dream_when()``, if given, decides each wake whether to dream (a robot:
+      "on the charger"); otherwise ``MIND_DREAM`` does.
+    - The host calls ``pump(link)`` from its own loop, ``start()`` once, ``stop()``
+      when it ends.
+    """
+
+    def __init__(self, cfg, every: float, client, *, brain=None, awake_brain=None,
+                 dream_when: Callable[[], bool] | None = None, embedder=None,
+                 clock: Callable[[], float] | None = None, poll_seconds: float = 5.0) -> None:
+        import time
+        from dataclasses import replace
+
+        from ltms_mind.config import DreamCondition
+
+        self.queue = HostQueue()
+        self.clock = clock or time.monotonic
+        self.poll_seconds = poll_seconds
+        self.dream_when = dream_when
+        self._replace, self._Dream = replace, DreamCondition
+        self.mind = EmbeddedMind(cfg, every, client, self.queue.sign, lambda: self.queue.head,
+                                 _NoLock(), self.clock(), brain=brain, embedder=embedder)
+        self.dream_brain = self.mind.brain
+        self.awake_brain = awake_brain if awake_brain is not None else self.dream_brain
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def pump(self, link) -> int:
+        return self.queue.pump(link)
+
+    def tick(self, now: float) -> dict | None:
+        """One check: wake if due, choosing dream or awake (and the brain) for this wake."""
+        if not self.mind.due(now):
+            return None
+        dreaming = None
+        if self.dream_when is not None:
+            try:
+                dreaming = bool(self.dream_when())
+            except Exception:  # noqa: BLE001 - unknown: don't dream
+                dreaming = False
+        base = self.mind.cfg
+        if dreaming is not None:
+            self.mind.cfg = self._replace(base, dream=self._Dream("always" if dreaming else "never"))
+        # Without dream_when the loop decides from MIND_DREAM, so the dreaming brain serves both.
+        self.mind.brain = self.awake_brain if dreaming is False else self.dream_brain
+        try:
+            return self.mind.tick(now)
+        finally:
+            self.mind.cfg = base
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, name="ltms-mind", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            self.tick(self.clock())
+            self._stop.wait(self.poll_seconds)
+
+
+class _NoLock:
+    """The host's loop signs one item at a time; nothing else to lock."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        return False
