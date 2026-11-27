@@ -157,6 +157,17 @@ counted under its reason in the cycle record (`gated`).
 
 A brain error drops that task only (`brain_errors`).
 
+**Why, not just how many (#526).** The cycle record also lists up to 10
+rejections per wake in `rejected`; beyond that, `rejected_more` counts the rest.
+```json
+{"task": {"category": "reflect", "key": "q3-u3:58"}, "kind": "question",
+ "reason": "bad_proposal", "detail": "a question needs peers: who it is put to"}
+```
+`reason` is a gate code above, or `brain_error` when the brain call itself failed
+(e.g. `"ValueError: no JSON object in the reply"`). `detail` is at most 200
+characters. The model's own text is never put on the chain; the log line
+`gated … on <task>` has the rationale.
+
 The loop **binds** each proposal to its task, whatever the brain said: an
 answer's `refs.answers`, a review's `refs.reviews` and a check's `refs.checks`
 are set to the task's record; a reflect lesson, question or prediction cites the

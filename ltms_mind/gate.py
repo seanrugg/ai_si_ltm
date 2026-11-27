@@ -10,7 +10,8 @@
    recent records, or of something already accepted this wake.
 5. **budget**: the daily write cap (checked by the loop with ``Budget``).
 
-Each rejection has a reason code, counted in the cycle event.
+Each rejection has a reason code, counted in the cycle event, and a ``detail``
+saying what failed (``Gate.detail`` after ``check``), listed there too (#526).
 """
 from __future__ import annotations
 
@@ -153,21 +154,30 @@ def ref_error(refs) -> str | None:
 class Gate:
     def __init__(self, embedder, threshold: float, corpus: list[str]) -> None:
         self.embedder, self.threshold = embedder, threshold
+        self.detail: str | None = None  # what the last check() refused, in words (#526)
         texts = [t for t in corpus if t]
         self._vecs = embedder.embed(texts) if texts else []
 
     def check(self, p: Proposal) -> str | None:
-        """None if it passes (and remembers it for novelty); otherwise the reason code."""
+        """None if it passes (and remembers it for novelty); otherwise the reason code,
+        with what failed in ``self.detail``."""
+        reason, self.detail = self._check(p)
+        return reason
+
+    def _check(self, p: Proposal) -> tuple[str | None, str | None]:
         if p.kind not in KINDS:
-            return NO_PURPOSE
-        if shape_error(p):
-            return BAD_PROPOSAL
-        if ref_error(p.refs):
-            return BAD_REF
+            return NO_PURPOSE, f"unknown kind {str(p.kind)[:40]!r}"
+        err = shape_error(p)
+        if err:
+            return BAD_PROPOSAL, err
+        err = ref_error(p.refs)
+        if err:
+            return BAD_REF, err
         if p.kind != "question" and not (p.refs or p.sources):
-            return NO_EVIDENCE
+            return NO_EVIDENCE, "no refs or sources"
         vec = self.embedder.embed([p.summary])[0]
-        if any(self.embedder.cosine(vec, v) >= self.threshold for v in self._vecs):
-            return DUPLICATE
+        best = max((self.embedder.cosine(vec, v) for v in self._vecs), default=0.0)
+        if best >= self.threshold:
+            return DUPLICATE, f"near-copy of a recent record (similarity {best:.2f} >= {self.threshold})"
         self._vecs.append(vec)
-        return None
+        return None, None

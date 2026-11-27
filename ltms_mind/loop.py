@@ -43,6 +43,8 @@ from ltms_mind.directives import CLOSED_REPORTS, MindDirectives
 log = logging.getLogger("ltms_mind")
 
 CYCLE_TAG = "mind_cycle"
+REJECTED_MAX = 10  # rejections listed per wake in the cycle event (#526)
+BRAIN_ERROR = "brain_error"  # a ``rejected`` reason: the brain call itself failed
 MIND_TAG = "mind"
 # The ref a task's own subject must carry, by task kind: the brain can't point elsewhere.
 TASK_REF = {"answer": "answers", "review": "reviews", "check": "checks"}
@@ -313,6 +315,18 @@ class Mind:
                 p.peers = [issuer] if issuer else []
         return p
 
+    @staticmethod
+    def _reject(counts: dict, task: Task, kind, reason: str, detail: str | None) -> None:
+        """List why a proposal (or a brain call) went nowhere: at most REJECTED_MAX per wake,
+        the rest counted in ``rejected_more`` (#526). No model output goes on the chain."""
+        listed = counts.setdefault("rejected", [])
+        if len(listed) < REJECTED_MAX:
+            listed.append({"task": {"category": task.category, "key": task.key},
+                           "kind": str(kind)[:40] if kind is not None else None,
+                           "reason": reason, "detail": (detail or "")[:200]})
+        else:
+            counts["rejected_more"] = counts.get("rejected_more", 0) + 1
+
     def _run_tasks(self, tasks: list[Task], ctx: Context, gate: gate_mod.Gate, budget: Budget,
                    counts: dict, cycle: MindDream | None) -> None:
         gated = counts.setdefault("gated", {})
@@ -337,19 +351,23 @@ class Mind:
                 log.warning("brain failed on %s: %s", task.key, exc)
                 budget.charge(getattr(self.brain, "last_tokens", 0))
                 counts["brain_errors"] = counts.get("brain_errors", 0) + 1
+                self._reject(counts, task, None, BRAIN_ERROR, f"{type(exc).__name__}: {exc}")
                 continue
             budget.charge(getattr(self.brain, "last_tokens", 0))
             for p in proposals:
                 counts["considered"] = counts.get("considered", 0) + 1
                 if not isinstance(p, Proposal):
                     gated[gate_mod.BAD_PROPOSAL] = gated.get(gate_mod.BAD_PROPOSAL, 0) + 1
+                    self._reject(counts, task, None, gate_mod.BAD_PROPOSAL, f"not a proposal: {type(p).__name__}")
                     continue
                 reason = gate.check(self._bind(task, p))
+                detail = gate.detail
                 if reason is None and not budget.can_write():
-                    reason = gate_mod.OVER_BUDGET
+                    reason, detail = gate_mod.OVER_BUDGET, "today's write cap is reached"
                 if reason:
                     gated[reason] = gated.get(reason, 0) + 1
-                    log.info("gated %s (%s): %s", p.kind, reason, p.rationale[:200])
+                    self._reject(counts, task, p.kind, reason, detail)
+                    log.info("gated %s on %s (%s: %s): %s", p.kind, task.key, reason, detail, p.rationale[:200])
                     continue
                 self._write(task, p, cycle)
                 budget.wrote()
