@@ -59,6 +59,37 @@ def test_cognition_models_flow_into_the_spec_sheet(mesh, admin):
     assert m["value"] == [{"name": "qwen2.5:1.5b", "where": "offboard", "runtime": "escapepod"}]
 
 
+def test_a_report_keeps_the_sections_it_leaves_out(mesh, admin, db_exec):
+    """The sidecar's order: cognition writes the models at start, then the robot's
+    sheet (hardware, software, notes) arrives on connect. The models must survive."""
+    v = mesh.member("vector")
+    _put(v, {"location": "offboard", "models": [{"name": "qwen2.5:1.5b", "runs_on": "escapepod"}]},
+         "/api/members/me/cognition")
+    r = _put(v, {"hardware": {"board": "Anki/DDL Vector"}, "software": {"harness": "robot-sidecar"},
+                 "notes": "counts"})
+    assert r.status_code == 200, r.text
+    s = admin.get(f"/api/admin/members/{v.member_id}/specs").json()["specs"]
+    assert s["models"]["value"] == [{"name": "qwen2.5:1.5b", "where": "offboard", "runtime": "escapepod"}]
+    assert s["hardware"]["value"] == {"board": "Anki/DDL Vector"}
+    h = admin.get(f"/api/admin/members/{v.member_id}/specs/history").json()
+    assert all("models" not in e["sections"] for e in h["events"][:1])   # the sheet didn't touch models
+    _put(v, {"hardware": {"board": "Anki/DDL Vector"}, "software": {"harness": "robot-sidecar"},
+             "notes": "counts"})
+    assert admin.get(f"/api/admin/members/{v.member_id}/specs/history").json()["total"] == h["total"]  # no-op
+
+
+def test_a_section_sent_as_null_is_cleared_and_a_sent_section_replaced(mesh, admin):
+    hub = mesh.member("jetson-hub")
+    _put(hub, SHEET)
+    r = _put(hub, {"models": None, "hardware": {"board": "Jetson Orin Nano Super"}})
+    assert r.status_code == 200, r.text
+    s = r.json()["specs"]
+    assert s["models"]["value"] is None and s["models"]["source"] is None
+    assert s["hardware"]["value"] == {"board": "Jetson Orin Nano Super"}   # a sent section is replaced whole
+    assert s["software"]["value"]["harness"] == "ltms-harness" and s["notes"]["value"] == "bench unit"
+    assert _put(hub, {"hardware": {"board": None}}).status_code == 422     # null fields are admin-only
+
+
 def test_validation_and_auth(mesh, admin, http):
     hub = mesh.member("jetson-hub")
     for body, code in (({"gpu": {}}, 422), ({"hardware": {"color": "red"}}, 422),

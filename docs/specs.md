@@ -19,9 +19,13 @@ LTMSClient(server, key_path=...).report_specs({
 
 `PUT /api/members/me/specs` with the same body. Every field is optional;
 unknown keys are refused (422). Text is at most 64 characters (`ping_reason`: 200), lists at most 16
-items, and the whole sheet at most 8 KiB (413). A report replaces the previous
-one. An identical re-report changes nothing, so a harness can report on every
-start without filling the audit log.
+items, and the whole sheet at most 8 KiB (413).
+
+A report replaces **the sections it sends**. A section it leaves out keeps what
+was reported before, and a section sent as `null` (e.g. `{"models": null}`) is
+cleared. So a robot that reports its hardware on connect doesn't erase the
+models its cognition report wrote at start. An identical re-report changes
+nothing, so a harness can report on every start without filling the audit log.
 
 ### How it answers a ping (#384)
 
