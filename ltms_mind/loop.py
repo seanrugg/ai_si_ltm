@@ -288,12 +288,20 @@ class Mind:
         return self._append(rtype, payload=payload, **header)
 
     def _bind(self, task: Task, p: Proposal) -> Proposal:
-        """Tie a proposal to its task: the task's subject goes in the ref its kind needs,
-        and an answer goes to whoever asked."""
+        """Tie a proposal to its task: the task's subject goes in the ref its kind needs
+        (a reflect lesson, question or prediction cites it in ``refs.evidence``), and an
+        answer goes to whoever asked."""
         ref = TASK_REF.get(task.kind)
         expected = {"answer": "answer", "review": "review", "check": "prediction-check"}.get(task.kind)
         if ref and p.kind == expected:
             p.refs = {**(p.refs or {}), ref: task.key}
+        if task.kind == "reflect" and p.kind in ("lesson", "question", "prediction"):
+            # What it reflects on is its evidence (#525), whatever the brain wrote.
+            ev = (p.refs or {}).get("evidence")
+            ev = [x for x in (ev if isinstance(ev, list) else [ev]) if x is not None]
+            if task.key not in ev:
+                ev.insert(0, task.key)
+            p.refs = {**(p.refs or {}), "evidence": ev}
         if p.kind == "answer" and task.inputs.get("asker"):
             p.peers = [task.inputs["asker"]]
         if task.kind == "directive":

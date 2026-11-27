@@ -150,6 +150,7 @@ counted under its reason in the cycle record (`gated`).
 |---|---|
 | A known kind (below). A summary alone has no kind | `no_purpose` |
 | The fields its kind needs; summary 1–500 characters; at most 16 sources | `bad_proposal` |
+| Every `refs` value is a record key, `<agent>:<seq>` (or a list of them) | `bad_ref` |
 | Cites evidence: `refs` to records or dataset `sources`. Questions are exempt | `no_evidence` |
 | New: cosine below `MIND_NOVELTY` against my last `MIND_CORPUS` records, my swarm's recent ones, and this wake's | `duplicate` |
 | Within today's write cap | `over_budget` |
@@ -158,7 +159,8 @@ A brain error drops that task only (`brain_errors`).
 
 The loop **binds** each proposal to its task, whatever the brain said: an
 answer's `refs.answers`, a review's `refs.reviews` and a check's `refs.checks`
-are set to the task's record, and an answer goes to whoever asked.
+are set to the task's record; a reflect lesson, question or prediction cites the
+outcome it reflects on in `refs.evidence` (#525); and an answer goes to whoever asked.
 
 ## Record conventions (no contract change)
 

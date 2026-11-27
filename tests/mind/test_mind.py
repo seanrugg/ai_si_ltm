@@ -9,7 +9,7 @@ from ltms_contract import generate_key
 from ltms_mind import config
 from ltms_mind.agenda import family_of
 from ltms_mind.brains.none import NoBrain
-from ltms_mind.gate import DUPLICATE, NO_EVIDENCE, NO_PURPOSE, Gate, LexicalEmbedder
+from ltms_mind.gate import BAD_REF, DUPLICATE, NO_EVIDENCE, NO_PURPOSE, Gate, LexicalEmbedder
 from ltms_mind.loop import CYCLE_TAG, continue_chain
 from ltms_mind.brains.base import Proposal
 
@@ -104,7 +104,7 @@ def test_gate_drops_no_evidence_duplicate_and_pure_summary(server, make_mind):
         if task.category != "reflect":
             return []
         return [
-            {"kind": "lesson", "summary": "Ramps need a slower approach speed", "rationale": "no refs"},
+            {"kind": "lesson", "summary": "Ramps need a slower approach speed", "refs": {"agent": "seq"}},
             {"kind": "lesson", "summary": "Robots stall on ramps steeper than ten degrees!",
              "refs": {"about": task.key}},
             {"kind": "summary", "summary": "Today qwen-b got stuck.", "refs": {"about": task.key}},
@@ -115,10 +115,48 @@ def test_gate_drops_no_evidence_duplicate_and_pure_summary(server, make_mind):
     # the stuck event is already cited by claude-a's lesson, so add an uncited one to reflect on
     server.other(generate_key(), "asker", "action", at=ts(23), summary="Climb the ramp", outcome="failed")
     out = make_mind(brain=ScriptedBrain(script)).wake()
-    assert out["gated"] == {NO_EVIDENCE: 1, DUPLICATE: 1, NO_PURPOSE: 1}
+    assert out["gated"] == {BAD_REF: 1, DUPLICATE: 1, NO_PURPOSE: 1}
     lessons = [r for r in mine(server) if r["type"] == "lesson"]
-    assert len(lessons) == 1 and lessons[0]["refs"] == {"about": "asker:1"}
+    assert len(lessons) == 1 and lessons[0]["refs"] == {"about": "asker:1", "evidence": ["asker:1"]}
     assert lessons[0]["payload"]["model_family"] == "qwen" and "cycle" in lessons[0]["payload"]
+
+
+def test_reflect_proposals_cite_their_task_whatever_the_brain_wrote(server, make_mind):
+    """#525: v3-c7r:71829 (on q3-u3:58) was a reflect lesson with refs {"agent": "seq"} and no citation."""
+    server.swarm = SWARM
+    server.other(generate_key(), "asker", "action", at=ts(23), summary="show_icon", outcome="failed")
+    seen = []
+
+    def script(task):
+        if task.category != "reflect":
+            return []
+        seen.append(task.key)
+        return [
+            {"kind": "lesson", "summary": "show_icon only takes blank, check, question, heart or dot"},
+            {"kind": "question", "summary": "Which icon did the caller ask for?", "peers": ["asker"],
+             "refs": {"evidence": ["v3-c7r:5"]}},
+            {"kind": "prediction", "summary": "show_icon fails again within a week unless validated",
+             "payload": {"claim": "fails again", "measure": "failed show_icon outcomes",
+                         "check_after": "2026-12-04T00:00:00Z"}, "refs": {"evidence": "asker:1"}},
+        ]
+
+    out = make_mind(brain=ScriptedBrain(script)).wake()
+    assert seen == ["asker:1"] and out["gated"] == {}
+    by_kind = {("question" if "question" in (r.get("tags") or []) else r["type"]): r for r in mine(server)
+               if "mind" in (r.get("tags") or [])}
+    assert by_kind["lesson"]["refs"] == {"evidence": ["asker:1"]}
+    assert by_kind["question"]["refs"] == {"evidence": ["asker:1", "v3-c7r:5"]}   # the task's key first, theirs kept
+    assert next(r for r in mine(server) if (r.get("payload") or {}).get("claim"))["refs"] == {"evidence": ["asker:1"]}
+
+
+def test_gate_refuses_refs_that_are_not_record_keys():
+    g = Gate(LexicalEmbedder(), 0.92, [])
+    for refs in ({"agent": "seq"}, {"evidence": ["<agent>:<seq>"]}, {"evidence": []}, {"about": "q3-u3:0"},
+                 {"about": "Q3-U3:5"}, {"about": 58}, {"about": ["q3-u3:58", None]}, ["q3-u3:58"]):
+        assert g.check(Proposal("lesson", "A lesson about icons", refs=refs)) == BAD_REF, refs
+    assert g.check(Proposal("question", "Which icon?", peers=["q3-u3"], refs={"agent": "seq"})) == BAD_REF
+    assert g.check(Proposal("lesson", "Icons must be one of five", refs={"evidence": ["q3-u3:58", "v3-c7r.a_b-1:7"]})) is None
+    assert g.check(Proposal("lesson", "Icons must be one of five kinds")) == NO_EVIDENCE   # no refs at all
 
 
 def test_gate_unit_rules():
