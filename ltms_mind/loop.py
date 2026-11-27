@@ -405,14 +405,19 @@ class Mind:
             counts["mode"] = "dreaming"
             with MindDream(self.client, counts) as cycle:
                 self._run_tasks(tasks, ctx, gate, budget, counts, cycle)
-                counts["budget"] = budget.used()
+                self._note_budget(counts, budget)
             self._note_dream(now)
         else:
             self._run_tasks(tasks, ctx, gate, budget, counts, None)
-            counts["budget"] = budget.used()
+            self._note_budget(counts, budget)
             self._cycle_event(counts)
         self.state["writes"] = {now.astimezone().date().isoformat(): budget.written_today}
         return self._finish(now, counts)
+
+    def _note_budget(self, counts: dict, budget: Budget) -> None:
+        counts["budget"] = budget.used()
+        if getattr(self.brain, "tokens_estimated", False):
+            counts["tokens_estimated"] = True  # the model server gave no usage (#340)
 
     def _cycle_event(self, counts: dict) -> None:
         mode = "paused" if counts.get("paused") else counts["mode"]

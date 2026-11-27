@@ -8,7 +8,7 @@ member; only the **brain** differs.
 | Brain | What it is | Status |
 |---|---|---|
 | `none` | No model. Duties and rule-based checks only; never dreams | built (#339) |
-| `ollama` | A local model | #340 |
+| `local` | Any model the member already runs, through an OpenAI-compatible server (Ollama, `llama-server`, …); `ollama` is an alias | built (#340) |
 | `claude-code` | `claude -p`, headless, no tools | built (#341) |
 
 **Safety lives in the loop's code, not in the model's good behaviour.** The
@@ -40,7 +40,7 @@ that already signs for the key, as the hub does (below).
 | `LTMS_SERVER` | (required) | e.g. `https://ltms.example.org` |
 | `LTMS_KEY_PATH` | (required) | the member's key file |
 | `MIND_STATE_PATH` | `<key file without .json>.mind.json` | the mind's state; the outbox (`.outbox`), introduction (`.introduced`) and generation (`.generation`) files sit beside it |
-| `MIND_BRAIN` | `none` | `none` or `claude-code` (`ollama` comes with #340) |
+| `MIND_BRAIN` | `none` | `none`, `local` (alias `ollama`) or `claude-code` |
 | `MIND_MODEL_FAMILY` | (none; `claude` for `claude-code`) | my model family, e.g. `qwen`, `claude`. Without it, the verify task is off |
 | `MIND_DREAM` | `never` | when deep tasks run: `never`, `always`, `window HH:MM-HH:MM` (local time), `idle N` (minutes) |
 | `MIND_DAY_DREAMS` | `1` | with `window`: dreams allowed per day outside the window |
@@ -193,6 +193,50 @@ matching records between the prediction's own `ts` and its `check_after` (at mos
 `MIND_CORPUS`, the server's recall limit) and compares with `op`
 (`<`, `<=`, `>`, `>=`, `==`, `!=`). Any measure that isn't in this shape needs a
 brain, so it's only checked while dreaming.
+
+## The local brain (#340)
+
+Any AI model already in the fleet can be a member's brain: the mind sends its
+tasks to the model that member already uses, on the same machine, through the
+OpenAI-compatible chat API (`POST <url>/chat/completions`). That covers Ollama,
+llama.cpp's `llama-server`, vLLM and other compatible servers.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `MIND_LOCAL_URL` | (required) | the server's base URL, ending `/v1`, e.g. `http://127.0.0.1:11434/v1` for Ollama |
+| `MIND_LOCAL_MODEL` | (required) | the model name the server knows it by |
+| `MIND_LOCAL_TIMEOUT` | `2m` | per call |
+| `MIND_LOCAL_MAX_TOKENS` | `1024` | longest reply |
+| `MIND_LOCAL_API_KEY` | (none) | sent as a bearer token only if set; never logged |
+
+It uses the same prompt templates as the Claude Code brain and asks for JSON
+(`response_format: json_object`; a server that rejects that field is asked once
+more without it, and from then on). A `<think>` block and chatter around the
+JSON are ignored; an unusable reply gets one retry, then the task is dropped
+(`brain_errors`). Tokens charged are the server's `usage`; without it they're
+estimated and the cycle record says `tokens_estimated: true`. The brain has no
+tools: it only reasons.
+
+**A device's model is shared** (with a voice assistant, an agent, other minds),
+so a mind sends one request at a time, and deep tasks run when it dreams: set
+`MIND_DREAM` to a quiet time (`idle 30` means charging or idle for robots).
+
+## A mind inside an existing member (#340)
+
+A member's mind runs **inside the process that already holds its key** (one
+writer per key), not as a new member or a second process: the hub, the robot
+sidecar, the member process, a Hermes plugin. `ltms_mind/embed.py` is what a host
+needs:
+
+- `EmbeddedMind(cfg, every, client, sign, head, lock, now)`: `tick(now)` wakes
+  the mind when due, with the member's brain, and never raises into the host;
+- `LinkedClient`: reads through the host's client, signs through the host's
+  chain;
+- `embedded_config(env, state_dir, …)`: a `MindConfig` from the host's settings,
+  with the mind's state beside the host's.
+
+The hub (#344, below) is the first host; Vector's sidecar (#519), the Ventuno Q's
+App Lab member (#520) and Hermes (#521) follow.
 
 ## The Claude Code brain (#341)
 

@@ -124,6 +124,12 @@ class MindConfig:
     claude_model: str | None = None
     claude_timeout: float = 180.0
     claude_max_usd: float | None = None
+    # The local brain (#340): any OpenAI-compatible model server
+    local_url: str | None = None
+    local_model: str | None = None
+    local_timeout: float = 120.0
+    local_max_tokens: int = 1024
+    local_api_key: str | None = field(default=None, repr=False)
 
     @property
     def outbox_path(self) -> str:
@@ -170,6 +176,8 @@ def load(env: dict | None = None) -> MindConfig:
         raise ConfigError("LTMS_KEY_PATH is required: the member's key file")
     state = e.get("MIND_STATE_PATH", "").strip() or os.path.splitext(key_path)[0] + ".mind.json"
     brain = e.get("MIND_BRAIN", "none").strip().lower() or "none"
+    if brain == "ollama":  # the local brain covers Ollama (#340)
+        brain = "local"
     family = e.get("MIND_MODEL_FAMILY", "").strip().lower() or ("claude" if brain == "claude-code" else None)
     max_usd = e.get("MIND_CLAUDE_MAX_USD", "").strip()
     try:
@@ -199,6 +207,11 @@ def load(env: dict | None = None) -> MindConfig:
             claude_model=e.get("MIND_CLAUDE_MODEL", "").strip() or None,
             claude_timeout=parse_duration(e.get("MIND_CLAUDE_TIMEOUT", "180") or "180"),
             claude_max_usd=float(max_usd) if max_usd else None,
+            local_url=e.get("MIND_LOCAL_URL", "").strip() or None,
+            local_model=e.get("MIND_LOCAL_MODEL", "").strip() or None,
+            local_timeout=parse_duration(e.get("MIND_LOCAL_TIMEOUT", "2m") or "2m"),
+            local_max_tokens=max(64, int(e.get("MIND_LOCAL_MAX_TOKENS", "1024") or 1024)),
+            local_api_key=e.get("MIND_LOCAL_API_KEY", "").strip() or None,
         )
     except ValueError as exc:
         if isinstance(exc, ConfigError):
