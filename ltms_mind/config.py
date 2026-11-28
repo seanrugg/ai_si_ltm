@@ -6,6 +6,7 @@ See ``docs/mind.md`` for the full list.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 
 # Agenda categories, in their fixed order (the epic, #338). The weight of each is
@@ -166,6 +167,36 @@ def read_env_file(path: str) -> dict:
     return out
 
 
+# Model families by name prefix (#521). Longer names first, so "codellama" isn't "llama".
+FAMILIES = (
+    ("codellama", "llama"), ("llama", "llama"), ("qwen", "qwen"), ("qwq", "qwen"), ("gemma", "gemma"),
+    ("mixtral", "mistral"), ("mistral", "mistral"), ("ministral", "mistral"), ("devstral", "mistral"),
+    ("codestral", "mistral"), ("magistral", "mistral"), ("phi", "phi"), ("glm", "glm"),
+    ("nemotron", "nemotron"), ("deepseek", "deepseek"), ("granite", "granite"), ("olmo", "olmo"),
+    ("command-r", "cohere"), ("aya", "cohere"), ("gpt-oss", "gpt-oss"), ("kimi", "kimi"),
+    ("minimax", "minimax"), ("smollm", "smollm"),
+)
+# Not listed: fine-tunes named for their tuner ("hermes3", "dolphin"), whose family is the
+# base model's. Those resolve from the base name if it appears ("dolphin-llama3"), else None.
+
+
+def family_of(model: str | None) -> str | None:
+    """A model's family from its name, for cross-family review: ``gemma4:31b`` -> ``gemma``,
+    ``hf.co/unsloth/Qwen3-8B-GGUF:Q4_K_M`` -> ``qwen``. None if it isn't recognised;
+    set ``MIND_MODEL_FAMILY`` then."""
+    if not model:
+        return None
+    base = str(model).strip().lower().split(":")[0].rsplit("/", 1)[-1]
+    for prefix, family in FAMILIES:
+        if base.startswith(prefix):
+            return family
+    words = [w for w in re.split(r"[-_.\s]+", base) if w]
+    for prefix, family in FAMILIES:  # e.g. "dolphin-llama3": the base family is a later word
+        if any(w.startswith(prefix) for w in words[1:]):
+            return family
+    return None
+
+
 def load(env: dict | None = None) -> MindConfig:
     e = dict(os.environ if env is None else env)
     server = e.get("LTMS_SERVER", "").strip()
@@ -178,7 +209,9 @@ def load(env: dict | None = None) -> MindConfig:
     brain = e.get("MIND_BRAIN", "none").strip().lower() or "none"
     if brain == "ollama":  # the local brain covers Ollama (#340)
         brain = "local"
-    family = e.get("MIND_MODEL_FAMILY", "").strip().lower() or ("claude" if brain == "claude-code" else None)
+    family = (e.get("MIND_MODEL_FAMILY", "").strip().lower()
+              or ("claude" if brain == "claude-code" else None)
+              or (family_of(e.get("MIND_LOCAL_MODEL")) if brain == "local" else None))
     max_usd = e.get("MIND_CLAUDE_MAX_USD", "").strip()
     try:
         return MindConfig(

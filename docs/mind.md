@@ -256,9 +256,70 @@ whether to dream (`dream_when`, e.g. "on the charger") and use a different brain
 awake (`awake_brain`, e.g. `NoBrain()`), so a robot's shared model is only
 used while it rests.
 
-Hosts so far: the hub (#344, below; no brain) and Vector's robot sidecar (#519;
-see `examples/robot-sidecar/README.md`). The Ventuno Q's App Lab member (#520)
-and Hermes (#521) follow.
+Hosts so far: the hub (#344, below; no brain), Vector's robot sidecar (#519;
+see `examples/robot-sidecar/README.md`) and a device member such as the Mac
+Studio (#521, below). The Ventuno Q's App Lab member (#520) follows.
+
+**The model family** comes from the model's name when `MIND_MODEL_FAMILY` isn't
+set: `gemma4:31b` → `gemma`, `qwen2.5:1.5b` → `qwen`, `hf.co/…/Qwen3-8B-GGUF` →
+`qwen`. Fine-tunes named after their tuner (`hermes3`, `dolphin3`) aren't
+guessed: set `MIND_MODEL_FAMILY` to the base model's family.
+
+## A device member (#521)
+
+**The device is the member, not the harness.** A device that runs its own
+models (the Mac Studio) is one member with one key, held by one process,
+`python -m ltms_mind.member`. That's the member process (`ltms-member`) plus:
+
+- **its mind** (`MEMBER_MIND_SECONDS`, off unless set), thinking with the
+  device's model server (`MIND_BRAIN=local`, e.g. Ollama with `gemma4:31b`). On
+  start the spec sheet lists that model, so the roster shows the family;
+- **the handoff** (`MEMBER_HANDOFF_PATH`, `cli_agent/handoff.py`). The harnesses
+  on the device (Hermes, coding agents Hermes drives) **submit** records to a
+  local SQLite queue; this process **signs** them into the device's one chain.
+  A harness never holds the key, so the chain has one writer. `submit` checks the
+  record against the contract at once. A record that still can't be signed is
+  moved to `refused` with the reason and never blocks the queue. A crash between
+  signing and removing re-signs a record on restart: a duplicate, never a loss.
+  Whoever can write the queue file records as the device, so it lives in the
+  device's `0700` folder and is created `0600`.
+
+```python
+from cli_agent.handoff import Handoff
+Handoff("/Users/YOU/.ltms/device/handoff.db").submit(
+    "action", summary="ran pytest in ai_si_ltm", outcome="success",
+    payload={"model": "gemma4:31b"}, tags=["hermes", "tool"], source="hermes",
+    ts="2026-11-28T01:00:00Z")   # when it happened
+```
+
+### Setting it up (the Mac Studio, a launchd agent)
+
+1. **The member's key**, generated on the device and kept there:
+   ```bash
+   mkdir -p ~/.ltms/device && chmod 700 ~/.ltms/device
+   python -m cli_agent genkey --name <member> --out ~/.ltms/device/<member>.key.json
+   chmod 600 ~/.ltms/device/<member>.key.json
+   python -m cli_agent enroll --key ~/.ltms/device/<member>.key.json \
+       --server https://ltms.example.org --kind agent --permissions contribute,recall \
+       --swarm <your-swarm> --operator <you>
+   ```
+2. **Approve it** in the dashboard and add it to its swarm.
+3. **Settings:** copy `deploy/device-member/device.env.example` to
+   `~/.ltms/device/device.env` (mode `0600`) and fill it in. Check the model
+   name against `curl -s http://127.0.0.1:11434/v1/models`.
+4. **First run, by hand**, from that folder:
+   `set -a; . ./device.env; set +a; python -m ltms_mind.member`. Within a minute:
+   the spec sheet (hardware and the model) and an introduction. The first
+   `mind_cycle` comes at the first wake. Stop it with Ctrl-C.
+5. **Always on:** edit the `/Users/YOU` paths in
+   `deploy/device-member/com.ltms.member.plist`, copy it to
+   `~/Library/LaunchAgents/` and
+   `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.ltms.member.plist`.
+   Logs go to `~/Library/Logs/ltms-member.log`.
+
+Changing the model is a one-line edit to `MIND_LOCAL_MODEL`, then
+`launchctl kickstart -k gui/$(id -u)/com.ltms.member`. The spec sheet and every
+record the mind writes then show the new model and family.
 
 ## The Claude Code brain (#341)
 

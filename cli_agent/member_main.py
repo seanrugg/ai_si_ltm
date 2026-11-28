@@ -51,6 +51,7 @@ class MemberConfig:
     ping_poll_seconds: float = 30.0    # PING_POLL_SECONDS: with LTMS_SERVER, check for admin pings (#356)
     intro_reply: str = "reply"         # INTRO_REPLY: reply | off, to other members' introductions (#334)
     intro_check_seconds: float = 3600.0  # INTRO_CHECK_SECONDS: how often to look for a new swarm or role
+    handoff_path: str | None = None    # MEMBER_HANDOFF_PATH: harnesses on this device record through it (#521)
 
 
 def load_config(env: Mapping[str, str]) -> MemberConfig:
@@ -126,6 +127,7 @@ def load_config(env: Mapping[str, str]) -> MemberConfig:
         intro_check_seconds=timers["INTRO_CHECK_SECONDS"],
         resend_seconds=timers["RESEND_SECONDS"],
         ping_poll_seconds=timers["PING_POLL_SECONDS"],
+        handoff_path=(env.get("MEMBER_HANDOFF_PATH") or "").strip() or None,
     )
 
 
@@ -327,6 +329,7 @@ class MemberNode:
         self.started = False
         self.connected = False
         self.link = None
+        self.handoff = None
         self._submits: "queue.Queue" = queue.Queue()
 
     # ------------------------------------------------------------------ start
@@ -346,6 +349,10 @@ class MemberNode:
         self.prefix = prefix
         logging.info("Member: %s, transport %s, topic prefix %s (from %s)", name, cfg.transport, prefix or "-", source)
         self.outbox = Outbox(cfg.outbox_path)
+        if cfg.handoff_path:
+            from cli_agent.handoff import Handoff
+            self.handoff = Handoff(cfg.handoff_path)
+            logging.info("Member: signing records handed off by this device's harnesses (%s)", cfg.handoff_path)
         if cfg.transport == "auto" and ltms is None:
             logging.info("Member: no LTMS_SERVER, so no direct fallback; MQTT only")
         now = self.clock()
@@ -468,6 +475,16 @@ class MemberNode:
             except Exception as exc:  # noqa: BLE001 - handed back to the caller
                 fut.set_exception(exc)
 
+    def _pump_handoff(self) -> None:
+        if self.handoff is None:
+            return
+        try:
+            n = self.handoff.pump(self.link)
+            if n:
+                logging.info("Member: signed %d handed-off record(s)", n)
+        except Exception:  # noqa: BLE001 - a harness's queue must not stop the member
+            logging.exception("Member: handoff failed")
+
     def step(self) -> None:
         """One pass of the member loop. Non-blocking; main thread only."""
         if not self.started:
@@ -477,6 +494,7 @@ class MemberNode:
         drain_messages(self.messages, self.name, self.prefix, self._on_swarm_message)
         drain_directives(self.fleet_msgs, self.directives)
         self._run_submits()
+        self._pump_handoff()
         if self.resend_wanted.is_set():
             self.resend_wanted.clear()
             link.resend_pending()
@@ -542,6 +560,7 @@ class MemberNode:
         self.started = False
         try:
             self._run_submits()
+            self._pump_handoff()
             if self.direct is not None and self.transport.choose(self.clock()) == "direct":
                 try:
                     self.direct.flush()
@@ -561,6 +580,8 @@ class MemberNode:
                 except Exception:  # noqa: BLE001
                     pass
                 self.mqtt.loop_stop()
+            if self.handoff is not None:
+                self.handoff.close()
             self.outbox.close()
 
 
