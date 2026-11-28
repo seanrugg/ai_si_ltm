@@ -22,5 +22,7 @@ def make(name: str, cfg=None) -> Brain:
         if cfg is None:
             raise ValueError("the local brain needs settings: MIND_LOCAL_URL and MIND_LOCAL_MODEL")
         return LocalBrain(url=cfg.local_url or "", model=cfg.local_model or "", timeout=cfg.local_timeout,
-                          max_tokens=cfg.local_max_tokens, api_key=cfg.local_api_key)
+                          max_tokens=cfg.local_max_tokens, api_key=cfg.local_api_key,
+                          api=cfg.local_api, context=cfg.local_context,
+                          probe=True)
     raise ValueError(f"unknown MIND_BRAIN {name!r}: built in: {', '.join(BUILT)}")

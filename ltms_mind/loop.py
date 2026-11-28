@@ -484,6 +484,10 @@ class Mind:
         counts["budget"] = budget.used()
         if getattr(self.brain, "tokens_estimated", False):
             counts["tokens_estimated"] = True  # the model server gave no usage (#340)
+        take = getattr(self.brain, "take_usage", None)
+        usage = take() if callable(take) else None
+        if usage:
+            counts["usage"] = usage  # prompt/completion split, truncated, context (#529)
 
     def _cycle_event(self, counts: dict) -> None:
         mode = "paused" if counts.get("paused") else counts["mode"]

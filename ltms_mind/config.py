@@ -130,6 +130,8 @@ class MindConfig:
     local_model: str | None = None
     local_timeout: float = 120.0
     local_max_tokens: int = 1024
+    local_api: str = "openai"           # or "ollama": native /api/chat, which can set num_ctx (#529)
+    local_context: int | None = None    # the model's context; unset: read from the server (#529)
     local_api_key: str | None = field(default=None, repr=False)
 
     @property
@@ -150,6 +152,14 @@ def _on(v: str | None, default: bool) -> bool:
     if v is None or v == "":
         return default
     return v.strip().lower() in ("1", "on", "yes", "true")
+
+
+def _local_api(v: str | None) -> str:
+    """``MIND_LOCAL_API`` (#529): ``openai`` (any ``/v1`` server, the default) or ``ollama``."""
+    v = (v or "").strip().lower() or "openai"
+    if v not in ("openai", "ollama"):
+        raise ConfigError(f"bad MIND_LOCAL_API {v!r}: openai or ollama")
+    return v
 
 
 def read_env_file(path: str) -> dict:
@@ -244,6 +254,8 @@ def load(env: dict | None = None) -> MindConfig:
             local_model=e.get("MIND_LOCAL_MODEL", "").strip() or None,
             local_timeout=parse_duration(e.get("MIND_LOCAL_TIMEOUT", "2m") or "2m"),
             local_max_tokens=max(64, int(e.get("MIND_LOCAL_MAX_TOKENS", "1024") or 1024)),
+            local_api=_local_api(e.get("MIND_LOCAL_API", "")),
+            local_context=int(e.get("MIND_LOCAL_CONTEXT", "0") or 0) or None,
             local_api_key=e.get("MIND_LOCAL_API_KEY", "").strip() or None,
         )
     except ValueError as exc:

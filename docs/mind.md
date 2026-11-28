@@ -295,7 +295,9 @@ llama.cpp's `llama-server`, vLLM and other compatible servers.
 | `MIND_LOCAL_URL` | (required) | the server's base URL, ending `/v1`, e.g. `http://127.0.0.1:11434/v1` for Ollama |
 | `MIND_LOCAL_MODEL` | (required) | the model name the server knows it by |
 | `MIND_LOCAL_TIMEOUT` | `2m` | per call |
-| `MIND_LOCAL_MAX_TOKENS` | `1024` | longest reply |
+| `MIND_LOCAL_MAX_TOKENS` | `1024` | longest reply; lowered per call to what the context leaves (#529) |
+| `MIND_LOCAL_CONTEXT` | (read from the server) | the model's context length in tokens; with `MIND_LOCAL_API=ollama` it is also sent as `num_ctx` |
+| `MIND_LOCAL_API` | `openai` | `openai`: `POST <url>/chat/completions` on any compatible server. `ollama`: Ollama's native `POST /api/chat`, which can set `num_ctx` |
 | `MIND_LOCAL_API_KEY` | (none) | sent as a bearer token only if set; never logged |
 
 It uses the same prompt templates as the Claude Code brain and asks for JSON
@@ -309,6 +311,38 @@ JSON are ignored; an unusable reply gets one retry, then the task is dropped
 (`brain_errors`). Tokens charged are the server's `usage`; without it they're
 estimated and the cycle record says `tokens_estimated: true`. The brain has no
 tools: it only reasons.
+
+**Context and token detail (#529).** A small model's context holds the prompt
+and the reply together, and a server cuts a prompt that doesn't fit without an
+error. So the brain learns the context length once: `MIND_LOCAL_CONTEXT` if set,
+otherwise from the server (llama.cpp's `/props`; for Ollama the loaded model in
+`/api/ps`, then `num_ctx` in the Modelfile via `/api/show`, then the model's
+trained `context_length`, which is only a ceiling). Each call's `max_tokens` is
+the smaller of `MIND_LOCAL_MAX_TOKENS` and what the context leaves after the
+prompt's estimated size and a margin. The estimate starts at 3 characters per
+token and follows the server's own counts after the first call. A prompt that
+would leave less than 128 tokens for the reply isn't sent: the task is dropped
+as a brain error that says so.
+
+Ollama's `/v1` can't set `num_ctx`, so its server default applies. To choose
+it, set `MIND_LOCAL_API=ollama` and `MIND_LOCAL_CONTEXT` (for example `8192`);
+`MIND_LOCAL_URL` may then end with or without `/v1`. Keep the KV cache in mind
+on a small device: it grows with `num_ctx`.
+
+The cycle record's `usage` gives the wake's detail:
+
+| Key | Meaning |
+|---|---|
+| `calls` | model calls this wake (retries included) |
+| `prompt_tokens`, `completion_tokens` | their totals; together they make `budget.tokens` |
+| `truncated` | replies that stopped at `max_tokens` (`finish_reason: length`) |
+| `too_long` | prompts not sent because they didn't fit the context |
+| `max_prompt` | the largest prompt this wake |
+| `context`, `context_source` | the context length and where it came from: `setting`, `server`, `modelfile` or `model` |
+| `max_tokens` | the `MIND_LOCAL_MAX_TOKENS` ceiling |
+
+When `truncated` is often above zero, raise `MIND_LOCAL_MAX_TOKENS`, if the
+context leaves room. When `max_prompt` comes close to `context`, raise the context.
 
 **A device's model is shared** (with a voice assistant, an agent, other minds),
 so a mind sends one request at a time, and deep tasks run when it dreams: set
