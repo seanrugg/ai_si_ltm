@@ -92,6 +92,33 @@ You need a running LTMS and Hermes Agent (tested with v0.23.3) on the same machi
 | `not started, cannot import cli_agent` | The plugin isn't linked from a checkout and `ltms-harness` isn't installed in Hermes's environment | Link it from a checkout (step 2), or see "Copying the plugin" above |
 | `Provider temporarily unavailable` in chat | The model server is slow or out of memory; not the plugin | Check the model server (for Ollama: `ollama ps`, `free -h`) |
 
+## Device mode: Hermes records as the device, and runs its member (#521)
+
+**The device is the member, not the harness.** On a device with its own member (the Mac Studio is **M4-C2**), set `LTMS_DEVICE_ENV` and the plugin changes role:
+
+- **The device's member runs while Hermes runs.** When Hermes's gateway starts (Hermes Desktop opening), the plugin starts the device's member on a thread: heartbeats, directives, its spec sheet, and its **mind**. When Hermes exits, it stops, after signing what's left. There's no launchd agent and no watcher.
+- **The mind thinks with Hermes's model:** `model.default` in `~/.hermes/config.yaml` at start, then the model of each session, if the model server lists it. The spec sheet and the mind's records name the model and its family (`gemma4:31b` is `gemma`).
+- **Hermes's sessions and tool calls are recorded as the device**, through its handoff (`MEMBER_HANDOFF_PATH`). The plugin never signs, so the device's chain has one writer.
+- **One host per device.** The first Hermes process to start takes `member.lock`. Any other (the CLI while Desktop is open) only hands its records over.
+
+Setup, once the device's member is enrolled and its `device.env` is written (`docs/mind.md`, "A device member"):
+
+1. Link and enable the plugin (as in Install, step 2).
+2. Add three lines to `~/.hermes/.env`:
+   ```bash
+   LTMS_SERVER=https://ltms.example.org
+   LTMS_KEY_PATH=/Users/<you>/.ltms/device/<member>.key.json
+   LTMS_DEVICE_ENV=/Users/<you>/.ltms/device/device.env
+   ```
+   `LTMS_DEVICE_ENV` turns device mode on. The other two match `device.env` (Hermes checks them before it enables the plugin).
+3. Restart Hermes (quit and reopen Hermes Desktop). Check the log:
+   ```bash
+   grep -hE "ltms_recorder|Device:|Member:" ~/.hermes/logs/agent.log ~/.hermes/logs/gateway-stdio.log | tail -8
+   ```
+   Look for `recording as <member> (…, device member running here)`, then `Device: spec sheet reported`. The member's lines go wherever Hermes sends its gateway's log; on the Mac Studio that's one of those two files.
+
+With device mode on, the plugin does nothing with `LTMS_KEY_PATH` itself: it never signs.
+
 ## Settings
 
 Plugin settings live under `plugins.entries.ltms_recorder.settings` in `~/.hermes/config.yaml`:
