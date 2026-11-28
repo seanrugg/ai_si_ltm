@@ -104,3 +104,59 @@ def test_start_and_stop(tmp_path, server):
         time.sleep(0.01)
     mind.stop()
     assert any("mind_cycle" in (r.get("tags") or []) for r in chain_ok(link))
+
+
+# -- an offline or failed wake still leaves a record (#527) ------------------------------
+
+def cycles(link):
+    return [r for r in chain_ok(link) if "mind_cycle" in (r.get("tags") or [])]
+
+
+def test_an_offline_wake_signs_its_cycle_into_the_hosts_chain(tmp_path, server):
+    """27 Nov, 17:29-17:44 ET: DNS failed on escapepod, sign-in failed, and four of
+    v3-c7r's wakes left no record. The body records were queued and arrived later."""
+    client, link = host(tmp_path, server)
+    cfg = embedded_config(ENV, str(tmp_path), force={"MIND_EMBEDDER": "lexical", "MIND_HEALTH": "off"})
+    mind = ThreadedMind(cfg, 300, client, brain=ScriptedBrain(), dream_when=lambda: True, clock=lambda: 0.0)
+    server.online = False
+    counts = run_with_pump(mind, link, 0.0)
+    assert counts == {"offline": True, "error": "ConnectionError: offline", "signed": True}
+    (rec,) = cycles(link)                              # queued in the host's outbox, sent when it's back
+    assert rec["summary"] == "Mind cycle (offline)" and rec["type"] == "event"
+    assert rec["payload"] == {"mode": "offline", "brain": "scripted", "offline": True,
+                              "error": "ConnectionError: offline"}
+    server.online = True
+    run_with_pump(mind, link, 300.0)                   # back online: the next wake runs as usual
+    summaries = [r["summary"] for r in cycles(link)]
+    assert summaries[0] == "Mind cycle (offline)" and summaries[-1] == "Dream cycle ended"
+
+
+def test_a_wake_that_fails_signs_where_it_failed(tmp_path, server, monkeypatch):
+    from ltms_mind import loop
+
+    def broken(self, **kw):
+        raise RuntimeError("agenda query timed out")
+    monkeypatch.setattr(loop.Agenda, "build", broken)
+    client, link = host(tmp_path, server)
+    cfg = embedded_config(ENV, str(tmp_path), force={"MIND_EMBEDDER": "lexical", "MIND_HEALTH": "off"})
+    mind = ThreadedMind(cfg, 300, client, brain=ScriptedBrain(), clock=lambda: 0.0)
+    assert run_with_pump(mind, link, 0.0) is None      # the host never sees the exception
+    (rec,) = cycles(link)
+    assert rec["summary"] == "Mind cycle (failed in agenda)"
+    assert rec["payload"]["failed"] == "RuntimeError: agenda query timed out"
+    assert rec["payload"]["phase"] == "agenda" and rec["payload"]["brain"] == "scripted"
+    assert "duties" in rec["payload"]                  # what the wake did before it failed
+
+
+def test_a_dream_that_fails_keeps_its_one_end_record(tmp_path, server, monkeypatch):
+    from ltms_mind import loop
+
+    def broken(self, *a, **kw):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(loop.Mind, "_run_tasks", broken)
+    client, link = host(tmp_path, server)
+    cfg = embedded_config(ENV, str(tmp_path), force={"MIND_EMBEDDER": "lexical", "MIND_HEALTH": "off"})
+    mind = ThreadedMind(cfg, 300, client, brain=ScriptedBrain(), dream_when=lambda: True, clock=lambda: 0.0)
+    run_with_pump(mind, link, 0.0)
+    (rec,) = cycles(link)                              # the dream's end says so; no second record
+    assert rec["summary"] == "Dream cycle ended" and rec["payload"]["error"] == "RuntimeError"
