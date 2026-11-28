@@ -439,3 +439,23 @@ def test_reads_wait_out_the_rate_limit():
     calls.clear(), waits.clear()
     Client.records = lambda self, **kw: (_ for _ in ()).throw(Limited("429"))
     assert a._records(type="lesson") == [] and waits == [1, 2]          # gives up after three tries
+
+
+# ------------------------------------------------------------------ server budgets (#342)
+def test_a_server_budget_only_ever_lowers_the_device_s(server, make_mind):
+    from ltms_mind.loop import _lower
+    assert _lower(10, 3) == 3 and _lower(10, 50) == 10 and _lower(10, None) == 10
+    assert _lower(10, True) == 10 and _lower(10, -1) == 10 and _lower(10, 0) == 0
+
+    server.swarm = SWARM
+    for i in range(4):
+        server.other(generate_key(), "asker", "action", at=ts(23, i), summary=f"step {i}", outcome="failed")
+    calls = []
+
+    def script(task):
+        calls.append(task.key)
+        return []
+
+    server.mind = {"paused": False, "budget": {"calls_per_wake": 1, "writes_per_day": 99}}
+    out = make_mind(brain=ScriptedBrain(script)).wake()
+    assert len(calls) == 1 and out["server_budget"] == {"calls_per_wake": 1, "writes_per_day": 99}

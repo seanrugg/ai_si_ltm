@@ -19,7 +19,7 @@ from server.api.schemas import (AdminLogin, ApproveRequest, BulkMembersRequest,
                                 EnrollmentPolicyUpdate, InviteCreate, McpSettingsUpdate,
                                 McpTokenCreate, PermissionsRequest, ReasonRequest,
                                 SwarmMode)
-from server.models import (AuditLog, EnrollmentSwarmRequest, IntegrityRun, Member, McpToken, Record, RecordPayload,
+from server.models import (AuditLog, EnrollmentSwarmRequest, IntegrityRun, Member, McpToken, Record,
                            RecordProvenance, RuntimeSetting, Swarm, SwarmMember)
 from server.mcp_remote import CALLER_LIMIT
 from server.services import auth as auth_service
@@ -34,6 +34,7 @@ from server.services import profile as profile_service
 from server.services import datasets as datasets_service
 from server.services import charter, dataset_uploads, integrations, reference_sources, url_snapshot
 from server.services import swarm_remove
+from server.services import growth as growth_service
 from server.services.errors import ServiceError
 
 router = APIRouter(prefix="/api", tags=["admin"])
@@ -681,31 +682,12 @@ async def volume(
     payload counts as 0 bytes.
     """
     async with transaction(request) as session:
-        if session.bind.dialect.name == "postgresql":
-            day = func.to_char(func.date_trunc("day", Record.ts), "YYYY-MM-DD")
-        else:
-            day = func.date(Record.ts)
+        day = recall.day_expr(session)
         since = datetime.now(timezone.utc) - timedelta(days=days)
-        stmt = (
-            select(
-                day.label("day"),
-                Record.agent,
-                Record.type,
-                func.count(Record.id).label("records"),
-                func.coalesce(func.sum(RecordPayload.size), 0).label("payload_bytes"),
-            )
-            .outerjoin(RecordPayload, RecordPayload.record_id == Record.id)
-            .where(Record.ts >= since, *([await _in_swarm_clause(session, swarm)] if swarm else []))
-            .group_by(day, Record.agent, Record.type)
-            .order_by(day.desc(), Record.agent, Record.type)
-        )
-        rows = (await session.execute(stmt)).all()
+        where = [await _in_swarm_clause(session, swarm)] if swarm else []
         return {
             "days": days,
-            "rows": [
-                {"day": r.day, "agent": r.agent, "type": r.type, "records": r.records, "payload_bytes": r.payload_bytes}
-                for r in rows
-            ],
+            "rows": await recall.volume_by_day(session, since=since, where=where, day=day),
             "swarms": await _swarm_message_share(session, day, since),
         }
 
@@ -1179,26 +1161,61 @@ async def outcomes(
 ) -> dict:
     """Outcome counts for actions, grouped by member, action summary and place."""
     async with transaction(request) as session:
-        key = func.lower(func.coalesce(Record.summary, ""))
-        stmt = select(Record.agent, key, Record.place, Record.outcome, func.count()).where(
-            Record.type == "action", Record.outcome.is_not(None)
-        )
-        if period_days:
-            stmt = stmt.where(Record.ts >= datetime.now(timezone.utc) - timedelta(days=period_days))
-        if agent:
-            stmt = stmt.where(Record.agent == agent)
-        if place:
-            stmt = stmt.where(Record.place == place)
-        stmt = stmt.group_by(Record.agent, key, Record.place, Record.outcome)
-        groups: dict[tuple, dict] = {}
-        for a, summary, pl, oc, n in (await session.execute(stmt)).all():
-            g = groups.setdefault((a, summary, pl), {"agent": a, "action": summary, "place": pl, "total": 0, "outcomes": {}})
-            g["outcomes"][oc] = n
-            g["total"] += n
-        rows = sorted(groups.values(), key=lambda g: -g["total"])
-        for g in rows:
-            g["success_rate"] = round(g["outcomes"].get("success", 0) / g["total"], 3) if g["total"] else None
+        since = datetime.now(timezone.utc) - timedelta(days=period_days) if period_days else None
+        rows = await recall.outcome_groups(session, since=since, agent=agent, place=place)
         return {"period_days": period_days, "groups": rows}
+
+
+# ------------------------------------------------------------------ growth ledger and mind settings (#342)
+@router.get("/admin/members/{member_id}/growth")
+async def member_growth(member_id: str, request: Request, days: int = Query(30, ge=1, le=365),
+                        admin: AdminAuth = ADMIN) -> dict:
+    """One member's growth ledger: learning (cross-family verified lessons, predictions,
+    answered questions, directives) next to volume. See ``server/services/growth.py``."""
+    async with transaction(request) as session:
+        m = await _member_by_id(session, member_id)
+        return (await growth_service.ledger(session, [m.name], days=days))[m.name]
+
+
+@router.get("/admin/swarms/{name}/growth")
+async def swarm_growth(name: str, request: Request, days: int = Query(30, ge=1, le=365),
+                       admin: AdminAuth = ADMIN) -> dict:
+    """The swarm's current members' ledgers, summed, with each member's verified lessons."""
+    from server.models import Swarm, SwarmMember
+    async with transaction(request) as session:
+        sid = await session.scalar(select(Swarm.id).where(Swarm.name == name, Swarm.status != "removed"))
+        if sid is None:
+            raise ServiceError(404, "no_swarm", f"no swarm {name!r}")
+        names = list(await session.scalars(
+            select(Member.name).join(SwarmMember, SwarmMember.member_id == Member.id)
+            .where(SwarmMember.swarm_id == sid, SwarmMember.left_at.is_(None))))
+        out = growth_service.roll_up(await growth_service.ledger(session, names, days=days), days=days)
+        return {"swarm": name, **out}
+
+
+@router.get("/admin/growth")
+async def fleet_growth(request: Request, days: int = Query(30, ge=1, le=365), admin: AdminAuth = ADMIN) -> dict:
+    """Every active member's ledger, summed, with each member's verified lessons."""
+    async with transaction(request) as session:
+        names = list(await session.scalars(select(Member.name).where(Member.status == "active")))
+        return growth_service.roll_up(await growth_service.ledger(session, names, days=days), days=days)
+
+
+@router.get("/admin/members/{member_id}/mind")
+async def get_mind_settings(member_id: str, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    """``{paused, budget}`` for this member's mind. The member hears it at sign-in."""
+    async with transaction(request) as session:
+        return await growth_service.get_settings(session, await _member_by_id(session, member_id))
+
+
+@router.patch("/admin/members/{member_id}/mind")
+async def set_mind_settings(member_id: str, body: dict, request: Request, admin: AdminAuth = ADMIN) -> dict:
+    """Pause a mind (``{"paused": true}``) or lower its budgets (``{"budget": {"calls_per_wake": 3}}``;
+    ``null`` returns a key to the device's own setting). Reduce-only: the member never goes
+    above its own ``MIND_*`` caps. Audited."""
+    async with transaction(request) as session:
+        m = await _member_by_id(session, member_id)
+        return await growth_service.set_settings(session, m, body, admin=admin.username)
 
 
 @router.get("/admin/lessons")
