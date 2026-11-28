@@ -177,6 +177,7 @@ class MindDream(DreamCycle):
     def __init__(self, client, counts: dict) -> None:
         super().__init__(client, jitter_s=0)
         self.counts = counts
+        self.ended = False  # the end event is signed: the wake has its cycle record (#527)
 
     def __exit__(self, exc_type, exc, tb) -> bool:
         payload = {"cycle": self.id, "phase": "end", "items_read": self.items_read, "lessons": self.lessons,
@@ -184,6 +185,7 @@ class MindDream(DreamCycle):
         if exc_type is not None:
             payload["error"] = exc_type.__name__
         self.client.append("event", summary="Dream cycle ended", tags=[self.TAG, CYCLE_TAG], payload=payload)
+        self.ended = True
         return False
 
 
@@ -198,6 +200,11 @@ class Mind:
         self.health = health if cfg.health else None
         self.monotonic = monotonic
         self.state = State(cfg.state_path)
+        # Where a wake is, and whether it has its cycle record yet (#527): a wake that
+        # fails before that still signs one, so a failed or offline wake is never a gap.
+        self.phase = "start"
+        self._signed_in = self._cycle_signed = False
+        self._dream: MindDream | None = None
 
     # ------------------------------------------------------------------ duties
     def _duties(self, tok: dict, counts: Counter, decide=None) -> tuple[dict | None, list[dict]]:
@@ -424,15 +431,26 @@ class Mind:
 
     # ------------------------------------------------------------------ one wake
     def wake(self) -> dict:
+        """One wake. A wake that raises still signs a ``mind_cycle`` event saying where it
+        failed (``_failed``), then re-raises so the host logs the traceback."""
         now = self.now()
         counts: dict = {"mode": "awake", "brain": self.brain.name}
+        self.phase, self._signed_in, self._cycle_signed, self._dream = "sign-in", False, False, None
+        try:
+            return self._wake(now, counts)
+        except Exception as exc:
+            self._failed(counts, exc)
+            raise
+
+    def _wake(self, now: datetime, counts: dict) -> dict:
         duty = Counter()
         self.client.auto_read_charter = False  # the duty reads it, and counts it
         try:
             tok = self.client.login()
         except Exception as exc:  # noqa: BLE001 - offline: the outbox waits for the next wake
-            log.warning("sign-in failed, nothing done this wake: %s", exc)
-            return {"offline": True, "error": str(exc)[:200]}
+            return self._offline(exc)
+        self._signed_in = True
+        self.phase = "duties"
         self.client.outbox = continue_chain(load_outbox(self.cfg.outbox_path), self.client.seq, self.client.last_hash)
         duty["outbox_restored"] = len(self.client.outbox)
         self._flush(duty)
@@ -451,6 +469,7 @@ class Mind:
         # declining them for good.
         swarm, open_directives = self._duties(tok, duty, None if paused else self._decider(budget))
         counts["duties"] = {k: v for k, v in duty.items() if v}
+        self.phase = "agenda"
 
         if paused:
             counts["paused"] = True
@@ -467,9 +486,11 @@ class Mind:
         ctx = Context(member=self.client.name, swarm=(swarm or {}).get("name"), family=self.cfg.model_family,
                       now=iso(now), mode="dreaming" if dreaming else "awake")
         gate = gate_mod.Gate(self.embedder, self.cfg.novelty, self._corpus(swarm) if tasks else [])
+        self.phase = "tasks"
         if dreaming:
             counts["mode"] = "dreaming"
-            with MindDream(self.client, counts) as cycle:
+            self._dream = MindDream(self.client, counts)
+            with self._dream as cycle:
                 self._run_tasks(tasks, ctx, gate, budget, counts, cycle)
                 self._note_budget(counts, budget)
             self._note_dream(now)
@@ -477,8 +498,44 @@ class Mind:
             self._run_tasks(tasks, ctx, gate, budget, counts, None)
             self._note_budget(counts, budget)
             self._cycle_event(counts)
+        self.phase = "finish"
         self.state["writes"] = {now.astimezone().date().isoformat(): budget.written_today}
         return self._finish(now, counts)
+
+    # ------------------------------------------------------------------ offline or failed (#527)
+    def _offline(self, exc: Exception) -> dict:
+        """The server can't be reached. A mind that signs through its host's chain (which
+        works offline) still records the wake: the host's outbox sends it later. A
+        standalone mind doesn't know its chain head before sign-in, so it only logs."""
+        err = _error(exc)
+        log.warning("sign-in failed, nothing done this wake: %s", err)
+        out = {"offline": True, "error": err}
+        if getattr(self.client, "signs_offline", False):
+            try:
+                self._append("event", summary="Mind cycle (offline)", tags=[CYCLE_TAG],
+                             payload={"mode": "offline", "brain": self.brain.name, "offline": True, "error": err})
+                out["signed"] = True
+            except Exception as exc2:  # noqa: BLE001 - nothing more to do this wake
+                log.warning("couldn't sign the offline cycle record either: %s", _error(exc2))
+        return out
+
+    def _failed(self, counts: dict, exc: Exception) -> None:
+        """Sign a ``mind_cycle`` event for a wake that raised, unless it already has one
+        (an awake cycle event, or a dream's end event, which carries the error)."""
+        if self._cycle_signed or (self._dream is not None and self._dream.ended):
+            return
+        offline_signer = getattr(self.client, "signs_offline", False)
+        if not (self._signed_in or offline_signer):
+            return  # a standalone mind before sign-in: no chain head to sign on
+        payload = {**counts, "failed": _error(exc), "phase": self.phase}
+        try:
+            self._append("event", summary=f"Mind cycle (failed in {self.phase})", tags=[CYCLE_TAG],
+                         payload=payload)
+            if not offline_signer:  # the mind's own outbox: keep it, and send it if possible
+                self._flush()
+                save_outbox(self.cfg.outbox_path, self.client.outbox)
+        except Exception as exc2:  # noqa: BLE001 - the original error is re-raised by wake()
+            log.warning("couldn't sign the failed cycle record: %s", _error(exc2))
 
     def _note_budget(self, counts: dict, budget: Budget) -> None:
         counts["budget"] = budget.used()
@@ -493,6 +550,7 @@ class Mind:
         mode = "paused" if counts.get("paused") else counts["mode"]
         text = f"Mind cycle ({mode}): {counts.get('tasks', 0)} tasks, {counts.get('written', 0)} written"
         self._append("event", summary=text, tags=[CYCLE_TAG], payload=counts)
+        self._cycle_signed = True
 
     def _flush(self, duty: Counter | None = None) -> None:
         if not self.client.outbox:
@@ -513,6 +571,11 @@ class Mind:
         self.state.save()
         log.info("wake done: %s", json.dumps(counts, default=str))
         return counts
+
+
+def _error(exc: BaseException) -> str:
+    """``<ExceptionClass>: <message>``, at most 200 characters, for a record or a log."""
+    return f"{type(exc).__name__}: {exc}"[:200]
 
 
 def run_forever(mind_factory: Callable[[], Mind], every: float, jitter: float,

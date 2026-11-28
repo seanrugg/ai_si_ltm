@@ -36,6 +36,10 @@ class LinkedClient:
     it, so the mind keeps no outbox of its own and ``flush`` does nothing.
     """
 
+    # The host's chain signs without the server (its outbox sends later), so the mind
+    # can record an offline or failed wake (#527).
+    signs_offline = True
+
     def __init__(self, client, append: Callable[..., dict], head: Callable[[], dict]) -> None:
         object.__setattr__(self, "_client", client)
         object.__setattr__(self, "_sign", append)

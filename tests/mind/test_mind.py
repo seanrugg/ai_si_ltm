@@ -270,7 +270,9 @@ def test_an_offline_outbox_flushes_on_the_next_wake(server, make_mind):
     server.online = False
     from ltms_mind.loop import save_outbox
     save_outbox(m.cfg.outbox_path, c.outbox)
-    assert m.wake().get("offline") is True
+    out = m.wake()
+    assert out == {"offline": True, "error": "ConnectionError: offline"}
+    assert [r["summary"] for r in c.outbox] == ["queued while the network was down"]   # #527: no head, so no record
     server.online = True
     fresh = FakeClient(server, "me")
     fresh.key = c.key
@@ -505,3 +507,50 @@ def test_a_server_budget_only_ever_lowers_the_device_s(server, make_mind):
     server.mind = {"paused": False, "budget": {"calls_per_wake": 1, "writes_per_day": 99}}
     out = make_mind(brain=ScriptedBrain(script)).wake()
     assert len(calls) == 1 and out["server_budget"] == {"calls_per_wake": 1, "writes_per_day": 99}
+
+
+def test_a_standalone_wake_that_fails_after_sign_in_signs_and_sends_its_failure(server, make_mind, monkeypatch):
+    """#527: a failed wake is never a silent gap."""
+    from ltms_mind import loop
+
+    def broken(self, **kw):
+        raise RuntimeError("agenda query timed out")
+    monkeypatch.setattr(loop.Agenda, "build", broken)
+    m = make_mind(dream=config.DreamCondition("never"))
+    with pytest.raises(RuntimeError, match="agenda query timed out"):   # still raised for the host's log
+        m.wake()
+    (rec,) = [r for r in mine(server) if CYCLE_TAG in (r.get("tags") or [])]
+    assert rec["summary"] == "Mind cycle (failed in agenda)"
+    assert rec["payload"]["failed"] == "RuntimeError: agenda query timed out" and rec["payload"]["phase"] == "agenda"
+
+
+def test_a_failure_while_signing_the_failure_raises_the_original_error(server, make_mind, monkeypatch):
+    from ltms_mind import loop
+
+    def broken(self, **kw):
+        raise RuntimeError("first")
+    monkeypatch.setattr(loop.Agenda, "build", broken)
+    m = make_mind(dream=config.DreamCondition("never"))
+    real = m.client.append
+
+    def refuse(type, **kw):
+        if "Mind cycle (failed" in kw.get("summary", ""):
+            raise OSError("disk full")
+        return real(type, **kw)
+    m.client.append = refuse
+    with pytest.raises(RuntimeError, match="first"):
+        m.wake()
+
+
+def test_a_wake_that_fails_after_its_cycle_record_adds_none(server, make_mind, monkeypatch):
+    from ltms_mind import loop
+
+    def broken(self, now, counts):
+        raise OSError("state file is read-only")
+    monkeypatch.setattr(loop.Mind, "_finish", broken)
+    m = make_mind(dream=config.DreamCondition("never"))
+    with pytest.raises(OSError):
+        m.wake()
+    m.client.flush()
+    assert [r["summary"] for r in mine(server) if CYCLE_TAG in (r.get("tags") or [])] == [
+        "Mind cycle (awake): 0 tasks, 0 written"]

@@ -107,6 +107,20 @@ catches near-copies, not rewordings.
    the counts. A dreaming wake writes the dream cycle's start and end events
    instead (#240), and the end event carries the same counts under `mind`.
    Either way, that's the only record when nothing passes the gate.
+   **A wake never leaves a silent gap (#527):**
+   - *Offline.* If sign-in fails (no network, DNS), a mind inside a host (the
+     hub, the robot sidecar, a device member, Hermes in device mode) signs
+     `Mind cycle (offline)` through the host's chain, with
+     `{mode: "offline", offline: true, error: "<class>: <message>"}`. The host's
+     outbox sends it when the server is back, with its original time. A
+     standalone `ltms_mind run` doesn't know its chain head before sign-in, so
+     it only logs the failure: signing without the head would fork the chain.
+   - *Failed.* A wake that raises after that signs `Mind cycle (failed in <phase>)`
+     with the counts so far, plus `failed` (`"<class>: <message>"`) and `phase`
+     (`duties`, `agenda`, `tasks` or `finish`), then re-raises so the host logs
+     the traceback. A dream that fails signs no extra record: its end event
+     already carries `error`. Neither does a wake that fails after its cycle
+     record. If signing that record fails too, the wake only logs it.
 8. **Flush and save:** records that couldn't be sent stay in the outbox file
    and go first on the next wake, provided they still continue the chain.
 
