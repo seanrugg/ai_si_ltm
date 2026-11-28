@@ -131,7 +131,8 @@ def test_mac_facts_come_from_sysctl(monkeypatch):
     monkeypatch.setattr(hardware.platform, "machine", lambda: "arm64")
     sheet = hardware.spec_sheet(hardware.detect("."), "ltms-member")
     assert sheet["hardware"]["ram_mib"] == 192 * 1024 and sheet["hardware"]["board"] == "Mac14,14"
-    assert sheet["hardware"]["cpu"] == "Apple M2 Ultra" and "Apple GPU (Metal)" in sheet["hardware"]["accelerators"]
+    assert sheet["hardware"]["cpu"] == "Apple M2 Ultra"
+    assert sheet["hardware"]["accelerators"] == ["Apple GPU (Metal)", "NPU"]   # the Neural Engine
     assert sheet["software"]["os"] == "macOS 15.5"
 
 

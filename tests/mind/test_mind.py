@@ -372,3 +372,70 @@ def test_gate_detail_is_cleared_on_a_pass():
     g = Gate(LexicalEmbedder(), 0.92, [])
     assert g.check(Proposal("note", "x")) == NO_PURPOSE and g.detail == "unknown kind 'note'"
     assert g.check(Proposal("lesson", "Icons need one of five names", refs={"e": "a:1"})) is None and g.detail is None
+
+
+# ------------------------------------------------------------------ cross-family review (#521, first live run)
+def test_a_reviewer_sees_the_evidence_a_lesson_cites(server, make_mind):
+    """M4-C2's first dream: Gemma reviewed Vector's lessons with only their keys to go on."""
+    server.swarm = SWARM
+    k = generate_key()
+    stall = server.other(k, "claude-a", "action", at=ts(21), summary="Climb the ramp", outcome="stuck",
+                         payload={"slope_deg": 14, "motor_a": 2.4})
+    server.other(k, "claude-a", "lesson", at=ts(22), summary="Ramps over 12 degrees stall the motors",
+                 refs={"evidence": [f"claude-a:{stall['seq']}", "claude-a:999"]})
+    brain = ScriptedBrain()
+    make_mind(brain=brain).wake()
+    task = next(t for t, _ in brain.seen if t.category == "verify")
+    ev = {e["key"]: e for e in task.inputs["evidence"]}
+    assert ev["claude-a:1"]["found"] is True and ev["claude-a:1"]["outcome"] == "stuck"
+    assert '"slope_deg": 14' in ev["claude-a:1"]["payload"]
+    assert ev["claude-a:999"] == {"key": "claude-a:999", "found": False}
+
+
+def test_a_record_key_written_as_name_and_number_is_fixed_not_refused(server, make_mind):
+    """Gemma's two reviews were gated bad_ref: refs {"v3-c7r": "72120"}."""
+    from ltms_mind.loop import normalize_refs
+    assert normalize_refs({"v3-c7r": "72120"}) == {"evidence": ["v3-c7r:72120"]}
+    assert normalize_refs({"v3-c7r": 72120, "evidence": "q3-u3:58"}) == {"evidence": ["q3-u3:58", "v3-c7r:72120"]}
+    assert normalize_refs({"v3-c7r": ["1", "2"]}) == {"evidence": ["v3-c7r:1", "v3-c7r:2"]}
+    for left in ({"agent": "seq"}, {"v3-c7r": "0"}, {"v3-c7r": True}, {"reviews": "v3-c7r:5"}, None):
+        assert normalize_refs(left) == left
+
+    server.swarm = SWARM
+    server.other(generate_key(), "claude-a", "lesson", at=ts(22), summary="Dust lowers lidar range",
+                 refs={"agent": "seq"})
+
+    def script(task):
+        if task.category != "verify":
+            return []
+        agent, _, seq = task.key.partition(":")
+        return [{"kind": "review", "summary": "Cites only a placeholder: no evidence to check",
+                 "refs": {agent: seq}, "payload": {"verdict": "refuted", "reasons": "refs is a template"}}]
+
+    out = make_mind(brain=ScriptedBrain(script)).wake()
+    assert out["gated"] == {} and out["written"] == 1
+    review = next(r for r in mine(server) if (r.get("payload") or {}).get("verdict"))
+    assert review["refs"] == {"evidence": ["claude-a:1"], "reviews": "claude-a:1"}
+
+
+def test_reads_wait_out_the_rate_limit():
+    from ltms_mind.agenda import Agenda
+
+    class Limited(Exception):
+        status = 429
+
+    calls, waits = [], []
+
+    class Client:
+        def records(self, **kw):
+            calls.append(kw)
+            if len(calls) < 3:
+                raise Limited("429 rate_limited")
+            return [{"agent": "x", "seq": 1}]
+
+    a = Agenda(Client(), me="me", swarm=None, family="gemma", now=datetime(2026, 11, 28, tzinfo=timezone.utc),
+               since=None, lookback_days=7, corpus=50, study_query="", read_items=set(), sleep=waits.append)
+    assert a._records(type="lesson") == [{"agent": "x", "seq": 1}] and waits == [1, 2]
+    calls.clear(), waits.clear()
+    Client.records = lambda self, **kw: (_ for _ in ()).throw(Limited("429"))
+    assert a._records(type="lesson") == [] and waits == [1, 2]          # gives up after three tries

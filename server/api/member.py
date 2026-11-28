@@ -244,6 +244,20 @@ def _audit(session, auth: MemberAuth, request: Request, detail: dict, count: int
                          detail=detail, request_id=request_id(request), response_count=count))
 
 
+@router.get("/records/{agent}/{seq}")
+async def get_record(agent: str, seq: int, request: Request,
+                     auth: MemberAuth = Depends(require("recall", "recall:scoped"))) -> dict:
+    """One record by key, within this member's read scope (#521). 404 if it doesn't
+    exist or the scope doesn't reach it: the two aren't told apart."""
+    async with transaction(request) as session:
+        scope = await _member_scope(session, auth)
+        rec = await recall.get_record(session, agent, seq, scope)
+        _audit(session, auth, request, {"endpoint": "record", "agent": agent, "seq": str(seq)}, int(rec is not None))
+        if rec is None:
+            raise ServiceError(404, "not_found", "record not found")
+        return rec
+
+
 @router.get("/records")
 async def get_records(
     request: Request,

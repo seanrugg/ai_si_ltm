@@ -132,3 +132,16 @@ def test_recall_is_audited(populated, admin):
     entries = admin.get("/api/admin/recall-log").json()["entries"]
     assert [e["detail"]["endpoint"] for e in entries[:2]] == ["context", "records"]
     assert entries[1]["response_count"] == 3
+
+
+def test_one_record_by_key_within_scope(populated, mesh):
+    """#521: a reviewer reads the records a lesson cites, one by one."""
+    z3, vec = populated
+    rec = vec.record("z3-r0", 2)
+    assert rec["seq"] == 2 and rec["outcome"] == "success" and rec["payload"] == {"distance_m": 0.5}
+    verify_record(rec, bytes(z3.key.verify_key))
+    assert vec.record("z3-r0", 999) is None and vec.record("nobody", 1) is None
+    scoped = mesh.member("scoped", permissions=["contribute", "recall:scoped"], scope={"types": ["lesson", "policy"]})
+    lesson_seq = next(r["seq"] for r in z3.records(agent="z3-r0", type="lesson"))
+    assert scoped.record("z3-r0", lesson_seq)["type"] == "lesson"
+    assert scoped.record("z3-r0", 2) is None              # an action: outside its scope, same answer as missing

@@ -165,6 +165,17 @@ def to_wire(record: Record, payload: RecordPayload | None, *, include_payload: b
     return out
 
 
+async def get_record(session: AsyncSession, agent: str, seq: int, scope: Scope) -> dict | None:
+    """One record by its key, if this reader's scope allows it; None otherwise (#521:
+    a reviewer reads the evidence a lesson cites)."""
+    stmt = apply_scope(select(Record).where(Record.agent == agent, Record.seq == seq), scope)
+    rec = await session.scalar(stmt)
+    if rec is None:
+        return None
+    payloads = await fetch_payloads(session, [rec])
+    return to_wire(rec, payloads.get(rec.id))
+
+
 async def query_records(
     session: AsyncSession, f: RecordFilter, scope: Scope, *, include_payload: bool = True
 ) -> list[dict]:
