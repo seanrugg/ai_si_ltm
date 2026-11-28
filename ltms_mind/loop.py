@@ -36,7 +36,7 @@ from cli_agent.introductions import INTRO_TAG, Introducer
 
 from ltms_mind import gate as gate_mod
 from ltms_mind.agenda import Agenda, iso, parse_ts
-from ltms_mind.brains.base import RECORD, Brain, Context, Proposal, Task
+from ltms_mind.brains.base import ALLOWED_KINDS, RECORD, Brain, Context, Proposal, Task
 from ltms_mind.budget import Budget
 from ltms_mind.config import MindConfig
 from ltms_mind.directives import CLOSED_REPORTS, MindDirectives
@@ -327,11 +327,11 @@ class Mind:
         (a reflect lesson, question or prediction cites it in ``refs.evidence``), and an
         answer goes to whoever asked. Record keys written the obvious wrong way are fixed first."""
         p.refs = normalize_refs(p.refs)
+        allowed = ALLOWED_KINDS.get(task.kind, ())
         ref = TASK_REF.get(task.kind)
-        expected = {"answer": "answer", "review": "review", "check": "prediction-check"}.get(task.kind)
-        if ref and p.kind == expected:
+        if ref and p.kind in allowed:
             p.refs = {**(p.refs or {}), ref: task.key}
-        if task.kind == "reflect" and p.kind in ("lesson", "question", "prediction"):
+        if task.kind == "reflect" and p.kind in allowed:
             # What it reflects on is its evidence (#525), whatever the brain wrote.
             ev = (p.refs or {}).get("evidence")
             ev = [x for x in (ev if isinstance(ev, list) else [ev]) if x is not None]
@@ -394,7 +394,7 @@ class Mind:
                     gated[gate_mod.BAD_PROPOSAL] = gated.get(gate_mod.BAD_PROPOSAL, 0) + 1
                     self._reject(counts, task, None, gate_mod.BAD_PROPOSAL, f"not a proposal: {type(p).__name__}")
                     continue
-                reason = gate.check(self._bind(task, p))
+                reason = gate.check(self._bind(task, p), task.kind)
                 detail = gate.detail
                 if reason is None and not budget.can_write():
                     reason, detail = gate_mod.OVER_BUDGET, "today's write cap is reached"

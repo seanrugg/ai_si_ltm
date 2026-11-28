@@ -15,6 +15,16 @@ from typing import Any
 # What a proposal is for. The gate's purpose rule passes only these; a proposal
 # that only summarises something has no kind here and is dropped (#338).
 KINDS = ("lesson", "answer", "review", "prediction", "prediction-check", "question", "report")
+# The kinds each task kind may propose (#540): one source for the prompt (``{{kinds}}``),
+# the local brain's JSON schema, the loop's binding and the gate (``wrong_kind``).
+ALLOWED_KINDS = {
+    "directive": ("report", "question"),
+    "answer": ("answer",),
+    "review": ("review",),
+    "check": ("prediction-check",),
+    "reflect": ("lesson", "question", "prediction"),
+    "study": ("lesson",),
+}
 VERDICTS = ("verified", "refuted", "unsure")
 CHECK_OUTCOMES = ("true", "false", "unclear")
 # A report on an accepted directive (#341). "couldnt" is an honest outcome, not a good one.
