@@ -109,9 +109,10 @@ export function RecentCycles({ cycles }) {
 }
 
 export function MindControls({ settings, onSave, busy }) {
-  const [draft, setDraft] = useState({});
+  // Filled from the settings on the first render (GrowthView keys this by them), not by an
+  // effect afterwards, so the fields never show empty for a moment.
+  const [draft, setDraft] = useState(() => ({ ...(settings?.budget || {}) }));
   const [error, setError] = useState(null);
-  useEffect(() => { setDraft({ ...(settings?.budget || {}) }); }, [settings]);
   if (!settings) return null;
   const paused = settings.paused;
   return (
@@ -167,7 +168,8 @@ export function GrowthView({ ledger, subject, settings, onSave, busy }) {
       <p className="mb-4 text-sm text-paper-muted">
         {GROWTH_ABOUT} <span>Model families: {ledger.families?.length ? ledger.families.join(", ") : "none reported"}.</span>
       </p>
-      {subject === "member" && <MindControls settings={settings} onSave={onSave} busy={busy} />}
+      {subject === "member" && settings
+        && <MindControls key={JSON.stringify(settings)} settings={settings} onSave={onSave} busy={busy} />}
       {empty
         ? <EmptyState title="No mind activity in this range">Lessons, reviews and mind cycles show here once this
             {subject === "member" ? " member's mind" : " swarm's minds"} start writing them.</EmptyState>
