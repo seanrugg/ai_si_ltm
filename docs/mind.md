@@ -207,6 +207,53 @@ matching records between the prediction's own `ts` and its `check_after` (at mos
 (`<`, `<=`, `>`, `>=`, `==`, `!=`). Any measure that isn't in this shape needs a
 brain, so it's only checked while dreaming.
 
+## The growth ledger (#342)
+
+Records are cheap; learning isn't. The ledger counts, from the records above,
+what a member learned next to how much it wrote. Nothing new is stored: it's
+worked out when it's read (`server/services/growth.py`).
+
+| Endpoint (admin) | Returns |
+|---|---|
+| `GET /api/admin/members/{id}/growth?days=30` | one member's ledger |
+| `GET /api/admin/swarms/{name}/growth` | its current members' ledgers summed, plus each member's verified lessons |
+| `GET /api/admin/growth` | every active member, summed |
+
+A member's ledger has:
+- **`lessons`**: `proposed`, then each lesson's status from its latest
+  **cross-family** review (`verified`, `refuted`, `unsure`, or `unreviewed`),
+  plus `promoted` (cited by an in-force policy).
+  - A review counts as cross-family only when the reviewer's `model_family` differs
+    from the author's, both taken from the records themselves. A later model change
+    doesn't rewrite history.
+  - Same-family reviews are counted (`same_family_reviews`) but never decide a status.
+  - When two other families disagree on the same day, `refuted` wins.
+- **`reviews_given`**: by verdict, and how many were cross-family.
+- **`predictions`**: `made`, `checked`, how they came out, and a Brier score
+  over those that gave `payload.probability`.
+- **`questions`** (`asked`, `answered_by_others`) and **`answers`** (`given`).
+- **`directives`**: reports by status. **`energy`**: a robot's off-dock outcomes.
+- **`actions`**: outcome counts, from the same query as `/admin/outcomes`.
+- **`cycles`**: wakes, dreams, pauses, records written, brain errors, tokens,
+  and the gate's reasons (`gated`, `rejected`).
+- **`volume.records`**: from the same query as `/admin/volume`. Also
+  **`learning_ratio`**: cross-family-verified lessons ÷ records written.
+
+### Settings from the server
+
+An admin can pause a member's mind or lower its budgets:
+
+```
+PATCH /api/admin/members/{id}/mind
+{"paused": true, "budget": {"calls_per_wake": 3, "tokens_per_wake": 8000, "writes_per_day": 5}}
+```
+
+- `null` returns a budget key to the device's own setting. Every change is audited (`mind_settings_change`).
+- The member hears its settings at sign-in (`mind` in the token response).
+- The loop takes the **smaller** of the server's budget and its own `MIND_BRAIN_CALLS`,
+  `MIND_TOKENS` and `MIND_DAILY_WRITES`: the server can only lower them. The cycle
+  record shows a server budget as `server_budget`.
+
 ## The local brain (#340)
 
 Any AI model already in the fleet can be a member's brain: the mind sends its

@@ -140,6 +140,13 @@ def host_health(path: str = "/") -> dict:
 _NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 
+def _lower(local: int, server) -> int:
+    """The server's limit if it's a whole number below the device's own; else the device's."""
+    if isinstance(server, int) and not isinstance(server, bool) and 0 <= server < local:
+        return server
+    return local
+
+
 def normalize_refs(refs):
     """Rewrite the obvious ways a model writes a record key (#521): ``{"v3-c7r": "72120"}``
     or ``{"v3-c7r": 72120}`` becomes ``{"evidence": ["v3-c7r:72120"]}``. Anything else is
@@ -432,8 +439,14 @@ class Mind:
         self.client.auto_read_charter = True
         paused = self.cfg.paused or bool((tok.get("mind") or {}).get("paused"))
         written_today = (self.state.get("writes") or {}).get(now.astimezone().date().isoformat(), 0)
-        budget = Budget(calls=self.cfg.brain_calls, tokens=self.cfg.tokens, seconds=self.cfg.seconds,
-                        daily_writes=self.cfg.daily_writes, written_today=written_today, clock=self.monotonic)
+        # The server can lower this mind's budget (#342), never raise it above the device's own caps.
+        server = (tok.get("mind") or {}).get("budget") or {}
+        budget = Budget(calls=_lower(self.cfg.brain_calls, server.get("calls_per_wake")),
+                        tokens=_lower(self.cfg.tokens, server.get("tokens_per_wake")), seconds=self.cfg.seconds,
+                        daily_writes=_lower(self.cfg.daily_writes, server.get("writes_per_day")),
+                        written_today=written_today, clock=self.monotonic)
+        if isinstance(server, dict) and server:
+            counts["server_budget"] = {k: v for k, v in server.items() if isinstance(v, int)}
         # A paused mind leaves directives unacknowledged until it resumes, rather than
         # declining them for good.
         swarm, open_directives = self._duties(tok, duty, None if paused else self._decider(budget))
