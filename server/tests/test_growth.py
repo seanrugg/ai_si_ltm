@@ -180,3 +180,30 @@ def test_growth_needs_an_admin(http, fleet):
     for url in (f"/api/admin/members/{vec.member_id}/growth", "/api/admin/growth",
                 f"/api/admin/members/{vec.member_id}/mind"):
         assert http.get(url).status_code == 401
+
+
+def test_the_growth_tab_gets_a_trend_the_lessons_with_reviewers_and_recent_cycles(admin, fleet):
+    """#343: what the Growth tab draws."""
+    vec, mac, q3 = fleet
+    k = lesson(vec, "show_icon takes five icon names", "qwen")
+    vec.append("lesson", summary="Studied: lidar dust", tags=["mind"],
+               payload={"sources": [{"dataset": "d", "version": 1, "item": "x"}], "model_family": "qwen"})
+    vec.append("event", summary="Mind cycle (awake)", tags=["mind_cycle"],
+               payload={"mode": "awake", "brain": "none", "considered": 2, "written": 0,
+                        "gated": {"bad_ref": 1}, "rejected": [{"reason": "bad_ref", "detail": "refs.x"}]})
+    vec.flush()
+    review(mac, k, "verified", "gemma")
+    review(q3, k, "unsure", "qwen")
+    mac.flush()
+    q3.flush()
+    g = growth(admin, vec)
+    assert g["lessons"]["studied"] == 1
+    [day] = g["daily"].values()
+    assert day["lessons"] == 2 and day["verified"] == 1 and day["records"] == g["volume"]["records"]
+    item = next(x for x in g["lesson_list"] if x["key"] == k)
+    assert item["status"] == "verified" and item["family"] == "qwen"
+    assert [(r["by"], r["family"], r["verdict"]) for r in item["reviews"]] == [
+        ("m4-c2", "gemma", "verified"), ("q3-u3", "qwen", "unsure")]
+    assert g["recent_cycles"][0]["considered"] == 2 and g["recent_cycles"][0]["gated"] == {"bad_ref": 1}
+    total = admin.get("/api/admin/growth").json()
+    assert sum(d["verified"] for d in total["daily"].values()) == 1 and "lesson_list" not in total

@@ -239,6 +239,16 @@ A member's ledger has:
 - **`volume.records`**: from the same query as `/admin/volume`. Also
   **`learning_ratio`**: cross-family-verified lessons ÷ records written.
 
+In the dashboard, a member's or swarm's **Growth** tab (#343) shows these:
+- the headline numbers, the daily trend of records written against lessons verified (with a table alternative);
+- for a member, its lessons with every review, the reviewer and their family, and its recent mind cycles;
+- for a swarm, its members ranked by verified lessons;
+- for a member, the mind controls below.
+
+The ledger also returns `daily` (`{day: {records, lessons, verified}}`, summed in the
+roll-ups) and, for a member, `lesson_list` (newest 50, with reviews) and
+`recent_cycles` (newest 10).
+
 ### Settings from the server
 
 An admin can pause a member's mind or lower its budgets:

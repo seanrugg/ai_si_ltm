@@ -116,3 +116,10 @@ export const TOKEN_PAYLOADS = "Payloads are full record contents (sensor reading
 export const TOKEN_EXPIRES = "The token stops working at the start of this day. Never means it works until revoked. Tokens with payloads should expire.";
 export const OPEN_PAYLOADS = "Off: open callers read headers only (summary, time, type). On: they also read full record contents for the types and swarms above, with no token. Turn it off when you're done.";
 export const INGEST_RATE_HELP = "Records over the limit wait in the member's outbox and are sent later; nothing is lost. A hub is charged for every record it relays for its swarm, so a busy hub may need a higher limit.";
+
+// Growth tab (#343).
+export const GROWTH_ABOUT = "Learning, not volume. A lesson counts as verified only when a member running a different model family reviews it and agrees; same-family reviews are shown but never decide. Worked out from the records each time you look.";
+export const GROWTH_TREND = "Records written each day next to lessons verified that day. Healthy growth is a few verified lessons per day while records stay steady: lots of records and no verified lessons means activity without learning.";
+export const MIND_PAUSE = "A paused mind still reads the charter, introduces itself and reports health, but does no thinking and leaves new directives for later. The member hears this at its next sign-in, so it takes effect at its next wake.";
+export const MIND_BUDGET = "Lowers this member's per-wake brain calls and tokens, and its records per day. The server can only lower them: the member never goes above its own settings on the device. Blank uses the device's own setting.";
+
