@@ -68,6 +68,11 @@ def test_member_list_shows_when_ingest_was_refused(mesh, admin, monkeypatch):
 
     assert _listed(admin, "z3-r0")["ingest_refused_at"] is not None
 
+    # Raising the limit clears the badge: that refusal was under the old limit.
+    assert admin.patch(f"/api/admin/members/{z3.member_id}/ingest-rate",
+                       json={"ingest_rate": 50}).status_code == 200
+    assert _listed(admin, "z3-r0")["ingest_refused_at"] is None
+
 
 def test_member_list_includes_the_server_default(mesh, admin, app):
     """#451: the dashboard shows "server default (N records/s)" without knowing LTMS_INGEST_RATE."""

@@ -427,7 +427,7 @@ function MemberRow({ m, swarm, swarms, location, inherited, estimate, geo, unpla
   return (
     <li className="border-b border-ink-line px-4 py-3 last:border-b-0">
       <div className="grid grid-cols-1 items-baseline gap-2 md:grid-cols-[12rem_6rem_1fr_7rem_auto]">
-        <span className="flex items-baseline gap-2">
+        <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
           <Link to={`/members/${encodeURIComponent(m.name)}/profile`} className="font-bold hover:underline"
                 aria-label={`Profile of ${m.name}`}>{m.name}</Link>
           <Link to={`/?agent=${encodeURIComponent(m.name)}`} className="text-xs text-paper-muted underline hover:text-paper"

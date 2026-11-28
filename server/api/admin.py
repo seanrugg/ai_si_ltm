@@ -357,7 +357,9 @@ async def set_ingest_rate(member_id: str, request: Request, body: dict, admin: A
     async with transaction(request) as session:
         m = await enrollment.set_ingest_rate(session, _uuid(member_id), admin=admin.username,
                                              ingest_rate=body["ingest_rate"])
-        return enrollment.member_to_dict(m)
+    # A refusal under the old limit says nothing about the new one: clear the badge.
+    getattr(request.app.state, "ingest_refused", {}).pop(str(m.id), None)
+    return enrollment.member_to_dict(m)
 
 
 @router.patch("/admin/members/{member_id}/permissions")
