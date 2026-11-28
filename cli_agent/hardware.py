@@ -129,7 +129,9 @@ def _mac_facts(facts: dict) -> None:
     ver = platform.mac_ver()[0]
     if ver:
         facts["os"] = f"macOS {ver}"
-    facts["gpu_metal"] = platform.machine() == "arm64"
+    apple_silicon = platform.machine() == "arm64"
+    facts["gpu_metal"] = apple_silicon
+    facts["npu"] = facts.get("npu") or apple_silicon  # every Apple silicon chip has a Neural Engine
 
 
 def profile(facts: dict) -> dict:
