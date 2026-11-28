@@ -97,3 +97,8 @@ class Brain:
         directives are followed by default. A brain that calls a model sets
         ``last_tokens`` here too."""
         return None
+
+    def take_usage(self) -> dict:
+        """Token detail since the last take (#529), for the cycle record's ``usage``;
+        resets it. ``{}``: nothing to report (the default)."""
+        return {}

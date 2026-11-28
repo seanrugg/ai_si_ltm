@@ -22,12 +22,26 @@ Tokens charged are the server's ``usage.prompt_tokens + completion_tokens``.
 Without ``usage``, they're estimated (characters / 4) and ``tokens_estimated``
 is set, which the loop copies into the cycle record.
 
+**Context (#529).** Each call's prompt and completion tokens and its
+``finish_reason`` are added up for the wake (``take_usage``, the cycle record's
+``usage``); ``truncated`` counts replies cut off at ``max_tokens``. The model's
+context length comes from ``MIND_LOCAL_CONTEXT`` or, once, from the server:
+llama.cpp's ``/props`` (``n_ctx``), or Ollama's ``/api/ps`` (the loaded
+context), the Modelfile's ``num_ctx`` (``/api/show``), else the model's trained
+``context_length``, which is only a ceiling. Each call's ``max_tokens`` is then
+min(``MIND_LOCAL_MAX_TOKENS``, context − estimated prompt − margin), and a prompt
+that leaves less than ``MIN_REPLY`` is not sent (``too_long``), because a server
+would cut it without an error. Ollama's ``/v1`` can't set ``num_ctx``;
+``MIND_LOCAL_API=ollama`` uses its native ``/api/chat``, which sends
+``MIND_LOCAL_CONTEXT`` as ``options.num_ctx``.
+
 The brain only reasons: no tools, no files, no network beyond its own model
 server. ``MIND_LOCAL_API_KEY`` is sent only if set, and never logged.
 """
 from __future__ import annotations
 
 import logging
+import math
 import re
 from typing import Any
 
@@ -42,6 +56,14 @@ log = logging.getLogger("ltms_mind.brains.local")
 THINK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 # How the reply is constrained, strictest first; a rejection moves one step down (#540).
 FORMATS = ("schema", "object", None)
+APIS = ("openai", "ollama")
+# Context sizing (#529): tokens kept free beyond the estimate (chat template, tokenizer
+# drift), the shortest reply worth asking for, and characters per token until the
+# server's own counts say otherwise (low, so a prompt is overestimated, not cut).
+MARGIN = 64
+MIN_REPLY = 128
+CHARS_PER_TOKEN = 3.0
+USAGE_KEYS = ("calls", "prompt_tokens", "completion_tokens", "truncated", "too_long", "max_prompt")
 
 
 def proposals_schema(task_kind: str) -> dict:
@@ -82,17 +104,29 @@ class LocalBrain(Brain):
     can_dream = True
 
     def __init__(self, *, url: str, model: str, timeout: float = 120.0, max_tokens: int = 1024,
-                 temperature: float = 0.2, api_key: str | None = None,
+                 temperature: float = 0.2, api_key: str | None = None, api: str = "openai",
+                 context: int | None = None, probe: bool = False,
                  client: httpx.Client | None = None) -> None:
         if not url or not model:
             raise ValueError("the local brain needs MIND_LOCAL_URL and MIND_LOCAL_MODEL")
-        self.url = url.rstrip("/") + "/chat/completions"
+        if api not in APIS:
+            raise ValueError(f"MIND_LOCAL_API must be one of {', '.join(APIS)}, not {api!r}")
+        base = url.rstrip("/")
+        self.root = base.removesuffix("/v1")  # where /props and /api/* live
+        self.api = api
+        self.url = self.root + "/api/chat" if api == "ollama" else base + "/chat/completions"
         self.model, self.timeout, self.max_tokens, self.temperature = model, timeout, max_tokens, temperature
         self._headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         self._client = client or httpx.Client(timeout=timeout)
         self.format_mode = FORMATS[0]  # steps down when the server rejects it (FORMATS)
         self.last_tokens = 0
         self.tokens_estimated = False
+        # Context (#529): set, or read from the server once (``probe``), or unknown.
+        self.num_ctx = context if context and context > 0 else None  # sent as options.num_ctx (ollama api)
+        self.context, self.context_source = (self.num_ctx, "setting") if self.num_ctx else (None, None)
+        self._probe = probe and self.context is None
+        self.chars_per_token = CHARS_PER_TOKEN
+        self.usage = dict.fromkeys(USAGE_KEYS, 0)
 
     def __repr__(self) -> str:  # never shows the key
         return f"LocalBrain(url={self.url!r}, model={self.model!r})"
@@ -102,10 +136,82 @@ class LocalBrain(Brain):
         """True while the server takes some ``response_format`` (schema or plain JSON)."""
         return self.format_mode is not None
 
+    # ------------------------------------------------------------------ context (#529)
+    def _get_json(self, method: str, path: str, **kw) -> dict | None:
+        """One probe request; None if it fails or isn't JSON. Raises nothing."""
+        try:
+            resp = self._client.request(method, self.root + path, headers=self._headers,
+                                        timeout=min(self.timeout, 10.0), **kw)
+        except httpx.HTTPError:
+            return None
+        if resp.status_code != 200:
+            return None
+        try:
+            out = resp.json()
+        except ValueError:
+            return None
+        return out if isinstance(out, dict) else None
+
+    def probe_context(self) -> int | None:
+        """Read the model's context length from the server (llama.cpp, then Ollama).
+        Sets ``context`` and ``context_source``; leaves them unset if nothing answers."""
+        props = self._get_json("GET", "/props")                     # llama.cpp's llama-server
+        if props is not None:
+            gen = props.get("default_generation_settings") or {}
+            n = _int(gen.get("n_ctx")) or _int(props.get("n_ctx"))
+            if n:
+                return self._set_context(n, "server")
+        ps = self._get_json("GET", "/api/ps")                       # Ollama: what's loaded now
+        for m in (ps or {}).get("models") or []:
+            if self.model in (m.get("name"), m.get("model")) and _int(m.get("context_length")):
+                return self._set_context(_int(m["context_length"]), "server")
+        show = self._get_json("POST", "/api/show", json={"model": self.model})
+        if show is not None:
+            found = re.search(r"^\s*num_ctx\s+(\d+)", str(show.get("parameters") or ""), re.MULTILINE)
+            if found:
+                return self._set_context(int(found.group(1)), "modelfile")
+            trained = [_int(v) for k, v in (show.get("model_info") or {}).items() if k.endswith(".context_length")]
+            if any(trained):
+                return self._set_context(max(trained), "model")   # a ceiling: the server may use less
+        return None
+
+    def _set_context(self, n: int, source: str) -> int:
+        self.context, self.context_source = n, source
+        log.info("model context: %d tokens (%s)", n, source)
+        return n
+
+    def reply_budget(self, prompt: str) -> int:
+        """The ``max_tokens`` for this prompt: what's left of the context, at most the setting.
+        Raises ``BrainError`` (and counts ``too_long``) if too little is left to reply."""
+        if self._probe:
+            self._probe = False
+            self.probe_context()
+        if not self.context:
+            return self.max_tokens
+        est = math.ceil(len(prompt) / self.chars_per_token)
+        room = self.context - est - MARGIN
+        if room < min(MIN_REPLY, self.max_tokens):
+            self.usage["too_long"] += 1
+            raise BrainError(f"the prompt (about {est} tokens) doesn't fit the model's context "
+                             f"({self.context}, {self.context_source})")
+        return min(self.max_tokens, room)
+
     # ------------------------------------------------------------------ one call
-    def _body(self, prompt: str, schema: dict | None = None) -> dict[str, Any]:
-        body = {"model": self.model, "messages": [{"role": "user", "content": prompt}],
-                "temperature": self.temperature, "max_tokens": self.max_tokens, "stream": False}
+    def _body(self, prompt: str, schema: dict | None = None, max_tokens: int | None = None) -> dict[str, Any]:
+        max_tokens = max_tokens or self.max_tokens
+        messages = [{"role": "user", "content": prompt}]
+        if self.api == "ollama":                                    # native /api/chat
+            options = {"temperature": self.temperature, "num_predict": max_tokens}
+            if self.num_ctx:
+                options["num_ctx"] = self.num_ctx
+            body = {"model": self.model, "messages": messages, "stream": False, "options": options}
+            if self.format_mode == "schema" and schema is not None:
+                body["format"] = schema
+            elif self.format_mode is not None:
+                body["format"] = "json"
+            return body
+        body = {"model": self.model, "messages": messages,
+                "temperature": self.temperature, "max_tokens": max_tokens, "stream": False}
         if self.format_mode == "schema" and schema is not None:
             body["response_format"] = {"type": "json_schema",
                                        "json_schema": {"name": "proposals", "schema": schema}}
@@ -113,9 +219,9 @@ class LocalBrain(Brain):
             body["response_format"] = {"type": "json_object"}
         return body
 
-    def _post(self, prompt: str, schema: dict | None = None) -> httpx.Response:
+    def _post(self, prompt: str, schema: dict | None = None, max_tokens: int | None = None) -> httpx.Response:
         try:
-            return self._client.post(self.url, json=self._body(prompt, schema), headers=self._headers,
+            return self._client.post(self.url, json=self._body(prompt, schema, max_tokens), headers=self._headers,
                                      timeout=self.timeout)
         except httpx.TimeoutException:
             raise BrainError(f"the model server timed out after {self.timeout:g}s") from None
@@ -126,14 +232,26 @@ class LocalBrain(Brain):
         """True if this reply refuses the ``response_format`` we sent (not some other 400)."""
         if resp.status_code not in (400, 422) or self.format_mode is None:
             return False
+        words = ("response_format", "format") if self.api == "ollama" else ("response_format",)
         if self.format_mode == "schema" and schema is None:  # we sent json_object, not the schema
-            return "response_format" in resp.text
-        return any(w in resp.text for w in ("response_format", "json_schema", "schema"))
+            return any(w in resp.text for w in words)
+        return any(w in resp.text for w in (*words, "json_schema", "schema"))
+
+    def _reply(self, out: dict) -> tuple[str, int | None, int | None, str | None]:
+        """(text, prompt tokens, completion tokens, finish reason) from either API's reply."""
+        if self.api == "ollama":
+            text = out["message"]["content"] or ""
+            return text, _int(out.get("prompt_eval_count")), _int(out.get("eval_count")), out.get("done_reason")
+        choice = out["choices"][0]
+        usage = out.get("usage") or {}
+        return (choice["message"]["content"] or "", _int(usage.get("prompt_tokens")),
+                _int(usage.get("completion_tokens")), choice.get("finish_reason"))
 
     def run(self, prompt: str, schema: dict | None = None) -> str:
-        """One chat call. Returns the reply's text; adds its tokens to ``last_tokens``.
-        ``schema`` constrains the reply while the server accepts it."""
-        resp = self._post(prompt, schema)
+        """One chat call. Returns the reply's text; adds its tokens to ``last_tokens``
+        and to the wake's ``usage``. ``schema`` constrains the reply while the server accepts it."""
+        max_tokens = self.reply_budget(prompt)
+        resp = self._post(prompt, schema, max_tokens)
         while self._rejected_format(resp, schema):
             if self.format_mode == "schema" and schema is None:
                 self.format_mode = "object"  # a rejected json_object goes past the schema step
@@ -141,21 +259,42 @@ class LocalBrain(Brain):
             log.info("the model server rejected response_format %s; using %s from now on",
                      self.format_mode, nxt or "none")
             self.format_mode = nxt
-            resp = self._post(prompt, schema)
+            resp = self._post(prompt, schema, max_tokens)
         if resp.status_code != 200:
             raise BrainError(f"the model server answered {resp.status_code}: {resp.text.strip()[:200]}")
         try:
-            out = resp.json()
-            text = out["choices"][0]["message"]["content"] or ""
+            text, p_tok, c_tok, finish = self._reply(resp.json())
         except (ValueError, KeyError, IndexError, TypeError):
-            raise BrainError("the model server's reply isn't an OpenAI-style chat completion") from None
-        usage = out.get("usage") or {}
-        if "prompt_tokens" in usage or "completion_tokens" in usage:
-            self.last_tokens += int(usage.get("prompt_tokens") or 0) + int(usage.get("completion_tokens") or 0)
-        else:
-            self.last_tokens += (len(prompt) + len(text)) // 4
+            kind = "an Ollama chat reply" if self.api == "ollama" else "an OpenAI-style chat completion"
+            raise BrainError(f"the model server's reply isn't {kind}") from None
+        if p_tok is None and c_tok is None:
+            p_tok, c_tok = math.ceil(len(prompt) / 4), math.ceil(len(text) / 4)
             self.tokens_estimated = True
+        p_tok, c_tok = p_tok or 0, c_tok or 0
+        if p_tok > 0 and not self.tokens_estimated:  # the server's count: learn this model's ratio
+            self.chars_per_token = min(6.0, max(1.5, len(prompt) / p_tok))
+        self.last_tokens += p_tok + c_tok
+        u = self.usage
+        u["calls"] += 1
+        u["prompt_tokens"] += p_tok
+        u["completion_tokens"] += c_tok
+        u["max_prompt"] = max(u["max_prompt"], p_tok)
+        if finish == "length":
+            u["truncated"] += 1
+        log.info("local call: prompt %d, completion %d of %d, finish %s", p_tok, c_tok, max_tokens, finish)
         return strip_thinking(text)
+
+    def take_usage(self) -> dict:
+        """The token counts since the last take (#529), for the cycle record; then resets them.
+        Empty if no call was made or refused."""
+        u, self.usage = self.usage, dict.fromkeys(USAGE_KEYS, 0)
+        if not (u["calls"] or u["too_long"]):
+            return {}
+        out = {k: v for k, v in u.items() if v or k in ("calls", "prompt_tokens", "completion_tokens")}
+        if self.context:
+            out["context"], out["context_source"] = self.context, self.context_source
+        out["max_tokens"] = self.max_tokens
+        return out
 
     def _ask(self, prompt: str, parse, schema: dict | None = None):
         """Run, parse; on an unusable reply, one retry that says what was wrong."""
@@ -182,3 +321,12 @@ class LocalBrain(Brain):
                 raise ValueError('expected {"accept": true|false, "reason": "..."}')
             return obj["accept"], (str(obj["reason"]) if obj.get("reason") else None)
         return self._ask(prompts.decide_prompt(directive, context), parse)
+
+
+def _int(v) -> int | None:
+    """A positive int from a server's JSON value, else None."""
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None

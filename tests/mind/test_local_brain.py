@@ -212,3 +212,135 @@ def test_parse_every():
     assert parse_every({"X": "0"}, "X", 7.0) == 0
     with pytest.raises(ValueError):
         parse_every({"X": "soon"}, "X", 1.0)
+
+
+# ------------------------------------------------------------------ tokens and context (#529)
+def routed(routes, seen=None):
+    """A fake model server by path: each route is (status, body) or a list of them, taken in turn."""
+    routes = {k: (list(v) if isinstance(v, list) else v) for k, v in routes.items()}
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content) if request.content else None
+        if seen is not None:
+            seen.append((request.url.path, body))
+        r = routes.get(request.url.path, (404, {"error": "not found"}))
+        if isinstance(r, list):
+            r = r.pop(0)
+        status, payload = r
+        return httpx.Response(status, json=payload) if isinstance(payload, dict) else httpx.Response(status, text=payload)
+    return httpx.Client(transport=httpx.MockTransport(handle))
+
+
+def chat_usage(text, prompt=900, completion=100, finish="stop"):
+    return 200, {"choices": [{"message": {"role": "assistant", "content": text}, "finish_reason": finish}],
+                 "usage": {"prompt_tokens": prompt, "completion_tokens": completion}}
+
+
+def test_each_call_is_split_into_prompt_and_completion_and_cut_replies_are_counted():
+    b = brain([chat_usage("not json", 800, 1024, "length"), chat_usage(json.dumps(PROPOSAL), 850, 60)])
+    b.propose(TASK, CTX)
+    assert b.last_tokens == 800 + 1024 + 850 + 60
+    u = b.take_usage()
+    assert u == {"calls": 2, "prompt_tokens": 1650, "completion_tokens": 1084, "truncated": 1,
+                 "max_prompt": 850, "max_tokens": 1024}
+    assert b.take_usage() == {}                            # taken: reset for the next wake
+
+
+def test_a_known_context_caps_max_tokens_and_a_prompt_that_cannot_fit_is_not_sent():
+    seen = []
+    b = brain([chat_usage(json.dumps(PROPOSAL))], seen, context=2048)
+    b.propose(TASK, CTX)
+    prompt = seen[0][1]["messages"][0]["content"]
+    est = -(-len(prompt) // 3)                             # chars / 3, rounded up, before the server's count
+    assert seen[0][1]["max_tokens"] == min(1024, 2048 - est - 64)
+    small = brain([], seen, context=est + 64 + 10)         # 10 tokens left: less than a useful reply
+    with pytest.raises(BrainError, match="doesn't fit the model's context"):
+        small.propose(TASK, CTX)
+    assert len(seen) == 1                                  # nothing was sent
+    assert small.take_usage() == {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "too_long": 1,
+                                  "context": est + 74, "context_source": "setting", "max_tokens": 1024}
+
+
+def test_the_servers_counts_teach_the_brain_its_tokenizer():
+    b = brain([chat_usage(json.dumps(PROPOSAL), prompt=200)], context=32768)
+    b.propose(TASK, CTX)
+    assert b.chars_per_token > 3.0                         # ~len/200, so later prompts aren't overestimated
+
+
+@pytest.mark.parametrize("routes,ctx,source", [
+    ({"/props": (200, {"default_generation_settings": {"n_ctx": 8192}})}, 8192, "server"),       # llama.cpp
+    ({"/api/ps": (200, {"models": [{"name": "qwen3:4b", "context_length": 4096}]})}, 4096, "server"),
+    ({"/api/show": (200, {"parameters": "temperature 0.7\nnum_ctx 6144", "model_info": {}})}, 6144, "modelfile"),
+    ({"/api/show": (200, {"parameters": "", "model_info": {"qwen3.context_length": 40960}})}, 40960, "model"),
+])
+def test_the_context_is_read_from_the_server_once(routes, ctx, source):
+    seen = []
+    b = LocalBrain(url="http://127.0.0.1:11434/v1", model="qwen3:4b", probe=True,
+                   client=routed({**routes, "/v1/chat/completions": [chat_usage(json.dumps(PROPOSAL))] * 2}, seen))
+    b.propose(TASK, CTX)
+    b.propose(TASK, CTX)
+    assert (b.context, b.context_source) == (ctx, source)
+    assert [p for p, _ in seen].count("/v1/chat/completions") == 2
+    assert len([p for p, _ in seen if p != "/v1/chat/completions"]) <= 3   # probed on the first call only
+    assert b.take_usage()["context"] == ctx
+
+
+def test_a_server_that_says_nothing_about_its_context_keeps_the_setting():
+    b = LocalBrain(url="http://127.0.0.1:8080/v1", model="m", probe=True,
+                   client=routed({"/v1/chat/completions": chat_usage(json.dumps(PROPOSAL))}))
+    b.propose(TASK, CTX)
+    assert b.context is None and "context" not in b.take_usage()
+
+
+def test_the_ollama_api_sets_num_ctx_and_reads_its_own_counts():
+    seen = []
+    reply = {"message": {"role": "assistant", "content": json.dumps(PROPOSAL)}, "done": True,
+             "done_reason": "length", "prompt_eval_count": 700, "eval_count": 300}
+    b = LocalBrain(url="http://127.0.0.1:11434/v1", model="qwen2.5:1.5b", api="ollama", context=8192, probe=True,
+                   client=routed({"/api/chat": [(400, '{"error":"invalid format: schema"}'), (200, reply)]}, seen))
+    (p,) = b.propose(TASK, CTX)
+    assert p.kind == "answer"
+    assert [s[0] for s in seen] == ["/api/chat", "/api/chat"]   # a set context is not probed
+    first, second = seen[0][1], seen[1][1]
+    assert first["format"]["required"] == ["proposals"] and second["format"] == "json"
+    assert first["options"]["num_ctx"] == 8192 and first["options"]["num_predict"] <= 1024
+    assert "max_tokens" not in first and "response_format" not in first
+    assert b.last_tokens == 1000
+    assert b.take_usage() == {"calls": 1, "prompt_tokens": 700, "completion_tokens": 300, "truncated": 1,
+                              "max_prompt": 700, "context": 8192, "context_source": "setting", "max_tokens": 1024}
+
+
+def test_api_and_context_settings():
+    env = {"LTMS_SERVER": "https://ltms.example.org", "LTMS_KEY_PATH": "/k/me.key.json", "MIND_BRAIN": "local",
+           "MIND_LOCAL_URL": "http://127.0.0.1:11434", "MIND_LOCAL_MODEL": "qwen2.5:1.5b",
+           "MIND_LOCAL_API": "Ollama", "MIND_LOCAL_CONTEXT": "8192"}
+    cfg = config.load(env)
+    assert cfg.local_api == "ollama" and cfg.local_context == 8192
+    b = brains.make(cfg.brain, cfg)
+    assert b.url == "http://127.0.0.1:11434/api/chat" and b.num_ctx == 8192 and b.context_source == "setting"
+    plain = config.load({**env, "MIND_LOCAL_API": "", "MIND_LOCAL_CONTEXT": ""})
+    assert plain.local_api == "openai" and plain.local_context is None
+    with pytest.raises(config.ConfigError, match="MIND_LOCAL_API"):
+        config.load({**env, "MIND_LOCAL_API": "vllm"})
+
+
+def test_the_cycle_record_carries_the_wakes_usage(server, make_mind):
+    """v3-c7r:74875 (a dream on 28 Nov) shows only "tokens": 1060; the split and the context were missing."""
+    from ltms_contract import generate_key
+
+    from .conftest import ts
+    from .test_mind import SWARM
+    server.swarm = SWARM
+    server.other(generate_key(), "asker", "action", at=ts(23), summary="dock", outcome="failed")
+    b = brain([chat_usage(json.dumps({"proposals": []}), 500, 20, "length")] * 10, context=4096)
+    counts = make_mind(brain=b).wake()
+    calls = counts["budget"]["brain_calls"]
+    assert calls > 0, "the reflect task should call the brain"
+    u = counts["usage"]
+    assert u["calls"] == calls and u["prompt_tokens"] == 500 * calls and u["truncated"] == calls
+    assert u["context"] == 4096 and u["prompt_tokens"] + u["completion_tokens"] == counts["budget"]["tokens"]
+    cycle = next(r for r in server.records if "mind_cycle" in (r.get("tags") or []))
+    assert (cycle["payload"].get("mind") or cycle["payload"])["usage"] == u
+    again = make_mind(brain=b).wake()                    # each wake reports its own calls, not a running total
+    assert again["usage"]["calls"] == again["budget"]["brain_calls"]
+    assert again["usage"]["prompt_tokens"] == 500 * again["budget"]["brain_calls"]
