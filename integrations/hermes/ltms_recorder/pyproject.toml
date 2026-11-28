@@ -4,7 +4,7 @@
 # it in the checkout it is linked from. See ../README.md.
 [project]
 name = "ltms-recorder-hermes-plugin"
-version = "0.2.2"
+version = "0.3.0"
 description = "Hermes Agent plugin: signed LTMS records of sessions and tool calls, plus a daily usage rollup"
 requires-python = ">=3.11"
 dependencies = [

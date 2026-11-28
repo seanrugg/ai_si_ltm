@@ -1,5 +1,5 @@
 name: ltms_recorder
-version: 0.2.2
+version: 0.3.0
 description: >-
   Records Hermes sessions and every tool call (with the raw result) as signed
   LTMS/FLTMS records, so a fleet can see what the agent actually did, plus one

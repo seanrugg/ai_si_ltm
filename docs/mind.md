@@ -292,7 +292,19 @@ Handoff("/Users/YOU/.ltms/device/handoff.db").submit(
     ts="2026-11-28T01:00:00Z")   # when it happened
 ```
 
-### Setting it up (the Mac Studio, a launchd agent)
+**Which process hosts it** depends on when the device should be in the fleet:
+
+- **While a harness runs** (the Mac Studio, M4-C2: while Hermes Desktop is open):
+  the harness's plugin hosts it. See `integrations/hermes/README.md`,
+  "Device mode". The member and mind start and stop with Hermes, and the mind
+  thinks with **Hermes's model**: `model.default` from Hermes's config at start,
+  then each session's model, if the model server has it.
+- **Always on**: a launchd agent, below.
+
+Either way, only one process per device hosts it: it holds `member.lock` beside
+`MEMBER_STATE_PATH`. Any other process on the device only hands off.
+
+### Setting it up (always on: a launchd agent)
 
 1. **The member's key**, generated on the device and kept there:
    ```bash
@@ -307,11 +319,13 @@ Handoff("/Users/YOU/.ltms/device/handoff.db").submit(
 3. **Settings:** copy `deploy/device-member/device.env.example` to
    `~/.ltms/device/device.env` (mode `0600`) and fill it in. Check the model
    name against `curl -s http://127.0.0.1:11434/v1/models`.
-4. **First run, by hand**, from that folder:
+4. **Hosted by Hermes instead?** Stop here and follow the Hermes README's
+   "Device mode": no launchd agent. Otherwise:
+5. **First run, by hand**, from that folder:
    `set -a; . ./device.env; set +a; python -m ltms_mind.member`. Within a minute:
    the spec sheet (hardware and the model) and an introduction. The first
    `mind_cycle` comes at the first wake. Stop it with Ctrl-C.
-5. **Always on:** edit the `/Users/YOU` paths in
+6. **Always on:** edit the `/Users/YOU` paths in
    `deploy/device-member/com.ltms.member.plist`, copy it to
    `~/Library/LaunchAgents/` and
    `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.ltms.member.plist`.

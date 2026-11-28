@@ -15,12 +15,12 @@ from pathlib import Path
 
 log = logging.getLogger("ltms_recorder")
 
-PLUGIN_VERSION = "0.2.2"
+PLUGIN_VERSION = "0.3.0"
 HOOKS = ("on_session_start", "post_tool_call", "on_session_end")
 ROLLUP_HOOKS = ("post_api_request", "api_request_error", "post_compaction")
 
 
-CLIENT_PACKAGES = ("cli_agent", "ltms_contract")
+CLIENT_PACKAGES = ("cli_agent", "ltms_contract")  # device mode (#521) also imports ltms_mind from the checkout
 
 
 def checkout_root() -> Path | None:
@@ -48,6 +48,7 @@ def use_checkout_client() -> Path | None:
     try:
         import cli_agent  # noqa: F401
         import ltms_contract  # noqa: F401
+        import ltms_mind  # noqa: F401
         return None
     except ImportError:
         pass
@@ -126,14 +127,23 @@ def wire(recorder, rollup) -> dict:
 
 
 def register(ctx) -> None:
-    """Hermes entry point. Never raises: a broken recorder must not stop Hermes."""
+    """Hermes entry point. Never raises: a broken recorder must not stop Hermes.
+
+    With ``LTMS_DEVICE_ENV`` set, device mode (#521, ``device.py``): Hermes records as
+    the device through its handoff, and runs the device's member and mind while it runs.
+    """
+    device = None
     try:
         use_checkout_client()
         try:
             settings = ctx.get_config() or {}
         except Exception:  # noqa: BLE001 - older Hermes, or no settings saved yet
             settings = {}
-        recorder = build_recorder(settings)
+        if os.environ.get("LTMS_DEVICE_ENV"):
+            from .device import start_device
+            recorder, device = start_device(settings)
+        else:
+            recorder = build_recorder(settings)
         rollup = build_rollup() if rollup_enabled(settings) else None
     except KeyError as exc:
         log.warning("ltms_recorder: not started, %s is not set", exc.args[0])
@@ -151,14 +161,22 @@ def register(ctx) -> None:
         log.warning("ltms_recorder: not started (%s)", type(exc).__name__)
         return
 
-    for name, fn in wire(recorder, rollup).items():
+    hooks = wire(recorder, rollup)
+    if os.environ.get("LTMS_DEVICE_ENV"):
+        from .device import follow_session_model
+        hooks["on_session_start"] = follow_session_model(hooks["on_session_start"], device)
+    for name, fn in hooks.items():
         ctx.register_hook(name, fn)
 
     def close() -> None:
         if rollup is not None:
             rollup.close(recorder)
         recorder.close()
+        if device is not None:
+            device.stop()  # after the recorder: its last records are in the handoff, signed on the way out
 
     atexit.register(close)
-    log.info("ltms_recorder: recording as %s (mode %s, rollup %s)", recorder.client.name,
-             recorder.settings["record_mode"], "on" if rollup is not None else "off")
+    log.info("ltms_recorder: recording as %s (mode %s, rollup %s%s)", recorder.client.name,
+             recorder.settings["record_mode"], "on" if rollup is not None else "off",
+             "" if not os.environ.get("LTMS_DEVICE_ENV") else
+             (", device member running here" if device is not None else ", device member runs in another process"))
