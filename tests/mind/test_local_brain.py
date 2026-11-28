@@ -60,7 +60,7 @@ def test_a_reply_becomes_proposals_and_usage_is_charged():
     assert b.last_tokens == 1000 and b.tokens_estimated is False
     req, body = seen[0]
     assert str(req.url) == "http://127.0.0.1:11434/v1/chat/completions"
-    assert body["model"] == "qwen3:4b" and body["response_format"] == {"type": "json_object"}
+    assert body["model"] == "qwen3:4b" and body["response_format"]["type"] == "json_schema"
     assert body["temperature"] == 0.2 and body["max_tokens"] == 1024 and body["stream"] is False
     assert "<data>" in body["messages"][0]["content"]    # the shared templates, data fenced
 
@@ -87,11 +87,52 @@ def test_bad_json_is_retried_once_then_dropped():
 
 def test_a_server_without_json_mode_is_asked_again_without_it():
     seen = []
-    b = brain([(400, "unknown field: response_format"), chat(json.dumps(PROPOSAL)), chat(json.dumps(PROPOSAL))], seen)
+    bad = (400, "unknown field: response_format")
+    b = brain([bad, bad, chat(json.dumps(PROPOSAL)), chat(json.dumps(PROPOSAL))], seen)
     b.propose(TASK, CTX)
-    assert "response_format" in seen[0][1] and "response_format" not in seen[1][1]
+    assert [s[1].get("response_format", {}).get("type") for s in seen] == ["json_schema", "json_object", None]
+    assert b.json_mode is False
     b.propose(TASK, CTX)                                   # remembered
-    assert "response_format" not in seen[2][1]
+    assert "response_format" not in seen[3][1]
+
+
+# ------------------------------------------------------------------ constrained output (#540)
+def test_the_schema_allows_only_the_tasks_kinds_and_record_keys():
+    seen = []
+    reflect = Task("reflect", "reflect", "q3-u3:58", "Write a lesson", {"record": {}})
+    lesson = {"proposals": [{"kind": "lesson", "summary": "Clear the dock path", "refs": {"evidence": ["q3-u3:58"]}}]}
+    b = brain([chat(json.dumps(lesson)), chat(json.dumps(PROPOSAL))], seen)
+    b.propose(reflect, CTX)
+    fmt = seen[0][1]["response_format"]
+    item = fmt["json_schema"]["schema"]["properties"]["proposals"]["items"]
+    assert fmt["type"] == "json_schema" and item["properties"]["kind"]["enum"] == ["lesson", "question", "prediction"]
+    key = item["properties"]["refs"]["additionalProperties"]["anyOf"][0]
+    assert key["pattern"] == r"^[a-z0-9][a-z0-9._-]{0,63}:[1-9][0-9]*$"
+    b.propose(TASK, CTX)
+    assert seen[1][1]["response_format"]["json_schema"]["schema"]["properties"]["proposals"]["items"][
+        "properties"]["kind"]["enum"] == ["answer"]
+
+
+@pytest.mark.parametrize("status", [400, 422])
+def test_a_server_that_rejects_the_schema_falls_back_to_json_object(status):
+    seen = []
+    b = brain([(status, "invalid response_format: json_schema not supported"),
+               chat(json.dumps(PROPOSAL)), chat(json.dumps(PROPOSAL))], seen)
+    assert len(b.propose(TASK, CTX)) == 1
+    assert seen[0][1]["response_format"]["type"] == "json_schema"
+    assert seen[1][1]["response_format"] == {"type": "json_object"}
+    b.propose(TASK, CTX)                                   # remembered
+    assert seen[2][1]["response_format"] == {"type": "json_object"} and b.json_mode is True
+
+
+def test_decide_asks_for_plain_json_and_other_400s_keep_the_schema():
+    seen = []
+    b = brain([chat(json.dumps({"accept": True})), (400, "prompt is too long")], seen)
+    b.decide({"id": "d1"}, CTX)
+    assert seen[0][1]["response_format"] == {"type": "json_object"}
+    with pytest.raises(BrainError):
+        b.propose(TASK, CTX)
+    assert b.format_mode == "schema"
 
 
 def test_server_errors_and_unreachable_servers_are_brain_errors():

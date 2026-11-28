@@ -9,9 +9,10 @@ from ltms_contract import generate_key
 from ltms_mind import config
 from ltms_mind.agenda import family_of
 from ltms_mind.brains.none import NoBrain
-from ltms_mind.gate import BAD_REF, DUPLICATE, NO_EVIDENCE, NO_PURPOSE, Gate, LexicalEmbedder
+from ltms_mind import prompts
+from ltms_mind.gate import BAD_REF, DUPLICATE, NO_EVIDENCE, NO_PURPOSE, WRONG_KIND, Gate, LexicalEmbedder
 from ltms_mind.loop import CYCLE_TAG, continue_chain
-from ltms_mind.brains.base import Proposal
+from ltms_mind.brains.base import ALLOWED_KINDS, Context, Proposal, Task
 
 from .conftest import FakeClient, ScriptedBrain, ts
 
@@ -345,6 +346,51 @@ def test_the_cycle_record_says_why_each_proposal_was_rejected(server, make_mind)
     assert rejected[1]["detail"] == "refs.agent must be <agent>:<seq>, got 'seq'"
     assert rejected[3]["detail"].startswith("near-copy of a recent record (similarity")
     assert "rejected_more" not in cycle["payload"]["mind"]
+
+
+# ------------------------------------------------------------------ allowed kinds per task (#540)
+def test_gate_refuses_a_kind_the_task_does_not_allow():
+    """Vector's reflect dreams on q3-u3:58 (72310, 72354, 72413) proposed answers."""
+    g = Gate(LexicalEmbedder(), 0.92, [])
+    answer = Proposal("answer", "The dock was blocked", refs={"answers": "q3-u3:58"})
+    assert g.check(answer, "reflect") == WRONG_KIND
+    assert g.detail == "reflect allows lesson, question, prediction; got answer"
+    assert g.check(Proposal("lesson", "Keep the dock clear", refs={"evidence": ["q3-u3:58"]}), "review") == WRONG_KIND
+    assert g.detail == "review allows review; got lesson"
+    assert g.check(answer, "answer") is None                       # allowed where it belongs
+    assert g.check(Proposal("note", "hello"), "reflect") == NO_PURPOSE   # an unknown kind is still no_purpose
+    assert g.check(Proposal("lesson", "Check the dock before docking", refs={"evidence": ["q3-u3:58"]})) is None
+    assert set(ALLOWED_KINDS) == set(prompts.KINDS)               # every task kind has its list
+
+
+def test_a_reflect_answer_is_rejected_as_wrong_kind_and_the_lesson_still_binds(server, make_mind):
+    server.swarm = SWARM
+    server.other(generate_key(), "asker", "action", at=ts(23), summary="dock", outcome="failed")
+
+    def script(task):
+        if task.category != "reflect":
+            return []
+        return [{"kind": "answer", "summary": "It failed because the dock was blocked"},
+                {"kind": "lesson", "summary": "Clear the path to the dock before a low-battery return"}]
+
+    out = make_mind(brain=ScriptedBrain(script)).wake()
+    assert out["gated"] == {WRONG_KIND: 1}
+    assert out["rejected"][0]["kind"] == "answer" and out["rejected"][0]["reason"] == WRONG_KIND
+    assert out["rejected"][0]["detail"] == "reflect allows lesson, question, prediction; got answer"
+    (lesson,) = [r for r in mine(server) if r["type"] == "lesson"]
+    assert lesson["refs"] == {"evidence": ["asker:1"]}                # #525 regression: no refs given, still cited
+
+
+def test_the_prompt_lists_only_the_tasks_kinds_and_a_real_record_key():
+    ctx = Context(member="v3-c7r", swarm="echo-base", family="qwen", now="2026-11-28T05:07:00Z", mode="dreaming")
+    reflect = Task("reflect", "reflect", "q3-u3:58", "q3-u3 recorded outcome 'failed'", {"record": {}})
+    text = prompts.task_prompt(reflect, ctx)
+    assert 'one this task allows: "lesson", "question" or "prediction".' in text
+    assert '"report"' not in text.split("THE TASK")[0] and "prediction-check" not in text.split("THE TASK")[0]
+    assert '{"evidence": ["q3-u3:58"]}' in text and "<agent>:<seq>" not in text
+    study = Task("study", "study", "ds1@2/icons", "Study 'icons'", {})
+    text = prompts.task_prompt(study, ctx)
+    assert 'one this task allows: "lesson".' in text and '{"evidence": ["v3-c7r:120"]}' in text
 
 
 def test_brain_errors_are_listed_and_the_list_is_capped(server, make_mind):

@@ -263,7 +263,8 @@ class Agenda:
                 if (self._in_swarm(r) or r.get("agent") == self.me) and key_of(r) not in cited:
                     tasks.append(Task("reflect", "reflect", key_of(r),
                                       f"{r['agent']} recorded outcome '{outcome}': {r.get('summary', '')}. "
-                                      "What can the swarm learn from it? Write a lesson that cites it, or a question.",
+                                      "Write a lesson the swarm can act on next time. If the cause isn't clear, "
+                                      f"write a question to {r['agent']} or the member best placed to explain it.",
                                       {"record": r}))
         return sorted(tasks, key=lambda t: t.inputs["record"].get("ts") or "", reverse=True)
 

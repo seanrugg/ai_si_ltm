@@ -149,6 +149,7 @@ counted under its reason in the cycle record (`gated`).
 | Rule | Reason code |
 |---|---|
 | A known kind (below). A summary alone has no kind | `no_purpose` |
+| A kind this task allows (table below) | `wrong_kind` |
 | The fields its kind needs; summary 1–500 characters; at most 16 sources | `bad_proposal` |
 | Every `refs` value is a record key, `<agent>:<seq>` (or a list of them) | `bad_ref` |
 | Cites evidence: `refs` to records or dataset `sources`. Questions are exempt | `no_evidence` |
@@ -167,6 +168,24 @@ rejections per wake in `rejected`; beyond that, `rejected_more` counts the rest.
 (e.g. `"ValueError: no JSON object in the reply"`). `detail` is at most 200
 characters. The model's own text is never put on the chain; the log line
 `gated … on <task>` has the rationale.
+
+**Each task allows only its own kinds (#540).** One map, `ALLOWED_KINDS` in
+`ltms_mind/brains/base.py`, feeds the prompt (rule 1 lists only these), the
+local brain's JSON schema, the loop's binding and the gate:
+
+| Task | Allowed kinds |
+|---|---|
+| directive | report, question |
+| answer | answer |
+| review | review |
+| check | prediction-check |
+| reflect | lesson, question, prediction |
+| study | lesson |
+
+Anything else is `wrong_kind`, with a detail like
+`reflect allows lesson, question, prediction; got answer`. Rule 2 of the prompt
+shows a real record key (the task's own when it is one) instead of a placeholder,
+which small models copied back as `{"agent": "seq"}`.
 
 The loop **binds** each proposal to its task, whatever the brain said: an
 answer's `refs.answers`, a review's `refs.reviews` and a check's `refs.checks`
@@ -280,8 +299,12 @@ llama.cpp's `llama-server`, vLLM and other compatible servers.
 | `MIND_LOCAL_API_KEY` | (none) | sent as a bearer token only if set; never logged |
 
 It uses the same prompt templates as the Claude Code brain and asks for JSON
-(`response_format: json_object`; a server that rejects that field is asked once
-more without it, and from then on). A `<think>` block and chatter around the
+constrained to the task (#540): `response_format: json_schema`, where `kind` is
+an enum of the task's allowed kinds and every `refs` value must be a record key.
+Ollama's `/v1` and llama.cpp's server take it. A server that rejects it gets
+`json_object`; one that rejects that too gets no `response_format`. Each step
+down happens once and is remembered. Deciding on a directive asks for plain
+`json_object`. A `<think>` block and chatter around the
 JSON are ignored; an unusable reply gets one retry, then the task is dropped
 (`brain_errors`). Tokens charged are the server's `usage`; without it they're
 estimated and the cycle record says `tokens_estimated: true`. The brain has no

@@ -1,6 +1,7 @@
 """The gate: a proposal is written only if it passes every rule (#338).
 
-1. **shape**: a known kind with the fields that kind needs.
+1. **shape**: a known kind, one the task allows (``ALLOWED_KINDS``; else ``wrong_kind``,
+   #540), with the fields that kind needs.
 2. **purpose**: it does something (answers, reviews, predicts, checks, asks, or
    teaches a lesson). A summary alone has no kind and fails here.
 3. **evidence**: ``refs`` to records or dataset ``sources``. Questions are exempt.
@@ -20,18 +21,19 @@ import math
 import re
 from collections import Counter
 
-from ltms_mind.brains.base import CHECK_OUTCOMES, KINDS, REPORT_STATUSES, VERDICTS, Proposal
+from ltms_mind.brains.base import ALLOWED_KINDS, CHECK_OUTCOMES, KINDS, REPORT_STATUSES, VERDICTS, Proposal
 
 log = logging.getLogger("ltms_mind.gate")
 
 # Reason codes (docs/mind.md).
 BAD_PROPOSAL = "bad_proposal"
 NO_PURPOSE = "no_purpose"
+WRONG_KIND = "wrong_kind"
 NO_EVIDENCE = "no_evidence"
 BAD_REF = "bad_ref"
 DUPLICATE = "duplicate"
 OVER_BUDGET = "over_budget"
-REASONS = (BAD_PROPOSAL, NO_PURPOSE, BAD_REF, NO_EVIDENCE, DUPLICATE, OVER_BUDGET)
+REASONS = (NO_PURPOSE, WRONG_KIND, BAD_PROPOSAL, BAD_REF, NO_EVIDENCE, DUPLICATE, OVER_BUDGET)
 
 # A record key: the contract's member name, a colon, a sequence number from 1.
 REF_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}:[1-9][0-9]*$")
@@ -158,15 +160,19 @@ class Gate:
         texts = [t for t in corpus if t]
         self._vecs = embedder.embed(texts) if texts else []
 
-    def check(self, p: Proposal) -> str | None:
+    def check(self, p: Proposal, task_kind: str | None = None) -> str | None:
         """None if it passes (and remembers it for novelty); otherwise the reason code,
-        with what failed in ``self.detail``."""
-        reason, self.detail = self._check(p)
+        with what failed in ``self.detail``. With ``task_kind``, the proposal's kind must
+        be one that task allows."""
+        reason, self.detail = self._check(p, task_kind)
         return reason
 
-    def _check(self, p: Proposal) -> tuple[str | None, str | None]:
+    def _check(self, p: Proposal, task_kind: str | None = None) -> tuple[str | None, str | None]:
         if p.kind not in KINDS:
             return NO_PURPOSE, f"unknown kind {str(p.kind)[:40]!r}"
+        allowed = ALLOWED_KINDS.get(task_kind) if task_kind else None
+        if allowed is not None and p.kind not in allowed:
+            return WRONG_KIND, f"{task_kind} allows {', '.join(allowed)}; got {p.kind}"
         err = shape_error(p)
         if err:
             return BAD_PROPOSAL, err
