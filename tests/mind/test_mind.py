@@ -317,3 +317,58 @@ def test_idle_dream_condition(server, make_mind):
     idle = config.DreamCondition("idle", idle_min=30)
     assert make_mind(dream=idle)._dream_due(datetime(2026, 11, 24, 3, 0, tzinfo=timezone.utc)) is False
     assert make_mind(dream=idle)._dream_due(datetime(2026, 11, 24, 3, 30, tzinfo=timezone.utc)) is True
+
+
+# ------------------------------------------------------------------ rejection detail (#526)
+def test_the_cycle_record_says_why_each_proposal_was_rejected(server, make_mind):
+    server.swarm = SWARM
+    server.other(generate_key(), "asker", "action", at=ts(23), summary="show_icon", outcome="failed")
+
+    def script(task):
+        if task.category != "reflect":
+            return []
+        return [
+            {"kind": "question", "summary": "Why did it fail?"},                       # no peers
+            {"kind": "lesson", "summary": "Icons", "refs": {"agent": "seq"}},            # bad ref
+            {"kind": "note", "summary": "hello"},                                       # no purpose
+            {"kind": "lesson", "summary": "show_icon only takes five icon names"},      # written
+            {"kind": "lesson", "summary": "show_icon only takes five icon names!"},     # duplicate
+        ]
+
+    make_mind(brain=ScriptedBrain(script)).wake()
+    cycle = [r for r in mine(server) if "mind_cycle" in (r.get("tags") or []) and r["payload"].get("phase") == "end"][-1]
+    rejected = cycle["payload"]["mind"]["rejected"]
+    assert [(r["kind"], r["reason"]) for r in rejected] == [
+        ("question", "bad_proposal"), ("lesson", BAD_REF), ("note", NO_PURPOSE), ("lesson", DUPLICATE)]
+    assert all(r["task"] == {"category": "reflect", "key": "asker:1"} for r in rejected)
+    assert rejected[0]["detail"] == "a question needs peers: who it is put to"
+    assert rejected[1]["detail"] == "refs.agent must be <agent>:<seq>, got 'seq'"
+    assert rejected[3]["detail"].startswith("near-copy of a recent record (similarity")
+    assert "rejected_more" not in cycle["payload"]["mind"]
+
+
+def test_brain_errors_are_listed_and_the_list_is_capped(server, make_mind):
+    server.swarm = SWARM
+    for i in range(3):
+        server.other(generate_key(), "asker", "action", at=ts(23, i), summary=f"step {i}", outcome="failed")
+
+    class Broken(ScriptedBrain):
+        def propose(self, task, ctx):
+            raise ValueError("no JSON object in the reply")
+
+    out = make_mind(brain=Broken()).wake()
+    assert out["brain_errors"] >= 1 and len(out["rejected"]) == out["brain_errors"]
+    assert out["rejected"][0]["reason"] == "brain_error" and out["rejected"][0]["kind"] is None
+    assert out["rejected"][0]["detail"] == "ValueError: no JSON object in the reply"
+
+    def many(task):
+        return [{"kind": "note", "summary": f"n{i}"} for i in range(14)] if task.category == "reflect" else []
+
+    out = make_mind(brain=ScriptedBrain(many), max_tasks=1).wake()
+    assert len(out["rejected"]) == 10 and out["rejected_more"] == 4
+
+
+def test_gate_detail_is_cleared_on_a_pass():
+    g = Gate(LexicalEmbedder(), 0.92, [])
+    assert g.check(Proposal("note", "x")) == NO_PURPOSE and g.detail == "unknown kind 'note'"
+    assert g.check(Proposal("lesson", "Icons need one of five names", refs={"e": "a:1"})) is None and g.detail is None
