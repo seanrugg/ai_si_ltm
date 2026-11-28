@@ -330,6 +330,15 @@ class LTMSClient:
         return self._call("GET", "/api/records/head", params={"agent": agent})
 
     # ------------------------------------------------------------------ read
+    def record(self, agent: str, seq: int) -> dict | None:
+        """One record by key within this member's read scope, or None if not found (#521)."""
+        try:
+            return self._call("GET", f"/api/records/{agent}/{int(seq)}")
+        except LTMSError as exc:
+            if exc.status == 404:
+                return None
+            raise
+
     def records(self, **params) -> list[dict]:
         if "from_" in params:
             params["from"] = params.pop("from_")

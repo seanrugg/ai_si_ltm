@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import random
+import re
 import shutil
 import time
 from collections import Counter
@@ -136,6 +137,31 @@ def host_health(path: str = "/") -> dict:
 
 
 # ---------------------------------------------------------------------------- dream cycle
+_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+
+
+def normalize_refs(refs):
+    """Rewrite the obvious ways a model writes a record key (#521): ``{"v3-c7r": "72120"}``
+    or ``{"v3-c7r": 72120}`` becomes ``{"evidence": ["v3-c7r:72120"]}``. Anything else is
+    left as it is, for the gate to judge."""
+    if not isinstance(refs, dict):
+        return refs
+    out, extra = {}, []
+    for k, v in refs.items():
+        values = v if isinstance(v, list) else [v]
+        if isinstance(k, str) and _NAME.match(k) and values and all(
+                (isinstance(x, int) and not isinstance(x, bool) and x > 0)
+                or (isinstance(x, str) and x.isdigit() and int(x) > 0) for x in values):
+            extra += [f"{k}:{int(x)}" for x in values]
+        else:
+            out[k] = v
+    if extra:
+        ev = out.get("evidence")
+        ev = list(ev) if isinstance(ev, list) else ([ev] if ev is not None else [])
+        out["evidence"] = ev + [x for x in extra if x not in ev]
+    return out
+
+
 class MindDream(DreamCycle):
     """A dream cycle whose end event also carries the mind's counts, so a dreaming
     wake writes one start/end pair and no separate ``mind_cycle`` event. It doesn't
@@ -292,7 +318,8 @@ class Mind:
     def _bind(self, task: Task, p: Proposal) -> Proposal:
         """Tie a proposal to its task: the task's subject goes in the ref its kind needs
         (a reflect lesson, question or prediction cites it in ``refs.evidence``), and an
-        answer goes to whoever asked."""
+        answer goes to whoever asked. Record keys written the obvious wrong way are fixed first."""
+        p.refs = normalize_refs(p.refs)
         ref = TASK_REF.get(task.kind)
         expected = {"answer": "answer", "review": "review", "check": "prediction-check"}.get(task.kind)
         if ref and p.kind == expected:

@@ -100,6 +100,9 @@ class FakeClient:
     def fleet_key(self):
         return self.server.fleet_public
 
+    def record(self, agent: str, seq: int) -> dict | None:
+        return next((r for r in self.server.records if r["agent"] == agent and r["seq"] == seq), None)
+
     def records(self, *, limit=25, include_payload=True, from_=None, to=None, **f) -> list[dict]:
         out = []
         for r in self.server.records:

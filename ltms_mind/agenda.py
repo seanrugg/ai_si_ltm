@@ -16,8 +16,10 @@ predictions with a numeric measure; the rest needs a dream (``loop.py``).
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
+import time
 from datetime import datetime, timedelta, timezone
 
 from ltms_mind.brains.base import Task
@@ -56,6 +58,11 @@ def roster_families(swarm: dict | None) -> dict[str, str | None]:
 
 def key_of(rec: dict) -> str:
     return f"{rec['agent']}:{rec['seq']}"
+
+
+READ_TRIES = 3        # a read that hits the rate limit waits 1 s, then 2 s, then gives up
+EVIDENCE_MAX = 5      # cited records a reviewer is shown, per lesson
+EVIDENCE_CHARS = 1500  # of each one's payload
 
 
 def ref_keys(rec: dict) -> set[str]:
@@ -101,8 +108,9 @@ def numeric_measure(rec: dict) -> dict | None:
 class Agenda:
     def __init__(self, client, *, me: str, swarm: dict | None, family: str | None, now: datetime,
                  since: datetime | None, lookback_days: int, corpus: int, study_query: str,
-                 read_items: set[str], directives: list[dict] | None = None) -> None:
+                 read_items: set[str], directives: list[dict] | None = None, sleep=time.sleep) -> None:
         self.client, self.me, self.swarm, self.family, self.now = client, me, swarm, family, now
+        self.sleep = sleep
         self.lookback = now - timedelta(days=lookback_days)
         self.since = since or self.lookback
         self.corpus, self.study_query, self.read_items = corpus, study_query, read_items
@@ -110,13 +118,45 @@ class Agenda:
         self.families = roster_families(swarm)
         self.directives = directives or []
 
+    def _read(self, fn, *args, **kw):
+        """A read that waits out the server's rate limit (429), at most READ_TRIES times.
+        A wake makes a burst of reads; dropping one silently loses a whole category."""
+        for attempt in range(READ_TRIES):
+            try:
+                return fn(*args, **kw)
+            except Exception as exc:  # noqa: BLE001 - re-raised below unless it's a 429 worth waiting out
+                if getattr(exc, "status", None) != 429 or attempt == READ_TRIES - 1:
+                    raise
+                self.sleep(2 ** attempt)
+        return None  # unreachable
+
     def _records(self, **params) -> list[dict]:
         params.setdefault("limit", self.corpus)
         try:
-            return self.client.records(**params)
+            return self._read(self.client.records, **params)
         except Exception as exc:  # noqa: BLE001 - one failed query drops that category, not the wake
             log.warning("records %s failed: %s", params, exc)
             return []
+
+    def _evidence(self, keys) -> list[dict]:
+        """The records a lesson cites, so a reviewer can check it against them (#521).
+        At most EVIDENCE_MAX; a key that can't be read says so, so "unsure" is possible."""
+        out = []
+        for key in sorted(keys)[:EVIDENCE_MAX]:
+            agent, _, seq = key.rpartition(":")
+            try:
+                rec = self._read(self.client.record, agent, int(seq))
+            except Exception as exc:  # noqa: BLE001 - an unreadable citation is evidence too: it's missing
+                log.warning("evidence %s unreadable: %s", key, exc)
+                rec = None
+            if rec is None:
+                out.append({"key": key, "found": False})
+                continue
+            payload = json.dumps(rec.get("payload"), default=str, ensure_ascii=False)
+            out.append({"key": key, "found": True, "type": rec.get("type"), "ts": rec.get("ts"),
+                        "summary": rec.get("summary"), "outcome": rec.get("outcome"), "tags": rec.get("tags"),
+                        "payload": payload if len(payload) <= EVIDENCE_CHARS else payload[:EVIDENCE_CHARS] + "…"})
+        return out
 
     def _in_swarm(self, rec: dict) -> bool:
         return rec.get("agent") in self.roster
@@ -188,6 +228,7 @@ class Agenda:
                               f"Check this lesson by {r['agent']} ({fam}) against its cited evidence, then give a "
                               f"verdict (verified, refuted or unsure) with reasons: {r.get('summary', '')}",
                               {"record": r, "family": fam, "cited": sorted(ref_keys(r)),
+                               "evidence": self._evidence(ref_keys(r)),
                                "sources": (r.get("payload") or {}).get("sources") or []}))
         return tasks
 
