@@ -52,7 +52,9 @@ def test_workflow_change_runs_everything():
                                   "cli_agent/client.py", "examples/robot-sidecar/sidecar.py",
                                   "examples/robot-sidecar/tests/test_x.py", "ltms_mcp/server.py",
                                   "docs/vocabulary.jsonld", "deploy/compose/.env.example",
-                                  "dashboard/src/lib/swarm-key-vectors.json"])
+                                  "dashboard/src/lib/swarm-key-vectors.json",
+                                  "ltms_mind/gate.py", "tests/mind/test_mind.py",
+                                  "integrations/hermes/ltms_recorder/device.py"])
 def test_python_paths(path):
     assert changes.classify([path])["python"]
 
