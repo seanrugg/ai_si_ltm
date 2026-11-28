@@ -21,6 +21,7 @@ RULES: dict[str, list[str]] = {
         # Python packages tested by pytest, not named in the issue.
         "ltms_contract/**", "ltms_mcp/**", "conformance/**", "harness/**",
         "examples/*/tests/**",
+        "ltms_mind/**", "tests/**", "integrations/**",  # tests/mind, test_hermes_device
         # Non-code files a Python test reads.
         "docs/vocabulary.jsonld",                      # test_vocabulary, test_xapi_translate
         "dashboard/src/lib/swarm-key-vectors.json",    # test_swarm_key_vectors
