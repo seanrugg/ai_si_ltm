@@ -280,3 +280,61 @@ async def context_pack(
     pack["count"] = CONTEXT_CAP - remaining
     pack["query"] = {"intent": intent, "target": target, "place": place}
     return pack
+
+
+# ------------------------------------------------------------------ shared counts (#342)
+# Used by GET /admin/outcomes, GET /admin/volume and the growth ledger, so they
+# can never disagree.
+
+def day_expr(session: AsyncSession):
+    """``Record.ts`` as a ``YYYY-MM-DD`` day, per database."""
+    if session.bind.dialect.name == "postgresql":
+        return func.to_char(func.date_trunc("day", Record.ts), "YYYY-MM-DD")
+    return func.date(Record.ts)
+
+
+async def volume_by_day(session: AsyncSession, *, since: datetime, where=(), day=None) -> list[dict]:
+    """Records and payload bytes per day, member and type since ``since``. ``payload_bytes``
+    sums ``RecordPayload.size``, so a purged payload counts as 0 bytes."""
+    day = day if day is not None else day_expr(session)
+    stmt = (
+        select(
+            day.label("day"),
+            Record.agent,
+            Record.type,
+            func.count(Record.id).label("records"),
+            func.coalesce(func.sum(RecordPayload.size), 0).label("payload_bytes"),
+        )
+        .outerjoin(RecordPayload, RecordPayload.record_id == Record.id)
+        .where(Record.ts >= since, *where)
+        .group_by(day, Record.agent, Record.type)
+        .order_by(day.desc(), Record.agent, Record.type)
+    )
+    return [{"day": r.day, "agent": r.agent, "type": r.type, "records": r.records, "payload_bytes": r.payload_bytes}
+            for r in (await session.execute(stmt)).all()]
+
+
+async def outcome_groups(session: AsyncSession, *, since: datetime | None = None, agent: str | None = None,
+                         place: str | None = None, agents: list[str] | None = None) -> list[dict]:
+    """Action outcome counts grouped by member, action summary and place, largest first."""
+    key = func.lower(func.coalesce(Record.summary, ""))
+    stmt = select(Record.agent, key, Record.place, Record.outcome, func.count()).where(
+        Record.type == "action", Record.outcome.is_not(None))
+    if since is not None:
+        stmt = stmt.where(Record.ts >= since)
+    if agent:
+        stmt = stmt.where(Record.agent == agent)
+    if agents is not None:
+        stmt = stmt.where(Record.agent.in_(agents))
+    if place:
+        stmt = stmt.where(Record.place == place)
+    stmt = stmt.group_by(Record.agent, key, Record.place, Record.outcome)
+    groups: dict[tuple, dict] = {}
+    for a, summary, pl, oc, n in (await session.execute(stmt)).all():
+        g = groups.setdefault((a, summary, pl), {"agent": a, "action": summary, "place": pl, "total": 0, "outcomes": {}})
+        g["outcomes"][oc] = n
+        g["total"] += n
+    rows = sorted(groups.values(), key=lambda g: -g["total"])
+    for g in rows:
+        g["success_rate"] = round(g["outcomes"].get("success", 0) / g["total"], 3) if g["total"] else None
+    return rows

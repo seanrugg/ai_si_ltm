@@ -14,6 +14,7 @@ from server.models import Member
 from server.services import auth as auth_service
 from server.services import charter
 from server.services import enrollment
+from server.services import growth
 from server.services import runtime_settings
 from server.services.errors import ServiceError
 
@@ -77,4 +78,7 @@ async def token(body: TokenRequest, request: Request) -> dict:
         status = await charter.status_for(session, request.app.state.config, member) if member else None
         if status is not None:
             out["charter"] = status  # #255: read it now if "read" is false
+        mind = await growth.for_sign_in(session, member) if member else None
+        if mind is not None:
+            out["mind"] = mind  # #342: paused and budgets; the mind's loop applies them, reduce-only
         return out
