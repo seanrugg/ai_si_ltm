@@ -41,6 +41,8 @@ from server.services.errors import ServiceError
 from server.services.records import _ref_targets
 
 VERDICTS = ("verified", "refuted", "unsure")
+LIST_MAX = 50     # lessons listed per member, newest first (the totals count them all)
+CYCLES_MAX = 10   # recent mind cycles listed per member
 SETTINGS_PREFIX = "mind:"
 BUDGET_KEYS = ("calls_per_wake", "tokens_per_wake", "writes_per_day")
 MAX_BUDGET = 1_000_000
@@ -88,7 +90,7 @@ async def _records(session: AsyncSession, *, since: datetime, types: str, agents
 def _empty() -> dict:
     return {
         "lessons": {"proposed": 0, "verified": 0, "refuted": 0, "unsure": 0, "unreviewed": 0, "promoted": 0,
-                    "same_family_reviews": 0},
+                    "studied": 0, "same_family_reviews": 0},
         "reviews_given": {"total": 0, "verified": 0, "refuted": 0, "unsure": 0, "cross_family": 0},
         "predictions": {"made": 0, "checked": 0, "true": 0, "false": 0, "unclear": 0, "brier": None},
         "questions": {"asked": 0, "answered_by_others": 0},
@@ -99,7 +101,12 @@ def _empty() -> dict:
                    "gated": {}, "rejected": {}},
         "volume": {"records": 0},
         "learning_ratio": None,
+        "daily": {},   # day -> {records, lessons, verified}: the Growth tab's trend
     }
+
+
+def _day(d: dict, day: str) -> dict:
+    return d.setdefault(day, {"records": 0, "lessons": 0, "verified": 0})
 
 
 async def ledger(session: AsyncSession, agents: list[str], *, days: int = 30,
@@ -142,6 +149,9 @@ async def ledger(session: AsyncSession, agents: list[str], *, days: int = 30,
     lesson_family = {_key(r): (r["agent"], await family(r)) for r in all_lessons}
     for r in lessons:
         out[r["agent"]]["lessons"]["proposed"] += 1
+        out[r["agent"]]["lessons"]["studied"] += int(bool(_payload(r).get("sources")))
+        _day(out[r["agent"]]["daily"], str(r.get("ts", ""))[:10])["lessons"] += 1
+    reviewers: dict[str, list[dict]] = defaultdict(list)   # lesson key -> every review, for the list
     cross: dict[str, list[tuple[str, str]]] = defaultdict(list)   # lesson key -> [(day, verdict)]
     for r in reviews:
         verdict = _payload(r).get("verdict")
@@ -153,6 +163,10 @@ async def ledger(session: AsyncSession, agents: list[str], *, days: int = 30,
             g["total"] += 1
             g[verdict] += 1
         for target in _ref(r, "reviews"):
+            if target in lesson_family and lesson_family[target][0] in mine:
+                reviewers[target].append({"key": _key(r), "by": r["agent"], "family": rfam, "verdict": verdict,
+                                          "reasons": str(_payload(r).get("reasons") or "")[:300],
+                                          "ts": r.get("ts")})
             author = lesson_family.get(target)
             if author is None:
                 if r["agent"] in mine:  # a review of a lesson outside this window or member set
@@ -179,13 +193,19 @@ async def ledger(session: AsyncSession, agents: list[str], *, days: int = 30,
         k, L = _key(r), out[r["agent"]]["lessons"]
         verdicts = sorted(cross.get(k, []), key=lambda v: v[2])
         if not verdicts:
-            L["unreviewed"] += 1
+            status = "unreviewed"
         else:
             last_day = verdicts[-1][0]
             same_day = {v for d, v, _ in verdicts if d == last_day}
-            L["refuted" if "refuted" in same_day else verdicts[-1][1]] += 1
+            status = "refuted" if "refuted" in same_day else verdicts[-1][1]
+            if status == "verified":
+                _day(out[r["agent"]]["daily"], last_day)["verified"] += 1
+        L[status] += 1
         if k in in_force:
             L["promoted"] += 1
+        out[r["agent"]].setdefault("lesson_list", []).append({
+            "key": k, "summary": r.get("summary"), "ts": r.get("ts"), "family": lesson_family[k][1],
+            "status": status, "promoted": k in in_force, "reviews": reviewers.get(k, [])})
 
     # ---- predictions and their checks
     by_pred = {_key(r): r for r in predictions}
@@ -249,6 +269,11 @@ async def ledger(session: AsyncSession, agents: list[str], *, days: int = 30,
         if not isinstance(counts, dict):
             continue
         C = out[r["agent"]]["cycles"]
+        out[r["agent"]].setdefault("recent_cycles", []).append({
+            "key": _key(r), "ts": r.get("ts"), "mode": counts.get("mode"), "brain": counts.get("brain"),
+            "considered": counts.get("considered", 0), "written": counts.get("written", 0),
+            "paused": bool(counts.get("paused")), "gated": counts.get("gated") or {},
+            "rejected": [x for x in (counts.get("rejected") or []) if isinstance(x, dict)][:10]})
         C["count"] += 1
         C["dreams"] += int(counts.get("mode") == "dreaming")
         C["paused"] += int(bool(counts.get("paused")))
@@ -269,6 +294,7 @@ async def ledger(session: AsyncSession, agents: list[str], *, days: int = 30,
             A["outcomes"][oc] = A["outcomes"].get(oc, 0) + n
     for row in await recall.volume_by_day(session, since=since, where=[Record.agent.in_(agents)]):
         out[row["agent"]]["volume"]["records"] += row["records"]
+        _day(out[row["agent"]]["daily"], str(row["day"]))["records"] += row["records"]
 
     # The families each member wrote with, from its own mind records.
     for r in lessons + reviews + predictions + questions + answers + reports:
@@ -278,6 +304,9 @@ async def ledger(session: AsyncSession, agents: list[str], *, days: int = 30,
                 out[r["agent"]]["families"].append(fam.strip().lower())
     for g in out.values():
         g["families"] = sorted(g["families"])
+        g["lesson_list"] = sorted(g.get("lesson_list", []), key=lambda x: str(x["ts"]), reverse=True)[:LIST_MAX]
+        g["recent_cycles"] = sorted(g.get("recent_cycles", []), key=lambda x: str(x["ts"]), reverse=True)[:CYCLES_MAX]
+        g["daily"] = dict(sorted(g["daily"].items()))
         written = g["volume"]["records"]
         g["learning_ratio"] = round(g["lessons"]["verified"] / written, 6) if written else None
     return out
@@ -314,6 +343,7 @@ def roll_up(per_member: dict[str, dict], *, days: int) -> dict:
         total["predictions"]["brier"] = None
     written = total["volume"]["records"]
     total["learning_ratio"] = round(total["lessons"]["verified"] / written, 6) if written else None
+    total["daily"] = dict(sorted(total.get("daily", {}).items()))
     total["families"] = sorted({f for g in per_member.values() for f in g["families"]})
     total["members"] = sorted(
         ({"name": g["member"], "learning_ratio": g["learning_ratio"], "verified_lessons": g["lessons"]["verified"]}

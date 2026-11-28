@@ -18,6 +18,7 @@ export const TABS = [
   { key: "topology", label: "Topology", aliases: ["interactions"] }, // #404: was Interactions
   { key: "chronology", label: "Chronology", aliases: ["activity"] }, // #403: was Activity
   { key: "senses", label: "Senses" },
+  { key: "growth", label: "Growth" }, // #343: the growth ledger (#342)
   { key: "history", label: "History" },
   { key: "manage", label: "Manage", swarmOnly: true },
 ];
