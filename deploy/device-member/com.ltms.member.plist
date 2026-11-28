@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  A device member with a mind (#521), e.g. the Mac Studio, as a launchd *agent*:
+  it runs as you, in your login session, beside Ollama and your harnesses.
+
+  Replace every /Users/YOU path with your own (launchd doesn't expand ~), then:
+    cp com.ltms.member.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.ltms.member.plist
+  Stop it:
+    launchctl bootout gui/$(id -u)/com.ltms.member
+  See docs/mind.md, "A device member".
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.ltms.member</string>
+
+  <!-- launchd can't read an env file: the wrapper exports device.env, then runs the member. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>set -a; . /Users/YOU/.ltms/device/device.env; set +a; exec /Users/YOU/ltms/.venv/bin/python -m ltms_mind.member</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/YOU/.ltms/device</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>60</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>/Users/YOU/Library/Logs/ltms-member.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOU/Library/Logs/ltms-member.log</string>
+</dict>
+</plist>

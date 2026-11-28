@@ -13,6 +13,8 @@ import glob
 import os
 import platform
 import shutil
+import subprocess
+import sys
 
 MIB = 1024 * 1024
 GIB = 1024 * MIB
@@ -102,7 +104,32 @@ def detect(data_dir: str = ".", root: str = "/") -> dict:
                                                             "usr/lib/systemd/system")
                                    for unit in ("arduino-router.service", "arduino-app-cli.service"))),
     }
+    if sys.platform == "darwin" and root == "/":
+        _mac_facts(facts)
     return {"version": 1, "facts": facts, "profile": profile(facts)}
+
+
+def _sysctl(name: str) -> str | None:
+    try:
+        out = subprocess.run(["sysctl", "-n", name], capture_output=True, text=True, timeout=2, check=False)
+        return out.stdout.strip() or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _mac_facts(facts: dict) -> None:
+    """macOS has no /proc: read the same facts from sysctl (#521, the Mac Studio)."""
+    mem = _sysctl("hw.memsize")
+    if mem and mem.isdigit():
+        facts["ram_bytes"] = int(mem)
+    facts["board"] = facts.get("board") or _sysctl("hw.model")
+    chip = _sysctl("machdep.cpu.brand_string")
+    if chip:
+        facts["arch"] = chip
+    ver = platform.mac_ver()[0]
+    if ver:
+        facts["os"] = f"macOS {ver}"
+    facts["gpu_metal"] = platform.machine() == "arm64"
 
 
 def profile(facts: dict) -> dict:
@@ -153,7 +180,8 @@ def spec_sheet(result: dict, harness: str) -> dict:
         hw["ram_mib"] = f["ram_bytes"] // MIB
     if isinstance(f.get("disk_total_bytes"), int):
         hw["storage_gib"] = f["disk_total_bytes"] // GIB
-    acc = [label for key, label in (("gpu_cuda", "CUDA GPU"), ("npu", "NPU"), ("mcu_bridge", "MCU bridge")) if f.get(key)]
+    acc = [label for key, label in (("gpu_cuda", "CUDA GPU"), ("gpu_metal", "Apple GPU (Metal)"), ("npu", "NPU"),
+                                    ("mcu_bridge", "MCU bridge")) if f.get(key)]
     if acc:
         hw["accelerators"] = acc
     sw = {"harness": harness[:64]}

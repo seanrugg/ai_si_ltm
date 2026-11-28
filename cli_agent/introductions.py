@@ -16,11 +16,17 @@ MAX_SUMMARY = 500
 
 
 def harness_version() -> str:
-    try:
-        from importlib.metadata import version
-        return version("ltms-harness")
-    except Exception:  # noqa: BLE001 - not installed as a package
-        return "unknown"
+    """The installed package's version. It is named ``ltms`` (#531); ``ltms-harness``
+    is an older name some installs may still carry."""
+    from importlib.metadata import PackageNotFoundError, version
+    for name in ("ltms", "ltms-harness"):
+        try:
+            return version(name)
+        except PackageNotFoundError:
+            continue
+        except Exception:  # noqa: BLE001 - a broken install still introduces itself
+            break
+    return "unknown"
 
 
 def describe(me: dict | None) -> tuple[str, str]:
